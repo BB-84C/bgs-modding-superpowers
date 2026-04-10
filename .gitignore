@@ -1,0 +1,9 @@
+.artifacts/*
+!.artifacts/.gitkeep
+.playwright-mcp/
+
+*.log
+*.tmp
+*.bak
+Thumbs.db
+Desktop.ini
