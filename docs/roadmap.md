@@ -1,28 +1,36 @@
 # Plugin Roadmap
 
-This is a lightweight navigation document for the plugin's current direction. It points to the durable design and implementation docs rather than duplicating them here.
+This document is the lightweight status board for the plugin itself. It summarizes durable direction and current status without repeating the design docs.
 
-## Now
+## Goal
 
-- Maintain the bootstrap baseline and keep this status view aligned with what is actually scaffolded.
-- Use the implementation plan documents in `docs/plans/` for the approved next-phase task sequence.
+- Build an OpenCode plugin for BGS modpack curation across Skyrim, Fallout 4, and Starfield.
+- Keep the project centered on curator workflows and decision support, not general mod authoring.
 
-## Next
+## Workflow Coverage
 
-- Start the first post-bootstrap implementation phase: flesh out the scaffolded skills, hooks, agents, templates, and tooling specs into working workflows.
+- Cover the top-level curation loop: environment setup, runtime/toolchain setup, mod discovery, evaluation, install planning, MO2 execution, conflict review, xEdit-driven data inspection, localization, testing, and modpack-facing documentation.
+- Keep file/archive reasoning, plugin/data conflict analysis, and release-quality logging in scope as the workflow matures.
 
-## Later
+## Current Baseline
 
-- Add lightweight roadmap updates here as major implementation milestones land.
-- Scaffold `save-safety-guard` only when the project is ready for save-risk policy and warning behavior; it is planned later and is not part of the current bootstrap baseline.
-- Keep detailed architecture and implementation notes in the existing design and plan documents.
+- The repository is still in bootstrap phase.
+- Today it provides repository standards, verification scripts, workflow skeleton content, and integration placeholder specs rather than working end-user automation.
+- The baseline is useful for repo structure and guardrails, but the actual curation workflows still need implementation.
 
-## Blocked / Needs Research
+## Next Major Tracks
 
-- Verify the exact OpenCode plugin packaging format before adding install or metadata files beyond the current placeholders.
-- Verify the safest initial xEdit and integration contracts before turning specs into tooling.
+- Turn the scaffolded skills, hooks, agents, templates, and tooling specs into usable curator workflows.
+- Start the first practical tooling track around read-only xEdit orchestration and structured conflict inspection.
+- Define the first shipped documentation flows for modpack dev logs and player-facing changelogs.
 
-## Done
+## Deferred / Blocked
 
-- Approved the initial architecture and bootstrap plan documented in the existing design and implementation docs.
-- Landed the first-wave bootstrap scaffolding: repository structure, baseline standards, skill and hook skeletons, templates, integration placeholders, and bootstrap verification scripts.
+- Defer save-safety and other higher-risk policy automation until the core curator loop is implemented and tested.
+- Block install metadata and packaging work until the OpenCode plugin format is verified.
+- Keep heavier integrations and write-capable patching work later than the current bootstrap baseline.
+
+## Supporting Docs
+
+- See `docs/plans/` for the approved design and implementation plans behind this roadmap.
+- See `docs/standards/repo-hygiene.md` for repository cleanliness and artifact-handling rules.
