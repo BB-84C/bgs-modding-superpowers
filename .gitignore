@@ -1,5 +1,6 @@
 .artifacts/*
 !.artifacts/.gitkeep
+.worktrees/
 .playwright-mcp/
 
 *.log
