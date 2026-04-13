@@ -2,6 +2,8 @@
 !.artifacts/.gitkeep
 .worktrees/
 .playwright-mcp/
+docs/initial_pormpt.md
+docs/initial_pormpt.pdf
 
 *.log
 *.tmp
