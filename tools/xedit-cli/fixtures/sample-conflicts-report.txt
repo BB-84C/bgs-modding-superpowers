@@ -1,0 +1,14 @@
+# Phase 1 sample conflict report fixture
+run|fixture-skyrimse|2026-04-13T18:00:00Z|SkyrimSE|plugins.txt
+file|Skyrim.esm|0|master
+file|Update.esm|1|master
+file|ExamplePatch.esp|2|plugin
+group|ARMO|Armor|1
+group|WEAP|Weapons|1
+record|ARMO:00012E46|ARMO|IronArmor|override-conflict|ExamplePatch.esp
+record|WEAP:00013989|WEAP|IronSword|override-conflict|ExamplePatch.esp
+override|ARMO:00012E46|0|Skyrim.esm|base
+override|ARMO:00012E46|1|Update.esm|override
+override|ARMO:00012E46|2|ExamplePatch.esp|winner
+override|WEAP:00013989|0|Skyrim.esm|base
+override|WEAP:00013989|1|ExamplePatch.esp|winner
