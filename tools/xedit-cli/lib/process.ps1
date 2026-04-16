@@ -70,11 +70,11 @@ function Get-XeditCliNewTargetProcesses {
     param(
         [datetime]$StartedAt,
         [int[]]$KnownProcessIds,
-        [string]$LauncherDirectory
+        [string]$LauncherPath
     )
 
     $allProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
-    $normalizedLauncherDirectory = Get-XeditCliNormalizedPath -Path $LauncherDirectory
+    $normalizedLauncherPath = Get-XeditCliNormalizedPath -Path $LauncherPath
     $matches = foreach ($process in $allProcesses) {
         if ($process.ProcessId -in $KnownProcessIds) {
             continue
@@ -88,8 +88,8 @@ function Get-XeditCliNewTargetProcesses {
             continue
         }
 
-        $normalizedExecutableDirectory = Get-XeditCliNormalizedPath -Path (Split-Path -Path $process.ExecutablePath -Parent)
-        if ([string]::IsNullOrWhiteSpace($normalizedExecutableDirectory) -or -not $normalizedExecutableDirectory.StartsWith($normalizedLauncherDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $normalizedExecutablePath = Get-XeditCliNormalizedPath -Path $process.ExecutablePath
+        if ([string]::IsNullOrWhiteSpace($normalizedExecutablePath) -or -not $normalizedExecutablePath.Equals($normalizedLauncherPath, [System.StringComparison]::OrdinalIgnoreCase)) {
             continue
         }
 
@@ -124,12 +124,11 @@ function Get-XeditCliLaunchedProcessId {
     )
 
     $deadline = (Get-Date).AddSeconds(5)
-    $launcherDirectory = Split-Path -Path $LauncherPath -Parent
 
     do {
         $wrapperLive = Get-XeditCliProcessById -ProcessId $WrapperProcess.Id
         $descendants = @(Get-XeditCliDescendantProcesses -RootProcessId $WrapperProcess.Id)
-        $newTargets = @(Get-XeditCliNewTargetProcesses -StartedAt $StartedAt -KnownProcessIds $KnownProcessIds -LauncherDirectory $launcherDirectory)
+        $newTargets = @(Get-XeditCliNewTargetProcesses -StartedAt $StartedAt -KnownProcessIds $KnownProcessIds -LauncherPath $LauncherPath)
 
         $preferredChild = $descendants | Where-Object {
             Test-XeditCliProcessLooksLikeXedit -Process $_
@@ -174,6 +173,72 @@ function Get-XeditCliRequiredOptionValues {
     return $Options
 }
 
+function Get-XeditCliValidatedMoProfile {
+    param(
+        [hashtable]$Options
+    )
+
+    if (-not $Options.ContainsKey("--mo-profile")) {
+        return $null
+    }
+
+    $profileName = [string]$Options["--mo-profile"]
+    if ([string]::IsNullOrWhiteSpace($profileName)) {
+        Write-Host "MO profile name must be non-empty"
+        return $false
+    }
+
+    return $profileName.Trim()
+}
+
+function Get-XeditCliHookBridgeBinaryPath {
+    $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
+    return Join-Path $repoRoot "tools\xedit-hook-bridge\src\xEditHookBridge.dll"
+}
+
+function Get-XeditCliExpectedHookDllPath {
+    param(
+        [string]$XeditExecutablePath
+    )
+
+    $current = Split-Path -Path $XeditExecutablePath -Parent
+    while (-not [string]::IsNullOrWhiteSpace($current)) {
+        if (Test-Path (Join-Path $current "Data") -PathType Container) {
+            return Join-Path $current "Mod Organizer\hook.dll"
+        }
+
+        $parent = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) {
+            break
+        }
+
+        $current = $parent
+    }
+
+    $xeditDirectory = Split-Path -Path $XeditExecutablePath -Parent
+    return [System.IO.Path]::GetFullPath((Join-Path $xeditDirectory "..\Mod Organizer\hook.dll"))
+}
+
+function Copy-XeditCliHookBridgeForRealLaunch {
+    param(
+        [string]$XeditExecutablePath
+    )
+
+    $sourcePath = Get-XeditCliHookBridgeBinaryPath
+    if (-not (Test-Path $sourcePath -PathType Leaf)) {
+        throw "Built hook bridge DLL not found: $sourcePath"
+    }
+
+    $targetPath = Get-XeditCliExpectedHookDllPath -XeditExecutablePath $XeditExecutablePath
+    Ensure-XeditCliParentDirectory -Path $targetPath
+    Copy-Item -Path $sourcePath -Destination $targetPath -Force
+
+    return [pscustomobject]@{
+        SourcePath = $sourcePath
+        TargetPath = $targetPath
+    }
+}
+
 function Invoke-XeditCliWithEnvironmentOverrides {
     param(
         [hashtable]$Variables,
@@ -214,19 +279,23 @@ function Start-XeditCliLauncherProcess {
         [hashtable]$EnvironmentVariables
     )
 
-    return Invoke-XeditCliWithEnvironmentOverrides -Variables $EnvironmentVariables -ScriptBlock {
-        $startProcessArguments = @{
-            FilePath = $LauncherPath
-            ArgumentList = $ArgumentList
-            PassThru = $true
-        }
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $LauncherPath
+    $startInfo.UseShellExecute = $false
 
-        if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
-            $startProcessArguments.WorkingDirectory = $WorkingDirectory
-        }
-
-        return Start-Process @startProcessArguments
+    if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $startInfo.WorkingDirectory = $WorkingDirectory
     }
+
+    foreach ($argument in $ArgumentList) {
+        $null = $startInfo.ArgumentList.Add($argument)
+    }
+
+    foreach ($entry in $EnvironmentVariables.GetEnumerator()) {
+        $startInfo.Environment[[string]$entry.Key] = [string]$entry.Value
+    }
+
+    return [System.Diagnostics.Process]::Start($startInfo)
 }
 
 function Wait-XeditCliProcessExit {
@@ -315,6 +384,7 @@ function Get-XeditCliNormalizedLauncherCommand {
             FilePath = $LauncherPath
             ArgumentList = @($GameModeArgument)
             SourcePath = $LauncherPath
+            DetectionPath = $LauncherPath
             WorkingDirectory = $wrapperDirectory
         }
     }
@@ -384,6 +454,7 @@ function Get-XeditCliNormalizedLauncherCommand {
         FilePath = $filePath
         ArgumentList = $argumentList
         SourcePath = $LauncherPath
+        DetectionPath = $(if ($tokens.Count -gt 1 -and -not (Test-XeditCliExecutablePathLooksLikeXedit -Path $resolvedFilePath)) { $resolvedXeditPath } else { $filePath })
         WorkingDirectory = $wrapperDirectory
     }
 }
@@ -393,8 +464,8 @@ function Invoke-XeditCliProcessLaunch {
         [string[]]$Arguments
     )
 
-    $options = ConvertTo-XeditCliOptionMap -Arguments $Arguments
-    if ($null -eq (Get-XeditCliRequiredOptionValues -Options $options -Names @("--launcher-path", "--game-mode"))) {
+    $options = ConvertTo-XeditCliOptionMap -Arguments $Arguments -RepeatableNames @("--plugin")
+    if ($null -eq (Get-XeditCliRequiredOptionValues -Options $options -Names @("--launcher-path", "--game-mode", "--load-mode"))) {
         return 1
     }
 
@@ -409,19 +480,42 @@ function Invoke-XeditCliProcessLaunch {
         return 1
     }
 
+    $selectionPolicy = Get-XeditCliNormalizedSelectionPolicy -Options $options
+    if ($null -eq $selectionPolicy) {
+        return 1
+    }
+
+    $moProfile = Get-XeditCliValidatedMoProfile -Options $options
+    if ($moProfile -is [bool] -and -not $moProfile) {
+        return 1
+    }
+
     $process = $null
     $knownProcessIds = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessId)
     $startedAt = Get-Date
 
     $normalizedLauncherCommand = Get-XeditCliNormalizedLauncherCommand -LauncherPath $launcherPath -GameModeArgument $gameModeArgument
+    $hookDeployment = $null
 
-    $process = Start-XeditCliLauncherProcess -LauncherPath $normalizedLauncherCommand.FilePath -ArgumentList $normalizedLauncherCommand.ArgumentList -WorkingDirectory $normalizedLauncherCommand.WorkingDirectory -EnvironmentVariables @{}
+    if ($null -ne $moProfile) {
+        $hookDeployment = Copy-XeditCliHookBridgeForRealLaunch -XeditExecutablePath $normalizedLauncherCommand.DetectionPath
+        $normalizedLauncherCommand.ArgumentList += ('-moprofile:"{0}"' -f $moProfile.Replace('"', ''))
+    }
 
-    $processId = Get-XeditCliLaunchedProcessId -WrapperProcess $process -LauncherPath $launcherPath -StartedAt $startedAt -KnownProcessIds $knownProcessIds
+    $hookSession = New-XeditCliHookSession -SelectionPolicy $selectionPolicy
+
+    $process = Start-XeditCliLauncherProcess -LauncherPath $normalizedLauncherCommand.FilePath -ArgumentList $normalizedLauncherCommand.ArgumentList -WorkingDirectory $normalizedLauncherCommand.WorkingDirectory -EnvironmentVariables $hookSession.EnvironmentVariables
+
+    $processId = Get-XeditCliLaunchedProcessId -WrapperProcess $process -LauncherPath $normalizedLauncherCommand.DetectionPath -StartedAt $startedAt -KnownProcessIds $knownProcessIds
 
     Write-Host "process launch"
     Write-Host "status: ok"
     Write-Host "launcher-path: $launcherPath"
+    Write-Host "hook-session-id: $($hookSession.SessionId)"
+    Write-Host "hook-session-path: $($hookSession.SessionPath)"
+    if ($null -ne $hookDeployment) {
+        Write-Host "hook-dll-path: $($hookDeployment.TargetPath)"
+    }
     Write-Host "xedit-pid: $processId"
 
     return 0

@@ -236,11 +236,13 @@ try {
         "--launcher-path",
         $directLauncherPath,
         "--game-mode",
-        "Fallout4"
+        "Fallout4",
+        "--load-mode",
+        "all"
     )
 
     if ($launch.ExitCode -ne 0) {
-        throw "process launch should succeed for a direct .exe launcher with --game-mode"
+        throw "process launch should succeed for a direct .exe launcher with --game-mode and --load-mode all"
     }
 
     if ($launch.Output -notmatch "xedit-pid:\s*(\d+)") {

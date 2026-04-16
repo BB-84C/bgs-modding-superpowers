@@ -8,6 +8,8 @@ The wrapper should launch xEdit explicitly rather than relying on a manually ope
 
 The caller-provided launcher path is the production entry point for this later Phase 1 task, and MO2 discovery stays outside the CLI.
 
+The step-1 target contract adds a step-1 hook bridge for Module Selection so live launch can steer the first dialog without forking xEdit. The launch contract includes `--load-mode all|only|exclude`; `all` forbids `--plugin`, `only` and `exclude` require repeatable `--plugin` args, plugin names must match the MO2-backed active set, subset results preserve MO2 order, `only` preserves MO2 order among requested roots, and `exclude` starts from the MO2-backed active set and removes requested plugins from that set when dependency rules allow it. The caller chooses a subset while the MO2-backed active list remains the source of truth for full plugin order. For real MO-backed launches, `process launch --mo-profile <name>` appends `-moprofile:"<name>"` and copies the built bridge DLL to xEdit's expected `..\Mod Organizer\hook.dll` path before launch. A no-fork `hook.dll` bridge is loaded through the MO seam.
+
 Launcher-driven live commands require authoritative `--game-mode` as the primary trust and control signal for mode selection, not executable-name-derived guessing. Direct `.exe` launchers and simple `.bat`/`.cmd` wrappers should be normalized to explicit launch commands with mapped xEdit mode arguments using `Fallout4 -> -FO4`, `Skyrim -> -TES5`, `SkyrimSE -> -SSE`, and `Starfield -> -SF1`, including `SkyrimSE` to `-SSE`, while complex wrappers fail closed.
 
 Recommended Phase 1 arguments:

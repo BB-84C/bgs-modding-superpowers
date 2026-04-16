@@ -4,6 +4,7 @@ $toolRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\")).Path
 
 . (Join-Path $toolRoot "lib/common.ps1")
 . (Join-Path $toolRoot "lib/doctor-env.ps1")
+. (Join-Path $toolRoot "lib/hook-session.ps1")
 . (Join-Path $toolRoot "lib/process.ps1")
 . (Join-Path $toolRoot "lib/sqlite-store.ps1")
 . (Join-Path $toolRoot "lib/conflicts-index.ps1")

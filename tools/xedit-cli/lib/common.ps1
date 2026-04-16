@@ -1,9 +1,14 @@
 function ConvertTo-XeditCliOptionMap {
     param(
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [string[]]$RepeatableNames = @()
     )
 
     $options = @{}
+    $repeatableLookup = @{}
+    foreach ($name in $RepeatableNames) {
+        $repeatableLookup[$name] = $true
+    }
 
     for ($index = 0; $index -lt $Arguments.Count; $index++) {
         $token = $Arguments[$index]
@@ -15,11 +20,84 @@ function ConvertTo-XeditCliOptionMap {
             throw "Missing value for option: $token"
         }
 
-        $options[$token] = $Arguments[$index + 1]
+        $value = $Arguments[$index + 1]
+        if ($value.StartsWith("--")) {
+            throw "Missing value for option: $token"
+        }
+
+        if ($repeatableLookup.ContainsKey($token)) {
+            if (-not $options.ContainsKey($token)) {
+                $options[$token] = @()
+            }
+
+            $options[$token] += $value
+        }
+        else {
+            $options[$token] = $value
+        }
+
         $index++
     }
 
     return $options
+}
+
+function Get-XeditCliNormalizedSelectionPolicy {
+    param(
+        [hashtable]$Options
+    )
+
+    $loadMode = $null
+    if ($Options.ContainsKey("--load-mode")) {
+        $loadMode = [string]$Options["--load-mode"]
+    }
+
+    if ([string]::IsNullOrWhiteSpace($loadMode)) {
+        Write-Host "Missing required options: --load-mode"
+        return $null
+    }
+
+    $normalizedLoadMode = $loadMode.Trim().ToLowerInvariant()
+    if (@("all", "only", "exclude") -notcontains $normalizedLoadMode) {
+        Write-Host "Unsupported load mode: $loadMode. Supported load modes: all, only, exclude"
+        return $null
+    }
+
+    $plugins = @()
+    if ($Options.ContainsKey("--plugin")) {
+        $plugins = @($Options["--plugin"])
+    }
+
+    $deduplicatedPlugins = @()
+    $seenPlugins = @{}
+    foreach ($plugin in $plugins) {
+        if ([string]::IsNullOrWhiteSpace([string]$plugin)) {
+            Write-Host "Plugin names must be non-empty filenames"
+            return $null
+        }
+
+        if ($seenPlugins.ContainsKey($plugin)) {
+            continue
+        }
+
+        $seenPlugins[$plugin] = $true
+        $deduplicatedPlugins += $plugin
+    }
+
+    if ($normalizedLoadMode -eq "all" -and $deduplicatedPlugins.Count -gt 0) {
+        Write-Host "Load mode 'all' does not accept --plugin"
+        return $null
+    }
+
+    if (@("only", "exclude") -contains $normalizedLoadMode -and $deduplicatedPlugins.Count -eq 0) {
+        Write-Host "Load mode '$normalizedLoadMode' requires at least one --plugin"
+        return $null
+    }
+
+    return [pscustomobject]@{
+        LoadMode = $normalizedLoadMode
+        Plugins = $deduplicatedPlugins
+    }
 }
 
 function Ensure-XeditCliParentDirectory {

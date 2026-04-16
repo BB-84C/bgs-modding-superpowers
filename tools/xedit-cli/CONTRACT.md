@@ -12,6 +12,7 @@ This document defines the production-launch target contract for later Phase 1 wo
 - normalize output for progressive-disclosure agent consumption
 - accept a caller-provided launcher path instead of discovering MO2 inside the CLI
 - use raw PID addressing for launched-process control
+- add a step-1 hook bridge for Module Selection without forking xEdit
 
 ## Read-Only Commands
 
@@ -30,6 +31,8 @@ Inspect one selected record from an indexed run and return a compact compare-sty
 ### `xedit-cli process launch`
 
 Target command surface: launch xEdit itself from a caller-provided launcher path and return the raw PID for later process control. Launcher-driven commands require authoritative `--game-mode`, and `--game-mode` is the primary trust and control signal for mode selection rather than executable-name-derived guessing. The CLI maps supported game modes to explicit xEdit mode arguments, specifically `Fallout4 -> -FO4`, `Skyrim -> -TES5`, `SkyrimSE -> -SSE`, and `Starfield -> -SF1`, including `SkyrimSE` to `-SSE`, then normalizes direct executables and simple `.bat`/`.cmd` wrappers to explicit launch commands while complex wrappers fail closed.
+
+Step 1 target contract: add a step-1 hook bridge for Module Selection. Callers must provide `--load-mode all|only|exclude`. `all` forbids `--plugin`, while `only` and `exclude` require at least one repeatable `--plugin` argument. Plugin names must match the MO2-backed active set, duplicates are deduplicated, `only` preserves MO2 order among requested roots, and `exclude` starts from the MO2-backed active set and removes requested plugins when dependency rules allow it. The caller chooses a subset, but MO2 remains the source of truth for full plugin order. For real MO-backed launches, the minimal contract also accepts `--mo-profile <name>`, appends `-moprofile:"<name>"` to xEdit, and deploys the built bridge DLL to the xEdit-expected `..\Mod Organizer\hook.dll` path before launch. The CLI then loads a no-fork `hook.dll` bridge through the MO seam so in-process selection can follow the requested policy.
 
 ### `xedit-cli process status`
 
@@ -55,3 +58,4 @@ Target command surface: stop a launched xEdit process by raw PID when the caller
 - require explicit patch targets for write operations
 - keep SQLite as an internal artifact layer, not a user-facing dump format
 - keep MO2 discovery outside the CLI and require callers to pass a launcher path in
+- keep MO2 as the source of truth for full plugin order during Module Selection
