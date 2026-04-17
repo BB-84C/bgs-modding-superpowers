@@ -1,0 +1,19 @@
+{
+  "system.ping": {
+    "ok": true,
+    "result": {
+      "status": "ok"
+    }
+  },
+  "system.capabilities": {
+    "ok": true,
+    "result": {
+      "commands": [
+        "system.ping",
+        "system.capabilities",
+        "session.open",
+        "session.artifacts"
+      ]
+    }
+  }
+}
