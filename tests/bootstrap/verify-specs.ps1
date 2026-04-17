@@ -3,9 +3,20 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\")).Path
 
 $requiredPaths = @(
+    "tools/README.md",
     "tools/xedit-cli/README.md",
     "tools/xedit-cli/CONTRACT.md",
-    "tools/xedit-cli/live-integration.md"
+    "tools/xedit-cli/live-integration.md",
+    "tools/mo2-vfs-launcher/mo2-vfs-launcher.ps1",
+    "tools/mo2-vfs-launcher/mo2-vfs-launcher.cmd",
+    "tools/mo2-vfs-launcher/README.md",
+    "tools/mo2-control-plane/README.md",
+    "tools/mo2-control-plane/live-integration.md",
+    "tools/mo2-control-plane/live-bridge/README.md",
+    "tools/mo2-control-plane/broker/README.md",
+    "tools/mo2-control-plane/plugin/README.md",
+    "tests/mo2-control-plane/live-sandbox.ps1",
+    "docs/plans/2026-04-16-mo2-agent-control-plane-design.md"
 )
 
 $missing = $requiredPaths | Where-Object { -not (Test-Path (Join-Path $repoRoot $_)) }
@@ -149,6 +160,111 @@ foreach ($phrase in @(
 )) {
     if ($liveIntegration -notmatch [regex]::Escape($phrase)) {
         throw "tools/xedit-cli/live-integration.md is missing phrase: $phrase"
+    }
+}
+
+$mo2LauncherReadme = Get-Content (Join-Path $repoRoot "tools/mo2-vfs-launcher/README.md") -Raw
+foreach ($phrase in @(
+    'target path',
+    '--target-path',
+    'environment injection',
+    '--env',
+    'state file',
+    '--state-file',
+    'wait mode',
+    '--wait-mode',
+    'failure behavior',
+    'writes a failed state',
+    'MO2 `run -e OpenCodeVfsLauncher`'
+)) {
+    if ($mo2LauncherReadme -notmatch [regex]::Escape($phrase)) {
+        throw "tools/mo2-vfs-launcher/README.md is missing phrase: $phrase"
+    }
+}
+
+$toolsReadme = Get-Content (Join-Path $repoRoot "tools/README.md") -Raw
+foreach ($phrase in @(
+    'MO2 control plane',
+    'broker CLI',
+    'plugin kernel'
+)) {
+    if ($toolsReadme -notmatch [regex]::Escape($phrase)) {
+        throw "tools/README.md is missing phrase: $phrase"
+    }
+}
+
+$controlPlaneReadme = Get-Content (Join-Path $repoRoot "tools/mo2-control-plane/README.md") -Raw
+foreach ($phrase in @(
+    'control plane',
+    'broker CLI',
+    'plugin kernel'
+)) {
+    if ($controlPlaneReadme -notmatch [regex]::Escape($phrase)) {
+        throw "tools/mo2-control-plane/README.md is missing phrase: $phrase"
+    }
+}
+
+$brokerReadme = Get-Content (Join-Path $repoRoot "tools/mo2-control-plane/broker/README.md") -Raw
+foreach ($phrase in @(
+    'broker CLI',
+    'capability discovery',
+    'session/artifact'
+)) {
+    if ($brokerReadme -notmatch [regex]::Escape($phrase)) {
+        throw "tools/mo2-control-plane/broker/README.md is missing phrase: $phrase"
+    }
+}
+
+$pluginReadme = Get-Content (Join-Path $repoRoot "tools/mo2-control-plane/plugin/README.md") -Raw
+foreach ($phrase in @(
+    'plugin kernel',
+    'capability discovery',
+    'safe-read'
+)) {
+    if ($pluginReadme -notmatch [regex]::Escape($phrase)) {
+        throw "tools/mo2-control-plane/plugin/README.md is missing phrase: $phrase"
+    }
+}
+
+$controlPlaneLiveIntegration = Get-Content (Join-Path $repoRoot "tools/mo2-control-plane/live-integration.md") -Raw
+foreach ($phrase in @(
+    '.artifacts/mo2/',
+    '.external-resource/Mod.Organizer-2.5.3dev7.exe',
+    'endpoint',
+    'usvfs',
+    'instance-specific',
+    'mutex'
+)) {
+    if ($controlPlaneLiveIntegration -notmatch [regex]::Escape($phrase)) {
+        throw "tools/mo2-control-plane/live-integration.md is missing phrase: $phrase"
+    }
+}
+
+$liveBridgeReadme = Get-Content (Join-Path $repoRoot "tools/mo2-control-plane/live-bridge/README.md") -Raw
+foreach ($phrase in @(
+    'live bridge',
+    '.artifacts/mo2/plugins/',
+    '.artifacts/mo2/plugins/mo2_agent_control.py',
+    'Mo2AgentControl/bootstrap/runtime',
+    'scaffold-only',
+    'instance-specific',
+    'named-pipe server'
+)) {
+    if ($liveBridgeReadme -notmatch [regex]::Escape($phrase)) {
+        throw "tools/mo2-control-plane/live-bridge/README.md is missing phrase: $phrase"
+    }
+}
+
+$controlPlaneDesign = Get-Content (Join-Path $repoRoot "docs/plans/2026-04-16-mo2-agent-control-plane-design.md") -Raw
+foreach ($phrase in @(
+    'control plane',
+    'plugin kernel',
+    'broker CLI',
+    'capability discovery',
+    'session/artifact'
+)) {
+    if ($controlPlaneDesign -notmatch [regex]::Escape($phrase)) {
+        throw "MO2 control-plane design is missing phrase: $phrase"
     }
 }
 
