@@ -6,9 +6,11 @@ function Get-ProcessFromPath {
 
     $resolvedPath = [System.IO.Path]::GetFullPath($Path)
 
-    @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+    return @(
+        Get-Process -ErrorAction SilentlyContinue | Where-Object {
         $null -ne $_.Path -and [System.StringComparer]::OrdinalIgnoreCase.Equals($_.Path, $resolvedPath)
-    })
+        }
+    )
 }
 
 function Stop-SandboxMo2FromPath {
@@ -24,7 +26,7 @@ function Stop-SandboxMo2FromPath {
     }
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-ProcessFromPath -Path $Path).Count -gt 0) {
+    while (@(Get-ProcessFromPath -Path $Path).Count -gt 0) {
         if ((Get-Date) -ge $deadline) {
             throw "Timed out waiting for sandbox MO2 to exit: $Path"
         }

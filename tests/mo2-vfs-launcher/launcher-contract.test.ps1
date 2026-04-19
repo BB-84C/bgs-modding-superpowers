@@ -9,14 +9,28 @@ $targetFailPath = Join-Path $PSScriptRoot "fixtures/target-fail.ps1"
 
 function Invoke-Launcher {
     param(
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [hashtable]$Environment = @{}
     )
 
-    $output = & pwsh -NoProfile -File $launcherPath @Arguments 2>&1
+    $previousEnvironment = @{}
+    try {
+        foreach ($name in $Environment.Keys) {
+            $previousEnvironment[$name] = [System.Environment]::GetEnvironmentVariable($name)
+            [System.Environment]::SetEnvironmentVariable($name, [string]$Environment[$name])
+        }
 
-    [pscustomobject]@{
-        ExitCode = $LASTEXITCODE
-        Output = ($output | ForEach-Object { $_.ToString() }) -join "`n"
+        $output = & pwsh -NoProfile -File $launcherPath @Arguments 2>&1
+
+        return [pscustomobject]@{
+            ExitCode = $LASTEXITCODE
+            Output = ($output | ForEach-Object { $_.ToString() }) -join "`n"
+        }
+    }
+    finally {
+        foreach ($name in $Environment.Keys) {
+            [System.Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name])
+        }
     }
 }
 
@@ -44,22 +58,22 @@ function Read-TextFile {
     return [System.IO.File]::ReadAllText($Path)
 }
 
-function Assert-LauncherSourceIsBrokerOnly {
+function Assert-LauncherSourceMatchesTransportArchitecture {
     param(
         [string]$Path
     )
 
     $source = Read-TextFile -Path $Path
-    foreach ($forbiddenPattern in @(
-        'function\s+Invoke-Mo2VfsLauncherDirectTransport\b',
-        'Invoke-Mo2VfsLauncherDirectTransport\s+-',
-        'StartInfo\s*=\s*\[System\.Diagnostics\.ProcessStartInfo\]::new\(',
-        'process\.StandardOutput\.ReadToEndAsync\('
+
+    foreach ($requiredSnippet in @(
+        "return 'broker'",
+        'if ($transportMode -eq ''direct-child'')'
     )) {
-        if ($source -match $forbiddenPattern) {
-            throw "launcher should remain transport-agnostic and broker-only: matched '$forbiddenPattern'"
+        if (-not $source.Contains($requiredSnippet)) {
+            throw "launcher should default to broker transport and only use direct-child when explicitly requested: missing '$requiredSnippet'"
         }
     }
+
 }
 
 function Read-KernelLogEntries {
@@ -122,7 +136,7 @@ $env:MO2_CONTROL_PLANE_FAKE_KERNEL_PATH = $fakeKernelPath
 $env:MO2_CONTROL_PLANE_FAKE_KERNEL_LOG_PATH = $kernelLogPath
 
 try {
-    Assert-LauncherSourceIsBrokerOnly -Path $launcherPath
+    Assert-LauncherSourceMatchesTransportArchitecture -Path $launcherPath
 
     $missingRequired = Invoke-Launcher -Arguments @()
     if ($missingRequired.ExitCode -eq 0) {
@@ -131,6 +145,27 @@ try {
 
     if ($missingRequired.Output -notmatch [regex]::Escape("Missing required options: --target-path, --session-id, --state-file")) {
         throw "launcher should explain missing required options cleanly"
+    }
+
+    $missingSessionStatePath = Join-Path $tempRoot "missing-session-state.json"
+    $missingSessionResult = Invoke-Launcher -Arguments @(
+        "--target-path",
+        $targetOkPath,
+        "--state-file",
+        $missingSessionStatePath
+    )
+
+    if ($missingSessionResult.ExitCode -eq 0) {
+        throw "launcher should fail when --session-id is missing even if --state-file is supplied"
+    }
+
+    $missingSessionState = Read-StateJson -Path $missingSessionStatePath
+    if ($missingSessionState.status -ne "failed") {
+        throw "missing required options should still write failed state when --state-file is supplied"
+    }
+
+    if ($missingSessionState.error -ne "Missing required options: --session-id") {
+        throw "missing-session failure should record the exact error in the state file"
     }
 
     $malformedStatePath = Join-Path $tempRoot "malformed-env-state.json"
@@ -188,6 +223,26 @@ try {
 
     if ($invalidWaitMode.Output -notmatch [regex]::Escape("Invalid --wait-mode: later. Supported wait modes: spawned, exit")) {
         throw "launcher should fail closed for invalid wait modes"
+    }
+
+    $invalidTransportStatePath = Join-Path $tempRoot "invalid-transport-state.json"
+    $invalidTransportMode = Invoke-Launcher -Arguments @(
+        "--target-path",
+        $targetOkPath,
+        "--session-id",
+        "session-invalid-transport",
+        "--state-file",
+        $invalidTransportStatePath,
+        "--transport-mode",
+        "mystery"
+    )
+
+    if ($invalidTransportMode.ExitCode -eq 0) {
+        throw "launcher should reject unsupported transport modes"
+    }
+
+    if ($invalidTransportMode.Output -notmatch [regex]::Escape("Invalid --transport-mode: mystery. Supported transport modes: broker, direct-child")) {
+        throw "launcher should fail closed for invalid transport modes"
     }
 
     $invalidWaitState = Read-StateJson -Path $invalidWaitStatePath
@@ -497,6 +552,132 @@ try {
 
     if ($explicitKernelEntry.session_id -ne "session-spawned-explicit") {
         throw "launcher should preserve the caller session id for spawned broker launches"
+    }
+
+    $callerEnvStatePath = Join-Path $tempRoot "target-ok-caller-env-state.json"
+    $callerEnvResultPath = Join-Path $tempRoot "target-ok-caller-env.json"
+    $callerHookSessionPath = Join-Path $tempRoot "hook-session"
+    $callerEnvResult = Invoke-Launcher -Arguments @(
+        "--target-path",
+        $targetOkPath,
+        "--session-id",
+        "session-caller-env",
+        "--state-file",
+        $callerEnvStatePath,
+        "--wait-mode",
+        "exit",
+        "--env",
+        "ALPHA=explicit-one"
+    ) -Environment @{
+        ALPHA = "ambient-one"
+        BRAVO = "ambient two words"
+        MO2_VFS_TEST_RESULT_PATH = $callerEnvResultPath
+        XEDIT_CLI_HOOK_SESSION_ID = "hook-session-42"
+        XEDIT_CLI_HOOK_SESSION_PATH = $callerHookSessionPath
+        XEDIT_CLI_HOOK_LOAD_MODE = "only"
+        XEDIT_CLI_HOOK_PLUGINS = "Example.esm|Patch.esp"
+    }
+
+    if ($callerEnvResult.ExitCode -ne 0) {
+        throw "launcher should preserve caller environment passthrough in exit wait mode: $($callerEnvResult.Output)"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($callerEnvResult.Output)) {
+        throw "caller env passthrough should write state to --state-file instead of stdout"
+    }
+
+    $callerEnvState = Read-StateJson -Path $callerEnvStatePath
+    Assert-JsonCoreFields -State $callerEnvState -ExpectedStatus "exited" -ExpectedSessionId "session-caller-env" -ExpectedTargetPath $targetOkPath
+
+    if (@($callerEnvState.args).Count -ne 0) {
+        throw "caller env passthrough should keep args empty when no target args are supplied"
+    }
+
+    if ($callerEnvState.error -ne $null) {
+        throw "caller env passthrough should keep successful state error null"
+    }
+
+    if ($callerEnvState.exit_code -ne 0) {
+        throw "caller env passthrough should preserve the target exit code in state"
+    }
+
+    if (-not (Test-Path $callerEnvResultPath -PathType Leaf)) {
+        throw "caller env passthrough should survive the launcher boundary to the target process"
+    }
+
+    $callerTargetResult = Get-Content -Path $callerEnvResultPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    if ($callerTargetResult.env.ALPHA -ne "explicit-one") {
+        throw "explicit --env values should override ambient env values at the target boundary"
+    }
+
+    if ($callerTargetResult.env.BRAVO -ne "ambient two words") {
+        throw "caller env passthrough should preserve spaces in target-visible env values"
+    }
+
+    $callerEnvKernelEntry = @(Read-KernelLogEntries -Path $kernelLogPath | Where-Object {
+        $_.command -eq "launch.start" -and
+        $_.payload.transport.target_path -eq $targetOkPath -and
+        $_.payload.transport.wait_mode -eq "exit" -and
+        $_.session_id -eq "session-caller-env"
+    } | Select-Object -Last 1)
+    if ($null -eq $callerEnvKernelEntry) {
+        throw "caller env passthrough should still route through broker launch.start"
+    }
+
+    if ($callerEnvKernelEntry.payload.transport.env.ALPHA -ne "explicit-one") {
+        throw "explicit --env values should override ambient env values in broker transport"
+    }
+
+    if ($callerEnvKernelEntry.payload.transport.env.BRAVO -ne "ambient two words") {
+        throw "launcher should preserve arbitrary caller env values in broker transport"
+    }
+
+    if ($callerEnvKernelEntry.payload.transport.env.XEDIT_CLI_HOOK_SESSION_ID -ne "hook-session-42") {
+        throw "launcher should preserve xEdit hook session env keys without rewriting them"
+    }
+
+    if ($callerEnvKernelEntry.payload.transport.env.XEDIT_CLI_HOOK_SESSION_PATH -ne $callerHookSessionPath) {
+        throw "launcher should preserve xEdit hook session paths without rewriting them"
+    }
+
+    if ($callerEnvKernelEntry.payload.transport.env.XEDIT_CLI_HOOK_LOAD_MODE -ne "only") {
+        throw "launcher should preserve xEdit hook policy env keys without rewriting them"
+    }
+
+    if ($callerEnvKernelEntry.payload.transport.env.XEDIT_CLI_HOOK_PLUGINS -ne "Example.esm|Patch.esp") {
+        throw "launcher should preserve xEdit hook plugin policy env keys without rewriting them"
+    }
+
+    $directStatePath = Join-Path $tempRoot "target-ok-direct-child-state.json"
+    $directResultPath = Join-Path $tempRoot "target-ok-direct-child.json"
+    $directResult = Invoke-Launcher -Arguments @(
+        "--target-path",
+        $targetOkPath,
+        "--session-id",
+        "session-direct-child",
+        "--state-file",
+        $directStatePath,
+        "--transport-mode",
+        "direct-child",
+        "--wait-mode",
+        "exit",
+        "--env",
+        "MO2_VFS_TEST_RESULT_PATH=$directResultPath"
+    )
+
+    if ($directResult.ExitCode -ne 0) {
+        throw "launcher direct-child mode should succeed in exit wait mode: $($directResult.Output)"
+    }
+
+    $directState = Read-StateJson -Path $directStatePath
+    Assert-JsonCoreFields -State $directState -ExpectedStatus "exited" -ExpectedSessionId "session-direct-child" -ExpectedTargetPath $targetOkPath
+
+    if ($directState.exit_code -ne 0) {
+        throw "launcher direct-child mode should preserve the child exit code"
+    }
+
+    if (-not (Test-Path $directResultPath -PathType Leaf)) {
+        throw "launcher direct-child mode should still execute the target directly"
     }
 
     $defaultSpawnedStatePath = Join-Path $tempRoot "target-sleep-default-spawned-state.json"

@@ -70,11 +70,11 @@ function Get-XeditCliNewTargetProcesses {
     param(
         [datetime]$StartedAt,
         [int[]]$KnownProcessIds,
-        [string]$LauncherDirectory
+        [string]$LauncherPath
     )
 
     $allProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
-    $normalizedLauncherDirectory = Get-XeditCliNormalizedPath -Path $LauncherDirectory
+    $normalizedLauncherPath = Get-XeditCliNormalizedPath -Path $LauncherPath
     $matches = foreach ($process in $allProcesses) {
         if ($process.ProcessId -in $KnownProcessIds) {
             continue
@@ -88,8 +88,8 @@ function Get-XeditCliNewTargetProcesses {
             continue
         }
 
-        $normalizedExecutableDirectory = Get-XeditCliNormalizedPath -Path (Split-Path -Path $process.ExecutablePath -Parent)
-        if ([string]::IsNullOrWhiteSpace($normalizedExecutableDirectory) -or -not $normalizedExecutableDirectory.StartsWith($normalizedLauncherDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $normalizedExecutablePath = Get-XeditCliNormalizedPath -Path $process.ExecutablePath
+        if ([string]::IsNullOrWhiteSpace($normalizedExecutablePath) -or -not $normalizedExecutablePath.Equals($normalizedLauncherPath, [System.StringComparison]::OrdinalIgnoreCase)) {
             continue
         }
 
@@ -112,7 +112,7 @@ function Get-XeditCliNewTargetProcesses {
         $process
     }
 
-    return @($matches | Sort-Object ProcessId)
+    return @($matches | Sort-Object CreationDate, ProcessId)
 }
 
 function Get-XeditCliLaunchedProcessId {
@@ -124,12 +124,11 @@ function Get-XeditCliLaunchedProcessId {
     )
 
     $deadline = (Get-Date).AddSeconds(5)
-    $launcherDirectory = Split-Path -Path $LauncherPath -Parent
 
     do {
         $wrapperLive = Get-XeditCliProcessById -ProcessId $WrapperProcess.Id
         $descendants = @(Get-XeditCliDescendantProcesses -RootProcessId $WrapperProcess.Id)
-        $newTargets = @(Get-XeditCliNewTargetProcesses -StartedAt $StartedAt -KnownProcessIds $KnownProcessIds -LauncherDirectory $launcherDirectory)
+        $newTargets = @(Get-XeditCliNewTargetProcesses -StartedAt $StartedAt -KnownProcessIds $KnownProcessIds -LauncherPath $LauncherPath)
 
         $preferredChild = $descendants | Where-Object {
             Test-XeditCliProcessLooksLikeXedit -Process $_
@@ -139,12 +138,12 @@ function Get-XeditCliLaunchedProcessId {
             return $preferredChild.ProcessId
         }
 
-        if ($wrapperLive -and (Test-XeditCliProcessLooksLikeXedit -Process $wrapperLive)) {
-            return $WrapperProcess.Id
+        if ($newTargets.Count -gt 0) {
+            return $newTargets[-1].ProcessId
         }
 
-        if ($newTargets.Count -gt 0) {
-            return $newTargets[0].ProcessId
+        if ($wrapperLive -and (Test-XeditCliProcessLooksLikeXedit -Process $wrapperLive)) {
+            return $WrapperProcess.Id
         }
 
         Start-Sleep -Milliseconds 200
@@ -172,6 +171,78 @@ function Get-XeditCliRequiredOptionValues {
     }
 
     return $Options
+}
+
+function Get-XeditCliValidatedMoProfile {
+    param(
+        [hashtable]$Options
+    )
+
+    if (-not $Options.ContainsKey("--mo-profile")) {
+        return $null
+    }
+
+    $profileName = [string]$Options["--mo-profile"]
+    if ([string]::IsNullOrWhiteSpace($profileName)) {
+        Write-Host "MO profile name must be non-empty"
+        return $false
+    }
+
+    $trimmedProfileName = $profileName.Trim()
+    if ($trimmedProfileName -match '[\\/]' -or $trimmedProfileName -match '(^|[\\/])\.\.($|[\\/])' -or $trimmedProfileName -eq '..') {
+        Write-Host "MO profile name must not contain path separators or traversal"
+        return $false
+    }
+
+    return $trimmedProfileName
+}
+
+function Get-XeditCliHookBridgeBinaryPath {
+    $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
+    return Join-Path $repoRoot "tools\xedit-hook-bridge\src\xEditHookBridge.dll"
+}
+
+function Get-XeditCliExpectedHookDllPath {
+    param(
+        [string]$XeditExecutablePath
+    )
+
+    $current = Split-Path -Path $XeditExecutablePath -Parent
+    while (-not [string]::IsNullOrWhiteSpace($current)) {
+        if (Test-Path (Join-Path $current "Data") -PathType Container) {
+            return Join-Path $current "Mod Organizer\hook.dll"
+        }
+
+        $parent = Split-Path -Path $current -Parent
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) {
+            break
+        }
+
+        $current = $parent
+    }
+
+    $xeditDirectory = Split-Path -Path $XeditExecutablePath -Parent
+    return [System.IO.Path]::GetFullPath((Join-Path $xeditDirectory "..\Mod Organizer\hook.dll"))
+}
+
+function Copy-XeditCliHookBridgeForRealLaunch {
+    param(
+        [string]$XeditExecutablePath
+    )
+
+    $sourcePath = Get-XeditCliHookBridgeBinaryPath
+    if (-not (Test-Path $sourcePath -PathType Leaf)) {
+        throw "Built hook bridge DLL not found: $sourcePath"
+    }
+
+    $targetPath = Get-XeditCliExpectedHookDllPath -XeditExecutablePath $XeditExecutablePath
+    Ensure-XeditCliParentDirectory -Path $targetPath
+    Copy-Item -Path $sourcePath -Destination $targetPath -Force
+
+    return [pscustomobject]@{
+        SourcePath = $sourcePath
+        TargetPath = $targetPath
+    }
 }
 
 function Invoke-XeditCliWithEnvironmentOverrides {
@@ -214,19 +285,18 @@ function Start-XeditCliLauncherProcess {
         [hashtable]$EnvironmentVariables
     )
 
-    return Invoke-XeditCliWithEnvironmentOverrides -Variables $EnvironmentVariables -ScriptBlock {
-        $startProcessArguments = @{
-            FilePath = $LauncherPath
-            ArgumentList = $ArgumentList
-            PassThru = $true
-        }
-
-        if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
-            $startProcessArguments.WorkingDirectory = $WorkingDirectory
-        }
-
-        return Start-Process @startProcessArguments
+    $startProcessParameters = @{
+        FilePath = $LauncherPath
+        ArgumentList = @($ArgumentList)
+        PassThru = $true
+        Environment = $EnvironmentVariables
     }
+
+    if (-not [string]::IsNullOrWhiteSpace($WorkingDirectory)) {
+        $startProcessParameters.WorkingDirectory = $WorkingDirectory
+    }
+
+    return Start-Process @startProcessParameters
 }
 
 function Wait-XeditCliProcessExit {
@@ -315,6 +385,7 @@ function Get-XeditCliNormalizedLauncherCommand {
             FilePath = $LauncherPath
             ArgumentList = @($GameModeArgument)
             SourcePath = $LauncherPath
+            DetectionPath = $LauncherPath
             WorkingDirectory = $wrapperDirectory
         }
     }
@@ -384,6 +455,7 @@ function Get-XeditCliNormalizedLauncherCommand {
         FilePath = $filePath
         ArgumentList = $argumentList
         SourcePath = $LauncherPath
+        DetectionPath = $(if ($tokens.Count -gt 1 -and -not (Test-XeditCliExecutablePathLooksLikeXedit -Path $resolvedFilePath)) { $resolvedXeditPath } else { $filePath })
         WorkingDirectory = $wrapperDirectory
     }
 }
@@ -398,6 +470,12 @@ function Invoke-XeditCliProcessLaunch {
         return 1
     }
 
+    $unsupportedLegacyOptions = @(Get-XeditCliUnsupportedLegacyLaunchOptions -Options $options)
+    if ($unsupportedLegacyOptions.Count -gt 0) {
+        Write-Host "Legacy options are no longer supported: $($unsupportedLegacyOptions -join ', ')"
+        return 1
+    }
+
     $launcherPath = $options["--launcher-path"]
     if (-not (Test-XeditCliLauncherPath -Path $launcherPath)) {
         Write-Host "Launcher path must end with .bat, .cmd, or .exe: $launcherPath"
@@ -409,19 +487,76 @@ function Invoke-XeditCliProcessLaunch {
         return 1
     }
 
-    $process = $null
-    $knownProcessIds = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessId)
-    $startedAt = Get-Date
+    $moProfile = Get-XeditCliValidatedMoProfile -Options $options
+    if ($moProfile -is [bool] -and -not $moProfile) {
+        return 1
+    }
+
+    $pluginSource = Get-XeditCliResolvedPluginSource -Options $options -GameMode $options["--game-mode"] -MoProfile $moProfile -SandboxRoot $null
+    if ($null -eq $pluginSource) {
+        return 1
+    }
 
     $normalizedLauncherCommand = Get-XeditCliNormalizedLauncherCommand -LauncherPath $launcherPath -GameModeArgument $gameModeArgument
+    $hookSession = New-XeditCliHookSession -PluginLines $pluginSource.PluginLines
+    $hookDeployment = $null
 
-    $process = Start-XeditCliLauncherProcess -LauncherPath $normalizedLauncherCommand.FilePath -ArgumentList $normalizedLauncherCommand.ArgumentList -WorkingDirectory $normalizedLauncherCommand.WorkingDirectory -EnvironmentVariables @{}
+    if ($null -ne $moProfile) {
+        $hookDeployment = Copy-XeditCliHookBridgeForRealLaunch -XeditExecutablePath $normalizedLauncherCommand.DetectionPath
+        $normalizedLauncherCommand.ArgumentList += ('-moprofile:"{0}"' -f $moProfile.Replace('"', ''))
+    }
 
-    $processId = Get-XeditCliLaunchedProcessId -WrapperProcess $process -LauncherPath $launcherPath -StartedAt $startedAt -KnownProcessIds $knownProcessIds
+    $normalizedLauncherCommand.ArgumentList += ('-P:' + $hookSession.SessionPluginsFilePath)
+    $mo2LaunchRequest = $null
+    $mo2LaunchResult = $null
+    $processId = $null
+    if ($null -ne $moProfile) {
+        $mo2LaunchRequest = New-XeditCliMo2LaunchRequest -Profile $moProfile -SandboxRoot $null -TargetPath $normalizedLauncherCommand.DetectionPath -TargetArguments $normalizedLauncherCommand.ArgumentList -TargetWorkingDirectory $normalizedLauncherCommand.WorkingDirectory -HookSession $hookSession
+        Write-XeditCliMo2LaunchRequestArtifact -LaunchRequest $mo2LaunchRequest
+    }
+
+    if ($null -ne $mo2LaunchRequest) {
+        $mo2LaunchResult = Invoke-XeditCliMo2LaunchStart -LaunchRequest $mo2LaunchRequest
+        Write-XeditCliMo2LaunchResponseArtifact -LaunchRequest $mo2LaunchRequest -LaunchResponse $mo2LaunchResult.Response
+        if ([string]$mo2LaunchResult.State.status -eq 'failed') {
+            throw "MO2 VFS launcher failed: $($mo2LaunchResult.State.error)"
+        }
+
+        if ($null -ne $mo2LaunchResult.State.pid) {
+            $processId = [int]$mo2LaunchResult.State.pid
+        }
+        elseif ($null -ne $mo2LaunchResult.Response.result.pid) {
+            $processId = [int]$mo2LaunchResult.Response.result.pid
+        }
+    }
+    else {
+        $process = $null
+        $knownProcessIds = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessId)
+        $startedAt = Get-Date
+
+        $process = Start-XeditCliLauncherProcess -LauncherPath $normalizedLauncherCommand.FilePath -ArgumentList $normalizedLauncherCommand.ArgumentList -WorkingDirectory $normalizedLauncherCommand.WorkingDirectory -EnvironmentVariables $hookSession.EnvironmentVariables
+
+        $processId = Get-XeditCliLaunchedProcessId -WrapperProcess $process -LauncherPath $normalizedLauncherCommand.DetectionPath -StartedAt $startedAt -KnownProcessIds $knownProcessIds
+    }
 
     Write-Host "process launch"
     Write-Host "status: ok"
     Write-Host "launcher-path: $launcherPath"
+    Write-Host "hook-session-id: $($hookSession.SessionId)"
+    Write-Host "hook-session-path: $($hookSession.SessionPath)"
+    if ($null -ne $hookDeployment) {
+        Write-Host "hook-dll-path: $($hookDeployment.TargetPath)"
+    }
+    if ($null -ne $mo2LaunchRequest) {
+        Write-Host "mo2-sandbox-root: $($mo2LaunchRequest.sandbox_root)"
+        Write-Host "mo2-launch-runner: $($mo2LaunchRequest.runner)"
+        Write-Host "mo2-launch-runtime-root: $($mo2LaunchResult.RuntimeRoot)"
+        Write-Host "mo2-launch-request-file: $($mo2LaunchRequest.artifacts.request_file)"
+        Write-Host "mo2-launch-response-file: $($mo2LaunchRequest.artifacts.response_file)"
+        Write-Host "mo2-launch-state-file: $($mo2LaunchRequest.artifacts.state_file)"
+        Write-Host "mo2-launch-id: $($mo2LaunchResult.Response.result.launch_id)"
+        Write-Host "mo2-launch-backend: $($mo2LaunchResult.Response.result.artifacts.backend)"
+    }
     Write-Host "xedit-pid: $processId"
 
     return 0

@@ -1,9 +1,14 @@
 function ConvertTo-XeditCliOptionMap {
     param(
-        [string[]]$Arguments
+        [string[]]$Arguments,
+        [string[]]$RepeatableNames = @()
     )
 
     $options = @{}
+    $repeatableLookup = @{}
+    foreach ($name in $RepeatableNames) {
+        $repeatableLookup[$name] = $true
+    }
 
     for ($index = 0; $index -lt $Arguments.Count; $index++) {
         $token = $Arguments[$index]
@@ -15,11 +20,112 @@ function ConvertTo-XeditCliOptionMap {
             throw "Missing value for option: $token"
         }
 
-        $options[$token] = $Arguments[$index + 1]
+        $value = $Arguments[$index + 1]
+        if ($value.StartsWith("--")) {
+            throw "Missing value for option: $token"
+        }
+
+        if ($repeatableLookup.ContainsKey($token)) {
+            if (-not $options.ContainsKey($token)) {
+                $options[$token] = @()
+            }
+
+            $options[$token] += $value
+        }
+        else {
+            $options[$token] = $value
+        }
+
         $index++
     }
 
     return $options
+}
+
+function Get-XeditCliDefaultPluginsFilePath {
+    param(
+        [string]$GameMode
+    )
+
+    $directoryName = switch ($GameMode) {
+        'Fallout4' { 'Fallout4' }
+        'Skyrim' { 'Skyrim' }
+        'SkyrimSE' { 'Skyrim Special Edition' }
+        'Starfield' { 'Starfield' }
+        default { $null }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($directoryName)) {
+        return $null
+    }
+
+    return Join-Path (Join-Path $env:LOCALAPPDATA $directoryName) 'plugins.txt'
+}
+
+function Get-XeditCliMo2ProfilePluginsFilePath {
+    param(
+        [string]$Profile,
+        [string]$SandboxRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Profile)) {
+        return $null
+    }
+
+    $resolvedSandboxRoot = if ([string]::IsNullOrWhiteSpace($SandboxRoot)) {
+        Get-XeditCliDefaultMo2SandboxRoot
+    }
+    else {
+        $SandboxRoot
+    }
+
+    return Join-Path (Join-Path (Join-Path $resolvedSandboxRoot 'profiles') $Profile) 'plugins.txt'
+}
+
+function Get-XeditCliUnsupportedLegacyLaunchOptions {
+    param(
+        [hashtable]$Options
+    )
+
+    $unsupportedOptions = @()
+    foreach ($optionName in @('--load-mode', '--plugin')) {
+        if ($Options.ContainsKey($optionName)) {
+            $unsupportedOptions += $optionName
+        }
+    }
+
+    return $unsupportedOptions
+}
+
+function Get-XeditCliResolvedPluginSource {
+    param(
+        [hashtable]$Options,
+        [string]$GameMode,
+        [string]$MoProfile,
+        [string]$SandboxRoot
+    )
+
+    $pluginsFilePath = $null
+    if ($Options.ContainsKey('--plugins-file')) {
+        $pluginsFilePath = [string]$Options['--plugins-file']
+        if ([string]::IsNullOrWhiteSpace($pluginsFilePath)) {
+            Write-Host 'Plugins file path must be non-empty'
+            return $null
+        }
+    }
+
+    $profilePluginFilePath = Get-XeditCliMo2ProfilePluginsFilePath -Profile $MoProfile -SandboxRoot $SandboxRoot
+    if ([string]::IsNullOrWhiteSpace($profilePluginFilePath)) {
+        $profilePluginFilePath = Get-XeditCliDefaultPluginsFilePath -GameMode $GameMode
+    }
+
+    try {
+        return Resolve-XeditCliPluginSource -PluginFilePath $pluginsFilePath -ProfilePluginFilePath $profilePluginFilePath
+    }
+    catch {
+        Write-Host $_.Exception.Message
+        return $null
+    }
 }
 
 function Ensure-XeditCliParentDirectory {
