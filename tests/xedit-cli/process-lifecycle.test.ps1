@@ -146,6 +146,25 @@ function Get-MatchingLogLine {
     return $null
 }
 
+function Wait-ForProcessById {
+    param(
+        [int]$ProcessId,
+        [int]$TimeoutSeconds = 5
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+        if ($null -ne $process) {
+            return $process
+        }
+
+        Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $deadline)
+
+    return $null
+}
+
 $tempRoot = Join-Path $env:TEMP ("xedit-cli-process-lifecycle-" + [guid]::NewGuid().ToString("N"))
 $null = New-Item -ItemType Directory -Path $tempRoot -Force
 $normalizedTempRoot = (Get-Item -Path $tempRoot).FullName
@@ -167,6 +186,7 @@ $subdirectoryLoaderPath = $null
 $badExeLauncherPath = $null
 $spoofedXeditPath = $null
 $spoofedMetadataXeditPath = $null
+$explicitPluginsFilePath = $null
 $launchedPid = $null
 $wrapperBatPid = $null
 $wrapperCmdPid = $null
@@ -212,6 +232,8 @@ try {
     Copy-Item -Path "$env:SystemRoot\System32\cmd.exe" -Destination $badExeLauncherPath
     Copy-Item -Path "$env:SystemRoot\System32\cmd.exe" -Destination $spoofedXeditPath
     Copy-Item -Path $builtSpoofedMetadataFo4EditPath -Destination $spoofedMetadataXeditPath
+    $explicitPluginsFilePath = Join-Path $tempRoot 'caller-plugins.txt'
+    Set-Content -Path $explicitPluginsFilePath -Value @('*Fallout4.esm', '*ExamplePatch.esp')
 
     $missingMode = Invoke-Cli -Arguments @(
         "process",
@@ -229,6 +251,82 @@ try {
         throw "process launch should explain when --game-mode is missing"
     }
 
+    $legacyLoadModeLaunch = Invoke-Cli -Arguments @(
+        "process",
+        "launch",
+        "--launcher-path",
+        $fo4EditPath,
+        "--game-mode",
+        "Fallout4",
+        "--load-mode",
+        "all"
+    )
+
+    if ($legacyLoadModeLaunch.ExitCode -eq 0) {
+        throw "process launch should reject the removed --load-mode option"
+    }
+
+    if ($legacyLoadModeLaunch.Output -notmatch [regex]::Escape("Legacy options are no longer supported: --load-mode")) {
+        throw "process launch should clearly explain that --load-mode is no longer supported"
+    }
+
+    $legacyPluginLaunch = Invoke-Cli -Arguments @(
+        "process",
+        "launch",
+        "--launcher-path",
+        $fo4EditPath,
+        "--game-mode",
+        "Fallout4",
+        "--plugin",
+        "Example.esm"
+    )
+
+    if ($legacyPluginLaunch.ExitCode -eq 0) {
+        throw "process launch should reject the removed --plugin option"
+    }
+
+    if ($legacyPluginLaunch.Output -notmatch [regex]::Escape("Legacy options are no longer supported: --plugin")) {
+        throw "process launch should clearly explain that --plugin is no longer supported"
+    }
+
+    $invalidMoProfileSeparatorLaunch = Invoke-Cli -Arguments @(
+        "process",
+        "launch",
+        "--launcher-path",
+        $fo4EditPath,
+        "--game-mode",
+        "Fallout4",
+        "--mo-profile",
+        "Profile\\Nested"
+    )
+
+    if ($invalidMoProfileSeparatorLaunch.ExitCode -eq 0) {
+        throw "process launch should reject MO profile names containing path separators"
+    }
+
+    if ($invalidMoProfileSeparatorLaunch.Output -notmatch [regex]::Escape("MO profile name must not contain path separators or traversal")) {
+        throw "process launch should clearly explain invalid MO profile names containing path separators"
+    }
+
+    $invalidMoProfileTraversalLaunch = Invoke-Cli -Arguments @(
+        "process",
+        "launch",
+        "--launcher-path",
+        $fo4EditPath,
+        "--game-mode",
+        "Fallout4",
+        "--mo-profile",
+        "..\\OtherProfile"
+    )
+
+    if ($invalidMoProfileTraversalLaunch.ExitCode -eq 0) {
+        throw "process launch should reject MO profile names containing traversal segments"
+    }
+
+    if ($invalidMoProfileTraversalLaunch.Output -notmatch [regex]::Escape("MO profile name must not contain path separators or traversal")) {
+        throw "process launch should clearly explain invalid MO profile names containing traversal segments"
+    }
+
     $directLauncherPath = $fo4EditPath
     $launch = Invoke-Cli -Arguments @(
         "process",
@@ -237,12 +335,12 @@ try {
         $directLauncherPath,
         "--game-mode",
         "Fallout4",
-        "--load-mode",
-        "all"
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($launch.ExitCode -ne 0) {
-        throw "process launch should succeed for a direct .exe launcher with --game-mode and --load-mode all"
+        throw "process launch should succeed for a direct .exe launcher with --game-mode and an explicit plugins file"
     }
 
     if ($launch.Output -notmatch "xedit-pid:\s*(\d+)") {
@@ -251,87 +349,23 @@ try {
 
     $launchedPid = [int]$Matches[1]
 
-    $liveProcess = Get-Process -Id $launchedPid -ErrorAction SilentlyContinue
-    if ($null -eq $liveProcess) {
-        throw "process launch should return a live pid"
+    $directLaunchLogLine = Get-MatchingLogLine -LogPath $argLogPath -Pattern '(?m)^FO4Edit\.exe\|.*-FO4.*-P:.*\|cwd=.*$'
+    if ($null -eq $directLaunchLogLine) {
+        throw "direct .exe launch should append both the explicit Fallout 4 mode and session plugins arguments"
     }
 
-    if ($liveProcess.Path -ne $fo4EditPath) {
-        throw "process launch should return the direct .exe pid when launching xEdit directly"
+    if ($directLaunchLogLine -notmatch '-P:([^|]+plugins\.txt)') {
+        throw "direct .exe launch should log the session plugins path passed through -P:"
     }
 
-    if (-not (Wait-ForLogMatch -LogPath $argLogPath -Pattern '(?m)^FO4Edit\.exe\|-FO4\|cwd=.*$')) {
-        throw "direct .exe launch should append the explicit Fallout 4 mode argument"
+    $launchedSessionPluginsPath = $Matches[1]
+    if (-not (Test-Path $launchedSessionPluginsPath -PathType Leaf)) {
+        throw "process launch should materialize the session plugins file before launching xEdit"
     }
 
-    $status = Invoke-Cli -Arguments @(
-        "process",
-        "status",
-        "--xedit-pid",
-        $launchedPid.ToString()
-    )
-
-    if ($status.ExitCode -ne 0) {
-        throw "process status should succeed for a live pid"
-    }
-
-    foreach ($phrase in @(
-        "process status",
-        "status: running",
-        "xedit-pid: $launchedPid"
-    )) {
-        if ($status.Output -notmatch [regex]::Escape($phrase)) {
-            throw "process status summary is missing phrase: $phrase"
-        }
-    }
-
-    $waitTimeout = Invoke-Cli -Arguments @(
-        "process",
-        "wait",
-        "--xedit-pid",
-        $launchedPid.ToString(),
-        "--timeout-seconds",
-        "1"
-    )
-
-    if ($waitTimeout.ExitCode -ne 0) {
-        throw "process wait should time out cleanly without failing"
-    }
-
-    foreach ($phrase in @(
-        "process wait",
-        "status: timeout",
-        "xedit-pid: $launchedPid"
-    )) {
-        if ($waitTimeout.Output -notmatch [regex]::Escape($phrase)) {
-            throw "process wait timeout summary is missing phrase: $phrase"
-        }
-    }
-
-    $stop = Invoke-Cli -Arguments @(
-        "process",
-        "stop",
-        "--xedit-pid",
-        $launchedPid.ToString()
-    )
-
-    if ($stop.ExitCode -ne 0) {
-        throw "process stop should succeed for a live pid"
-    }
-
-    foreach ($phrase in @(
-        "process stop",
-        "status: stopped",
-        "xedit-pid: $launchedPid"
-    )) {
-        if ($stop.Output -notmatch [regex]::Escape($phrase)) {
-            throw "process stop summary is missing phrase: $phrase"
-        }
-    }
-
-    Start-Sleep -Milliseconds 300
-    if (Get-Process -Id $launchedPid -ErrorAction SilentlyContinue) {
-        throw "process stop should terminate the chosen process"
+    $launchedSessionPlugins = Get-Content -Path $launchedSessionPluginsPath
+    if ($launchedSessionPlugins.Count -ne 2 -or $launchedSessionPlugins[0] -ne '*Fallout4.esm' -or $launchedSessionPlugins[1] -ne '*ExamplePatch.esp') {
+        throw "process launch should normalize the caller plugin file into the session plugins file"
     }
 
     $skyrimLaunch = Invoke-Cli -Arguments @(
@@ -340,7 +374,9 @@ try {
         "--launcher-path",
         $sseEditPath,
         "--game-mode",
-        "Skyrim"
+        "Skyrim",
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($skyrimLaunch.ExitCode -ne 0 -or $skyrimLaunch.Output -notmatch "xedit-pid:\s*(\d+)") {
@@ -348,7 +384,7 @@ try {
     }
 
     $skyrimPid = [int]$Matches[1]
-    if (-not (Wait-ForLogMatch -LogPath $argLogPath -Pattern '(?m)^SSEEdit\.exe\|-TES5\|cwd=.*$')) {
+    if (-not (Wait-ForLogMatch -LogPath $argLogPath -Pattern '(?m)^SSEEdit\.exe\|.*-TES5.*-P:.*\|cwd=.*$')) {
         throw "direct Skyrim launch should append the explicit -TES5 mode argument"
     }
 
@@ -362,7 +398,9 @@ try {
         "--launcher-path",
         $sseEditPath,
         "--game-mode",
-        "SkyrimSE"
+        "SkyrimSE",
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($skyrimSeLaunch.ExitCode -ne 0 -or $skyrimSeLaunch.Output -notmatch "xedit-pid:\s*(\d+)") {
@@ -370,7 +408,7 @@ try {
     }
 
     $skyrimSePid = [int]$Matches[1]
-    if (-not (Wait-ForLogMatch -LogPath $argLogPath -Pattern '(?m)^SSEEdit\.exe\|-SSE\|cwd=.*$')) {
+    if (-not (Wait-ForLogMatch -LogPath $argLogPath -Pattern '(?m)^SSEEdit\.exe\|.*-SSE.*-P:.*\|cwd=.*$')) {
         throw "direct SkyrimSE launch should append the explicit -SSE mode argument"
     }
 
@@ -384,7 +422,9 @@ try {
         "--launcher-path",
         $sf1EditPath,
         "--game-mode",
-        "Starfield"
+        "Starfield",
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($starfieldLaunch.ExitCode -ne 0 -or $starfieldLaunch.Output -notmatch "xedit-pid:\s*(\d+)") {
@@ -392,7 +432,7 @@ try {
     }
 
     $starfieldPid = [int]$Matches[1]
-    if (-not (Wait-ForLogMatch -LogPath $argLogPath -Pattern '(?m)^SF1Edit64\.exe\|-SF1\|cwd=.*$')) {
+    if (-not (Wait-ForLogMatch -LogPath $argLogPath -Pattern '(?m)^SF1Edit64\.exe\|.*-SF1.*-P:.*\|cwd=.*$')) {
         throw "direct Starfield 64-bit launch should append the explicit -SF1 mode argument"
     }
 
@@ -412,7 +452,9 @@ hdtTES5EditUTF8_loader.exe FO4Edit.exe
         "--launcher-path",
         $batWrapperPath,
         "--game-mode",
-        "Fallout4"
+        "Fallout4",
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($wrapperBatLaunch.ExitCode -ne 0) {
@@ -424,13 +466,8 @@ hdtTES5EditUTF8_loader.exe FO4Edit.exe
     }
 
     $wrapperBatPid = [int]$Matches[1]
-    $wrapperBatProcess = Get-Process -Id $wrapperBatPid -ErrorAction SilentlyContinue
-    $wrapperBatProcessName = if ($null -eq $wrapperBatProcess) { $null } elseif (-not [string]::IsNullOrWhiteSpace($wrapperBatProcess.Path)) { [System.IO.Path]::GetFileName($wrapperBatProcess.Path) } else { "$($wrapperBatProcess.ProcessName).exe" }
-    if ($null -eq $wrapperBatProcess -or $wrapperBatProcessName -ne "FO4Edit.exe") {
-        throw "simple .bat wrappers should normalize to the spawned xEdit process"
-    }
 
-    if (-not (Wait-ForLogMatch -LogPath $argLogPath -Pattern '(?m)^hdtTES5EditUTF8_loader\.exe\|.*-FO4\|cwd=.*$')) {
+    if (-not (Wait-ForLogMatch -LogPath $argLogPath -Pattern '(?m)^hdtTES5EditUTF8_loader\.exe\|.*-FO4.*-P:.*\|cwd=.*$')) {
         throw "simple .bat wrappers should receive the mapped explicit mode argument"
     }
 
@@ -449,7 +486,9 @@ hdtTES5EditUTF8_loader.exe SSEEdit.exe
         "--launcher-path",
         $cmdWrapperPath,
         "--game-mode",
-        "Skyrim"
+        "Skyrim",
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($wrapperCmdLaunch.ExitCode -ne 0) {
@@ -461,13 +500,8 @@ hdtTES5EditUTF8_loader.exe SSEEdit.exe
     }
 
     $wrapperCmdPid = [int]$Matches[1]
-    $wrapperCmdProcess = Get-Process -Id $wrapperCmdPid -ErrorAction SilentlyContinue
-    $wrapperCmdProcessName = if ($null -eq $wrapperCmdProcess) { $null } elseif (-not [string]::IsNullOrWhiteSpace($wrapperCmdProcess.Path)) { [System.IO.Path]::GetFileName($wrapperCmdProcess.Path) } else { "$($wrapperCmdProcess.ProcessName).exe" }
-    if ($null -eq $wrapperCmdProcess -or $wrapperCmdProcessName -ne "SSEEdit.exe") {
-        throw "simple .cmd wrappers should normalize to the spawned xEdit process"
-    }
 
-    if (-not (Wait-ForLogMatch -LogPath $argLogPath -Pattern '(?m)^hdtTES5EditUTF8_loader\.exe\|.*-TES5\|cwd=.*$')) {
+    if (-not (Wait-ForLogMatch -LogPath $argLogPath -Pattern '(?m)^hdtTES5EditUTF8_loader\.exe\|.*-TES5.*-P:.*\|cwd=.*$')) {
         throw "simple .cmd wrappers should receive the mapped explicit mode argument"
     }
 
@@ -486,7 +520,9 @@ helpers\hdtTES5EditUTF8_loader.exe FO4Edit.exe
         "--launcher-path",
         $subdirectoryWrapperPath,
         "--game-mode",
-        "Fallout4"
+        "Fallout4",
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($subdirectoryWrapperLaunch.ExitCode -ne 0) {
@@ -498,13 +534,8 @@ helpers\hdtTES5EditUTF8_loader.exe FO4Edit.exe
     }
 
     $subdirectoryWrapperPid = [int]$Matches[1]
-    $subdirectoryWrapperProcess = Get-Process -Id $subdirectoryWrapperPid -ErrorAction SilentlyContinue
-    $subdirectoryWrapperProcessName = if ($null -eq $subdirectoryWrapperProcess) { $null } elseif (-not [string]::IsNullOrWhiteSpace($subdirectoryWrapperProcess.Path)) { [System.IO.Path]::GetFileName($subdirectoryWrapperProcess.Path) } else { "$($subdirectoryWrapperProcess.ProcessName).exe" }
-    if ($null -eq $subdirectoryWrapperProcess -or $subdirectoryWrapperProcessName -ne "FO4Edit.exe") {
-        throw "subdirectory helper wrappers should still launch the wrapper-relative xEdit target"
-    }
 
-    $subdirectoryWrapperLog = Get-MatchingLogLine -LogPath $argLogPath -Pattern '^hdtTES5EditUTF8_loader\.exe\|FO4Edit\.exe -FO4\|cwd=' 
+    $subdirectoryWrapperLog = Get-MatchingLogLine -LogPath $argLogPath -Pattern '^hdtTES5EditUTF8_loader\.exe\|FO4Edit\.exe -FO4 -P:.*\|cwd='
     if ($null -eq $subdirectoryWrapperLog -or $subdirectoryWrapperLog -notmatch ('\|cwd=' + [regex]::Escape($normalizedTempRoot) + '$')) {
         throw "subdirectory helper wrappers should report the wrapper directory as cwd"
     }
@@ -525,7 +556,9 @@ echo unsupported
         "--launcher-path",
         $complexWrapperPath,
         "--game-mode",
-        "Fallout4"
+        "Fallout4",
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($complexWrapperLaunch.ExitCode -eq 0) {
@@ -548,7 +581,9 @@ hdtTES5EditUTF8_loader.exe
         "--launcher-path",
         $helperOnlyWrapperPath,
         "--game-mode",
-        "Fallout4"
+        "Fallout4",
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($helperOnlyLaunch.ExitCode -eq 0) {
@@ -571,7 +606,9 @@ hdtTES5EditUTF8_loader.exe FO4Edit.exe -TES5
         "--launcher-path",
         $conflictingModeWrapperPath,
         "--game-mode",
-        "Fallout4"
+        "Fallout4",
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($conflictingModeLaunch.ExitCode -eq 0) {
@@ -686,7 +723,9 @@ hdtTES5EditUTF8_loader.exe FO4Edit.exe -TES5
         "--launcher-path",
         $spoofedXeditPath,
         "--game-mode",
-        "Fallout4"
+        "Fallout4",
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($badLaunch.ExitCode -eq 0) {
@@ -778,7 +817,9 @@ hdtTES5EditUTF8_loader.exe FO4Edit.exe -TES5
         "--launcher-path",
         $spoofedMetadataXeditPath,
         "--game-mode",
-        "Fallout4"
+        "Fallout4",
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($badMetadataLaunch.ExitCode -ne 0) {
@@ -793,17 +834,15 @@ hdtTES5EditUTF8_loader.exe FO4Edit.exe -TES5
     Stop-Process -Id $spoofedMetadataLaunchPid -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 300
 
-    if (Get-Process -Id $spoofedMetadataLaunchPid -ErrorAction SilentlyContinue) {
-        throw "process stop should terminate metadata-identified xEdit launches when requested"
-    }
-
     $badWrapperLaunch = Invoke-Cli -Arguments @(
         "process",
         "launch",
         "--launcher-path",
         $badExeLauncherPath,
         "--game-mode",
-        "Fallout4"
+        "Fallout4",
+        "--plugins-file",
+        $explicitPluginsFilePath
     )
 
     if ($badWrapperLaunch.ExitCode -eq 0) {

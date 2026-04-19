@@ -252,15 +252,18 @@ internal sealed class ModuleSelectionForm : Form
         Height = 320;
         StartPosition = FormStartPosition.CenterScreen;
 
-        var moduleList = new CheckedListBox
+        var moduleList = new TreeView
         {
             Name = "Modules",
             Dock = DockStyle.Fill,
-            CheckOnClick = true
+            CheckBoxes = true,
+            ShowLines = false,
+            ShowPlusMinus = false,
+            ShowRootLines = false
         };
-        moduleList.Items.Add("Fallout4.esm", true);
-        moduleList.Items.Add("DLCRobot.esm", true);
-        moduleList.Items.Add("ExamplePatch.esp", true);
+        moduleList.Nodes.Add(new TreeNode("Fallout4.esm") { Checked = true });
+        moduleList.Nodes.Add(new TreeNode("DLCRobot.esm") { Checked = true });
+        moduleList.Nodes.Add(new TreeNode("ExamplePatch.esp") { Checked = true });
 
         var okButton = new Button
         {
@@ -328,6 +331,12 @@ try {
     Assert-WithinOverallTimeout
     $fixturePath = New-ModuleSelectionFixture -TempRoot $tempRoot
     $fixtureResultPath = Join-Path $tempRoot "fixture-result.txt"
+    $pluginsFilePath = Join-Path $tempRoot 'requested-plugins.txt'
+    Set-Content -Path $pluginsFilePath -Value @(
+        '*Fallout4.esm',
+        '*DLCRobot.esm',
+        '*ExamplePatch.esp'
+    )
 
     $env:XEDIT_CLI_TEST_HOOK_DLL = $BridgeDllPath
     $env:XEDIT_CLI_TEST_FIXTURE_RESULT = $fixtureResultPath
@@ -341,8 +350,8 @@ try {
         $fixturePath,
         "--game-mode",
         "Fallout4",
-        "--load-mode",
-        "all"
+        "--plugins-file",
+        $pluginsFilePath
     )
 
     if ($launch.ExitCode -ne 0) {
@@ -370,9 +379,16 @@ try {
     Assert-True -Condition (Test-Path $statusPath -PathType Leaf) -Message "hook bridge should report status back through the hook session path"
     $status = Get-Content -Path $statusPath -Raw
 
-    Assert-Match -Value $status -Pattern '(?m)^load_mode=all\s*$' -Message "hook bridge should persist the all-mode selection policy"
     Assert-Match -Value $status -Pattern '(?m)^selection_detected=true\s*$' -Message "hook bridge should report Module Selection detection"
-    Assert-Match -Value $status -Pattern '(?m)^selection_method=button-click\s*$' -Message "hook bridge should report the explicit confirmation method used"
+    Assert-Match -Value $status -Pattern '(?m)^selected_modules=Fallout4\.esm\|DLCRobot\.esm\|ExamplePatch\.esp\s*$' -Message "hook bridge should record the final selected modules that xEdit proceeded with"
+    Assert-Match -Value $status -Pattern '(?m)^detail=.*Module Selection.*\s*$' -Message "hook bridge should retain checkpoint detail about the Module Selection automation"
+    Assert-Match -Value $status -Pattern '(?m)^child_count=' -Message "hook bridge should retain diagnostic checkpoint evidence for the dialog snapshot"
+
+    Assert-True -Condition ($status -notmatch '(?m)^load_mode=') -Message "hook bridge should not expose load_mode after the load-only rollback"
+    Assert-True -Condition ($status -notmatch '(?m)^plugins=') -Message "hook bridge should not expose plugins after the load-only rollback"
+    Assert-True -Condition ($status -notmatch '(?m)^selection_method=') -Message "hook bridge should not expose selection_method after the load-only rollback"
+    Assert-True -Condition ($status -notmatch '(?m)^forced_dependencies=') -Message "hook bridge should not expose forced_dependencies after the load-only rollback"
+    Assert-True -Condition ($status -notmatch '(?m)^blocked_exclusions=') -Message "hook bridge should not expose blocked_exclusions after the load-only rollback"
 
     if ($status -match '(?m)^status=module-selection-confirmed\s*$') {
         Assert-Match -Value $status -Pattern '(?m)^selection_confirmed=true\s*$' -Message "hook bridge should report a confirmed selection when the terminal success state is written"

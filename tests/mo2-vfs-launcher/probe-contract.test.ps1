@@ -6,13 +6,19 @@ $probePath = Join-Path $repoRoot "tools/mo2-vfs-launcher/mo2-vfs-probe.ps1"
 function Invoke-Probe {
     param(
         [string]$TargetPath,
-        [string]$LocalAppDataPath
+        [string]$LocalAppDataPath,
+        [string]$ResultPath = $null
     )
 
     $previousLocalAppData = $env:LOCALAPPDATA
     try {
         $env:LOCALAPPDATA = $LocalAppDataPath
-        $output = & pwsh -NoProfile -File $probePath --path $TargetPath 2>&1
+        $arguments = @('--path', $TargetPath)
+        if (-not [string]::IsNullOrWhiteSpace($ResultPath)) {
+            $arguments += @('--result-path', $ResultPath)
+        }
+
+        $output = & pwsh -NoProfile -File $probePath @arguments 2>&1
 
         return [pscustomobject]@{
             ExitCode = $LASTEXITCODE
@@ -37,8 +43,9 @@ try {
 
     $pluginsPath = Join-Path $pluginsDirectory "plugins.txt"
     Set-Content -Path $pluginsPath -Value "*Fallout4.esm"
+    $resultPath = Join-Path $tempRoot "probe.result.json"
 
-    $result = Invoke-Probe -TargetPath $targetPath -LocalAppDataPath $localAppDataPath
+    $result = Invoke-Probe -TargetPath $targetPath -LocalAppDataPath $localAppDataPath -ResultPath $resultPath
     if ($result.ExitCode -ne 0) {
         throw "probe should succeed when both inspected paths are visible: $($result.Output)"
     }
@@ -71,6 +78,15 @@ try {
     $compactJson = $payload | ConvertTo-Json -Compress
     if ($result.Output -ne $compactJson) {
         throw "probe should emit compact JSON without extra formatting or noise"
+    }
+
+    if (-not (Test-Path -Path $resultPath -PathType Leaf)) {
+        throw "probe should optionally persist the same compact JSON payload to --result-path"
+    }
+
+    $persistedPayload = Get-Content -Path $resultPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    if (($persistedPayload | ConvertTo-Json -Compress) -ne $compactJson) {
+        throw "probe should persist the same compact JSON payload it writes to stdout"
     }
 }
 finally {

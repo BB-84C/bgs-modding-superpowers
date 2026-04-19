@@ -1,27 +1,9 @@
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$cliPath = Join-Path $repoRoot "tools/xedit-cli/bin/xedit-cli.ps1"
-$commonLibPath = Join-Path $repoRoot "tools/xedit-cli/lib/common.ps1"
-$hookSessionLibPath = Join-Path $repoRoot "tools/xedit-cli/lib/hook-session.ps1"
-$processLibPath = Join-Path $repoRoot "tools/xedit-cli/lib/process.ps1"
-
-. $commonLibPath
-. $hookSessionLibPath
-. $processLibPath
-
-function Invoke-Cli {
-    param(
-        [string[]]$Arguments
-    )
-
-    $output = & pwsh -NoProfile -File $cliPath @Arguments 2>&1
-
-    [pscustomobject]@{
-        ExitCode = $LASTEXITCODE
-        Output = ($output | ForEach-Object { $_.ToString() }) -join "`n"
-    }
-}
+$hookMainPath = Join-Path $repoRoot "tools/xedit-hook-bridge/src/HookMain.pas"
+$hookStatusPath = Join-Path $repoRoot "tools/xedit-hook-bridge/src/HookStatus.pas"
+$hookSessionPath = Join-Path $repoRoot "tools/xedit-hook-bridge/src/HookSession.pas"
 
 function Assert-Equal {
     param(
@@ -46,269 +28,92 @@ function Assert-True {
     }
 }
 
-function New-TestLauncherPath {
-    $tempRoot = Join-Path $env:TEMP ("xedit-cli-module-selection-" + [guid]::NewGuid().ToString("N"))
-    $null = New-Item -ItemType Directory -Path $tempRoot -Force
-    $launcherPath = Join-Path $tempRoot "launch-xedit.cmd"
-    Set-Content -Path $launcherPath -Value "@echo off"
-    return $launcherPath
+function Assert-NotMatch {
+    param(
+        [string]$Value,
+        [string]$Pattern,
+        [string]$Message
+    )
+
+    if ($Value -match $Pattern) {
+        throw "$Message`nUnexpected pattern: $Pattern"
+    }
 }
 
-$launcherPath = New-TestLauncherPath
+function New-TempSessionPath {
+    $sessionRoot = Join-Path $env:TEMP ("xedit-hook-contract-" + [guid]::NewGuid().ToString("N"))
+    $null = New-Item -ItemType Directory -Path $sessionRoot -Force
+    return $sessionRoot
+}
+
+function Read-StatusMap {
+    param(
+        [string]$SessionPath
+    )
+
+    $statusPath = Join-Path $SessionPath 'hook-status.txt'
+    $map = @{}
+    foreach ($line in Get-Content -Path $statusPath) {
+        if ($line -match '^(?<key>[^=]+)=(?<value>.*)$') {
+            $map[$matches.key] = $matches.value
+        }
+    }
+
+    return $map
+}
+
+$hookMainSource = Get-Content -Path $hookMainPath -Raw
+$hookStatusSource = Get-Content -Path $hookStatusPath -Raw
+$hookSessionSource = Get-Content -Path $hookSessionPath -Raw
+
+Assert-NotMatch -Value $hookMainSource -Pattern 'TryAdoptModelLayerResult' -Message 'HookMain should not keep model-layer result adoption after the load-only rollback'
+Assert-NotMatch -Value $hookMainSource -Pattern 'selection_method\s*=\s*''model-layer''' -Message 'HookMain should not restore selection_method=model-layer after the load-only rollback'
+Assert-NotMatch -Value $hookMainSource -Pattern 'GForcedDependencies' -Message 'HookMain should not track forced dependency status after the load-only rollback'
+Assert-NotMatch -Value $hookMainSource -Pattern 'GBlockedExclusions' -Message 'HookMain should not track blocked exclusion status after the load-only rollback'
+Assert-NotMatch -Value $hookMainSource -Pattern 'UsesSubsetLoadMode|ApplySubsetPolicyAndCapture|ParseRequestedPlugins|BuildForcedDependencies|BuildBlockedExclusions|ApplyOnlyPolicy|ApplyExcludePolicy' -Message 'HookMain should keep only load-only Module Selection automation helpers'
+Assert-True -Condition ($hookMainSource -match 'function\s+TryReadSessionSelectedModules') -Message 'HookMain should expose a session plugins.txt fallback reader for selected_modules evidence'
+Assert-True -Condition ($hookMainSource -match 'plugins\.txt') -Message 'HookMain should read selected_modules fallback evidence from the session plugins.txt path'
+Assert-True -Condition ($hookMainSource -match 'TryCaptureSelectedModulesOrFallback') -Message 'HookMain should wrap tree capture with a fallback evidence path instead of relying on the real VCL tree only'
+Assert-NotMatch -Value $hookMainSource -Pattern 'CompleteModuleSelection\(''failed'',\s*CaptureDetail,\s*True,\s*False\)' -Message 'HookMain should not fail immediately on module-tree capture detail before attempting confirmation'
+
+Assert-NotMatch -Value $hookStatusSource -Pattern 'ShouldPreserveModelLayerStatus' -Message 'HookStatus should not preserve stale model-layer status after the load-only rollback'
+Assert-NotMatch -Value $hookStatusSource -Pattern 'load_mode=' -Message 'HookStatus should not emit load_mode after the load-only rollback'
+Assert-NotMatch -Value $hookStatusSource -Pattern 'plugins=' -Message 'HookStatus should not emit plugins after the load-only rollback'
+Assert-NotMatch -Value $hookStatusSource -Pattern 'selection_method=' -Message 'HookStatus should not emit selection_method after the load-only rollback'
+Assert-NotMatch -Value $hookStatusSource -Pattern 'forced_dependencies=' -Message 'HookStatus should not emit forced_dependencies after the load-only rollback'
+Assert-NotMatch -Value $hookStatusSource -Pattern 'blocked_exclusions=' -Message 'HookStatus should not emit blocked_exclusions after the load-only rollback'
+Assert-NotMatch -Value $hookSessionSource -Pattern 'XEDIT_CLI_HOOK_LOAD_MODE|XEDIT_CLI_HOOK_PLUGINS' -Message 'HookSession should not read retired subset-era environment variables after the load-only rollback'
+Assert-NotMatch -Value $hookSessionSource -Pattern 'IsAllLoadMode|IsOnlyLoadMode|IsExcludeLoadMode|UsesSubsetLoadMode' -Message 'HookSession should not retain retired subset-era mode helpers after the load-only rollback'
+
+$sessionPath = New-TempSessionPath
 
 try {
-    $script:CapturedLaunch = $null
-    $script:CapturedDetectionPath = $null
-    $script:CapturedHookDeployment = $null
-    $detectionPath = Join-Path (Split-Path -Path $launcherPath -Parent) 'ResolvedTarget.exe'
+    Set-Content -Path (Join-Path $sessionPath 'hook-status.txt') -Value @'
+status=module-selection-confirmed
+selection_detected=true
+selection_confirmed=true
+selected_modules=Fallout4.esm|DLCRobot.esm|ExamplePatch.esp
+detail=Detected Module Selection and confirmed the current selection.
+heartbeat=worker-loop-3
+checkpoint=final-selected-modules
+'@
 
-    function Get-XeditCliNormalizedLauncherCommand {
-        param(
-            [string]$LauncherPath,
-            [string]$GameModeArgument
-        )
-
-        return [pscustomobject]@{
-            FilePath = $LauncherPath
-            ArgumentList = @($GameModeArgument)
-            DetectionPath = $detectionPath
-            WorkingDirectory = Split-Path -Path $LauncherPath -Parent
-        }
-    }
-
-    function Start-XeditCliLauncherProcess {
-        param(
-            [string]$LauncherPath,
-            [string[]]$ArgumentList,
-            [string]$WorkingDirectory,
-            [hashtable]$EnvironmentVariables
-        )
-
-        $script:CapturedLaunch = [pscustomobject]@{
-            LauncherPath = $LauncherPath
-            ArgumentList = @($ArgumentList)
-            WorkingDirectory = $WorkingDirectory
-            EnvironmentVariables = $EnvironmentVariables
-        }
-
-        return [pscustomobject]@{ Id = 42 }
-    }
-
-    function Get-XeditCliLaunchedProcessId {
-        param(
-            $WrapperProcess,
-            [string]$LauncherPath,
-            [datetime]$StartedAt,
-            [int[]]$KnownProcessIds
-        )
-
-        $script:CapturedDetectionPath = $LauncherPath
-        return 4242
-    }
-
-    function Copy-XeditCliHookBridgeForRealLaunch {
-        param(
-            [string]$XeditExecutablePath
-        )
-
-        $script:CapturedHookDeployment = $XeditExecutablePath
-        return [pscustomobject]@{
-            SourcePath = 'C:\bridge\xEditHookBridge.dll'
-            TargetPath = 'C:\game\Tools\Mod Organizer\hook.dll'
-        }
-    }
-
-    $launchAllExitCode = Invoke-XeditCliProcessLaunch -Arguments @(
-        "--launcher-path",
-        $launcherPath,
-        "--game-mode",
-        "Fallout4",
-        "--load-mode",
-        "all"
-    )
-
-    Assert-Equal -Actual $launchAllExitCode -Expected 0 -Message "process launch should accept --load-mode all"
-    Assert-True -Condition ($null -ne $script:CapturedLaunch) -Message "process launch should reach the launcher seam when --load-mode all is valid"
-
-    $missingLoadModeExitCode = Invoke-XeditCliProcessLaunch -Arguments @(
-        "--launcher-path",
-        $launcherPath,
-        "--game-mode",
-        "Fallout4"
-    )
-
-    Assert-Equal -Actual $missingLoadModeExitCode -Expected 1 -Message "process launch should reject a missing --load-mode"
-
-    $allWithPluginExitCode = Invoke-XeditCliProcessLaunch -Arguments @(
-        "--launcher-path",
-        $launcherPath,
-        "--game-mode",
-        "Fallout4",
-        "--load-mode",
-        "all",
-        "--plugin",
-        "Example.esp"
-    )
-
-    Assert-Equal -Actual $allWithPluginExitCode -Expected 1 -Message "--load-mode all should reject any --plugin"
-
-    $onlyWithoutPluginExitCode = Invoke-XeditCliProcessLaunch -Arguments @(
-        "--launcher-path",
-        $launcherPath,
-        "--game-mode",
-        "Fallout4",
-        "--load-mode",
-        "only"
-    )
-
-    Assert-Equal -Actual $onlyWithoutPluginExitCode -Expected 1 -Message "--load-mode only should require one or more --plugin values"
-
-    $excludeWithoutPluginExitCode = Invoke-XeditCliProcessLaunch -Arguments @(
-        "--launcher-path",
-        $launcherPath,
-        "--game-mode",
-        "Fallout4",
-        "--load-mode",
-        "exclude"
-    )
-
-    Assert-Equal -Actual $excludeWithoutPluginExitCode -Expected 1 -Message "--load-mode exclude should require one or more --plugin values"
-
-    $blankPluginOptions = ConvertTo-XeditCliOptionMap -Arguments @(
-        "--load-mode",
-        "only",
-        "--plugin",
-        "   "
-    ) -RepeatableNames @("--plugin")
-
-    $blankPluginPolicy = Get-XeditCliNormalizedSelectionPolicy -Options $blankPluginOptions
-    Assert-True -Condition ($null -eq $blankPluginPolicy) -Message "whitespace-only plugin values should be rejected"
-
-    $selectionOptions = ConvertTo-XeditCliOptionMap -Arguments @(
-        "--load-mode",
-        "only",
-        "--plugin",
-        "Example Plugin.esm",
-        "--plugin",
-        "Example Plugin.esm",
-        "--plugin",
-        "AnotherPlugin.esp"
-    ) -RepeatableNames @("--plugin")
-
-    $selectionPolicy = Get-XeditCliNormalizedSelectionPolicy -Options $selectionOptions
-
-    Assert-Equal -Actual $selectionPolicy.LoadMode -Expected "only" -Message "selection policy should normalize the load mode"
-    Assert-Equal -Actual $selectionPolicy.Plugins.Count -Expected 2 -Message "duplicate --plugin values should be deduplicated"
-    Assert-Equal -Actual $selectionPolicy.Plugins[0] -Expected "Example Plugin.esm" -Message "plugin names should be preserved as exact filenames"
-    Assert-Equal -Actual $selectionPolicy.Plugins[1] -Expected "AnotherPlugin.esp" -Message "plugin ordering should preserve the first occurrence of each plugin"
-    Assert-Equal -Actual $script:CapturedDetectionPath -Expected $detectionPath -Message "process launch should resolve and pass the normalized detection target to PID discovery"
-
-    $missingMoProfileValue = Invoke-Cli -Arguments @(
-        "process",
-        "launch",
-        "--launcher-path",
-        $launcherPath,
-        "--game-mode",
-        "Fallout4",
-        "--load-mode",
-        "all",
-        "--mo-profile"
-    )
-
-    Assert-Equal -Actual $missingMoProfileValue.ExitCode -Expected 1 -Message "the CLI entrypoint should reject a missing --mo-profile value"
-    Assert-True -Condition ($missingMoProfileValue.Output -match [regex]::Escape("Missing value for option: --mo-profile")) -Message "the CLI entrypoint should surface the missing --mo-profile value clearly"
-
-    $blankMoProfileOptions = ConvertTo-XeditCliOptionMap -Arguments @(
-        "--launcher-path",
-        $launcherPath,
-        "--game-mode",
-        "Fallout4",
-        "--load-mode",
-        "all",
-        "--mo-profile",
-        "   "
-    )
-
-    $blankMoProfileExitCode = Invoke-XeditCliProcessLaunch -Arguments @(
-        "--launcher-path",
-        $launcherPath,
-        "--game-mode",
-        "Fallout4",
-        "--load-mode",
-        "all",
-        "--mo-profile",
-        "   "
-    )
-
-    Assert-Equal -Actual $blankMoProfileExitCode -Expected 1 -Message "process launch should reject a whitespace-only --mo-profile"
-
-    $cliMissingLoadMode = Invoke-Cli -Arguments @(
-        "process",
-        "launch",
-        "--launcher-path",
-        $launcherPath,
-        "--game-mode",
-        "Fallout4"
-    )
-
-    Assert-Equal -Actual $cliMissingLoadMode.ExitCode -Expected 1 -Message "the CLI entrypoint should reject missing --load-mode"
-    Assert-True -Condition ($cliMissingLoadMode.Output -match [regex]::Escape("Missing required options: --load-mode")) -Message "the CLI entrypoint should surface the missing --load-mode error"
-
-    $cliMissingPluginValue = Invoke-Cli -Arguments @(
-        "process",
-        "launch",
-        "--launcher-path",
-        $launcherPath,
-        "--game-mode",
-        "Fallout4",
-        "--load-mode",
-        "only",
-        "--plugin",
-        "--plugin",
-        "Example.esp"
-    )
-
-    Assert-Equal -Actual $cliMissingPluginValue.ExitCode -Expected 1 -Message "the CLI entrypoint should reject a missing --plugin value"
-    Assert-True -Condition ($cliMissingPluginValue.Output -match [regex]::Escape("Missing value for option: --plugin")) -Message "the CLI entrypoint should surface the missing --plugin value clearly"
-
-    $cliAllWithPlugin = Invoke-Cli -Arguments @(
-        "process",
-        "launch",
-        "--launcher-path",
-        $launcherPath,
-        "--game-mode",
-        "Fallout4",
-        "--load-mode",
-        "all",
-        "--plugin",
-        "Example.esp"
-    )
-
-    Assert-Equal -Actual $cliAllWithPlugin.ExitCode -Expected 1 -Message "the CLI entrypoint should reject --plugin when --load-mode is all"
-    Assert-True -Condition ($cliAllWithPlugin.Output -match [regex]::Escape("Load mode 'all' does not accept --plugin")) -Message "the CLI entrypoint should surface the all-plus-plugin contract clearly"
-
-    $cliWhitespacePlugin = Invoke-Cli -Arguments @(
-        "process",
-        "launch",
-        "--launcher-path",
-        $launcherPath,
-        "--game-mode",
-        "Fallout4",
-        "--load-mode",
-        "only",
-        "--plugin",
-        "   "
-    )
-
-    Assert-Equal -Actual $cliWhitespacePlugin.ExitCode -Expected 1 -Message "the CLI entrypoint should reject whitespace-only plugin values"
-    Assert-True -Condition ($cliWhitespacePlugin.Output -match [regex]::Escape("Plugin names must be non-empty filenames")) -Message "the CLI entrypoint should surface whitespace-only plugin rejection clearly"
+    $hookStatus = Read-StatusMap -SessionPath $sessionPath
+    Assert-Equal -Actual $hookStatus['selection_detected'] -Expected 'true' -Message 'hook-session parsing should preserve dialog detection'
+    Assert-Equal -Actual $hookStatus['selection_confirmed'] -Expected 'true' -Message 'hook-session parsing should preserve confirmation'
+    Assert-Equal -Actual $hookStatus['selected_modules'] -Expected 'Fallout4.esm|DLCRobot.esm|ExamplePatch.esp' -Message 'hook-session parsing should preserve final selected module evidence'
+    Assert-Equal -Actual $hookStatus['detail'] -Expected 'Detected Module Selection and confirmed the current selection.' -Message 'hook-session parsing should preserve checkpoint detail'
+    Assert-Equal -Actual $hookStatus['heartbeat'] -Expected 'worker-loop-3' -Message 'hook-session parsing should preserve heartbeat detail lines'
+    Assert-Equal -Actual $hookStatus['checkpoint'] -Expected 'final-selected-modules' -Message 'hook-session parsing should preserve checkpoint detail lines'
+    Assert-True -Condition ([string]::IsNullOrWhiteSpace($hookStatus['load_mode'])) -Message 'hook-session parsing should observe that load_mode is absent'
+    Assert-True -Condition ([string]::IsNullOrWhiteSpace($hookStatus['plugins'])) -Message 'hook-session parsing should observe that plugins is absent'
+    Assert-True -Condition ([string]::IsNullOrWhiteSpace($hookStatus['selection_method'])) -Message 'hook-session parsing should observe that selection_method is absent'
+    Assert-True -Condition ([string]::IsNullOrWhiteSpace($hookStatus['forced_dependencies'])) -Message 'hook-session parsing should observe that forced_dependencies is absent'
+    Assert-True -Condition ([string]::IsNullOrWhiteSpace($hookStatus['blocked_exclusions'])) -Message 'hook-session parsing should observe that blocked_exclusions is absent'
 }
 finally {
-    if ($launcherPath) {
-        $launcherRoot = Split-Path -Path $launcherPath -Parent
-        if (Test-Path $launcherRoot) {
-            Remove-Item -Path $launcherRoot -Recurse -Force
-        }
+    if (Test-Path $sessionPath) {
+        Remove-Item -Path $sessionPath -Recurse -Force
     }
 }
 

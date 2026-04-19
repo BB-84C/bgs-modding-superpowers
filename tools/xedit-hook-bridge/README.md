@@ -1,170 +1,114 @@
 # xedit-hook-bridge
 
-This directory holds the minimal native hook bridge skeleton for the xEdit step-1 Module Selection handshake.
+This directory holds the minimal native hook bridge used by the current worktree's no-fork load path.
 
-## Handshake Contract
+## Current Contract
 
-The bridge handshake is intentionally small for this slice:
+The bridge contract is intentionally narrow for this slice:
 
 - the DLL exports `Init(logLevel: Integer; profileName: LPCWSTR): BOOL; cdecl`
-- `Init` reads `XEDIT_CLI_HOOK_SESSION_ID`, `XEDIT_CLI_HOOK_SESSION_PATH`, `XEDIT_CLI_HOOK_LOAD_MODE`, and optional `XEDIT_CLI_HOOK_PLUGINS`
+- `Init` reads only:
+  - `XEDIT_CLI_HOOK_SESSION_ID`
+  - `XEDIT_CLI_HOOK_SESSION_PATH`
 - `Init` writes `hook-status.txt` under `XEDIT_CLI_HOOK_SESSION_PATH`
-- a successful load writes `status=loaded`
-- if `XEDIT_CLI_HOOK_SESSION_PATH` is missing, the bridge writes a blocker status file under `%TEMP%\xedit-hook-bridge-blockers\` using either a sanitized session-id-derived filename ending in `-hook-status.txt` or `missing-session-hook-status.txt`
+- the bridge does not own plugin-subset semantics
+- the bridge only auto-confirms `Module Selection` and writes diagnostics
 
-## Module Selection `all` Contract
+The wrapper is now responsible for deciding the load set by materializing a session-scoped `plugins.txt` and launching xEdit with `-P:<session plugins.txt>`.
 
-The first Module Selection automation slice is intentionally narrow:
+## Status File Surface
 
-- detect a top-level `Module Selection` dialog
-- if `XEDIT_CLI_HOOK_LOAD_MODE=all`, confirm the current selection without changing it
-- write explicit status markers showing whether Module Selection was detected and confirmed
+The reduced load-only status surface is:
 
-Successful `all` confirmation updates `hook-status.txt` with:
+- `status=`
+- `session_id=`
+- `selection_detected=`
+- `selection_confirmed=`
+- `selected_modules=`
+- `detail=`
+- diagnostic snapshot lines
 
-- `status=module-selection-confirmed`
-- `selection_detected=true`
-- `selection_confirmed=true`
-- `selection_method=button-click`
+The bridge no longer writes subset-era fields such as:
 
-Failures keep writing `hook-status.txt` under the same hook session path with explicit `detail=` diagnostics.
+- `load_mode=`
+- `plugins=`
+- `selection_method=`
+- `forced_dependencies=`
+- `blocked_exclusions=`
 
-## Module Selection `only` / `exclude` Contract
+## Automation Behavior
 
-The subset slice keeps the same in-process dialog automation path and adds two policy modes:
+The bridge now does only three automation jobs:
 
-- `XEDIT_CLI_HOOK_LOAD_MODE=only` checks the requested plugin roots from `XEDIT_CLI_HOOK_PLUGINS` and lets dialog dependency rules force required masters back on
-- `XEDIT_CLI_HOOK_LOAD_MODE=exclude` unchecks the requested plugin roots when the dialog allows it
-- the bridge matches requested filenames against the visible module tree and confirms the dialog after applying the policy
-- the bridge records `selected_modules=` in visible tree order after the dialog has enforced dependency rules
-- `only` reports dependency-added modules through `forced_dependencies=`
-- `exclude` reports exclusions that stayed selected through `blocked_exclusions=`
+1. detect the `Module Selection` dialog when it appears
+2. dismiss startup interstitials that would otherwise block it, such as:
+   - `What's New?`
+   - `A message from the developer`
+3. confirm the current selection without mutating it
 
-## Manual Delphi CE Build Checkpoint
+For selected-module evidence, the bridge prefers:
 
-Because Delphi Community Edition cannot be driven from the command line on this machine, stop here after code changes and use this manual build loop:
+1. visible tree capture when available
+2. fallback to the session `plugins.txt` file when tree capture is unavailable
 
-1. Open `tools/xedit-hook-bridge/src/xEditHookBridge.dpr` in Delphi Community Edition.
-2. In the IDE target selector, choose `Win32` and `Release`.
-3. Click `Project -> Build xEditHookBridge` or the toolbar `Build` button.
-4. Confirm the built DLL appears at `tools/xedit-hook-bridge/src/xEditHookBridge.dll`.
-5. Make sure `%WINDIR%\Microsoft.NET\Framework\v4.0.30319\csc.exe` exists on the machine before running the repo-side verification step, because the verification harness builds a small x86 WinForms fixture locally.
+That fallback is acceptable in this slice because the session `plugins.txt` is the wrapper-owned canonical input to the launch.
 
-If Delphi writes the DLL somewhere else, tell the assistant the actual output path before running the repo-side verification command below.
+## Real xEdit Wiring
 
-## Real xEdit Hook Wiring
+For real MO-backed launches, `xedit-cli process launch --mo-profile <name>`:
 
-The real xEdit seam expects the built bridge DLL at `..\Mod Organizer\hook.dll` relative to the launched xEdit executable, and calls `Init(logLevel, profileName)` after `-moprofile:"<name>"` is present on the xEdit command line.
+- copies `tools/xedit-hook-bridge/src/xEditHookBridge.dll` to xEdit's expected `..\Mod Organizer\hook.dll` path
+- appends `-moprofile:"<name>"` to xEdit launch arguments
+- appends `-P:<session plugins.txt>` so xEdit reads the session-scoped load set
 
-`xedit-cli process launch --mo-profile <name>` is the minimal real-launch contract for this slice:
+The bridge stays no-fork and hook-based in this repository.
 
-- copy `tools/xedit-hook-bridge/src/xEditHookBridge.dll` to the real xEdit hook path `..\Mod Organizer\hook.dll` before launch
-- append `-moprofile:"<name>"` to the xEdit launch arguments
-- keep the existing synthetic fixture tests and manual Delphi CE rebuild flow
+## Non-Interactive RAD Build Discovery
 
-## Repo-Side Verification Command
-
-After the user clicks `Build` and the DLL exists at the expected path, run:
-
-```powershell
-pwsh -File tests/xedit-cli/module-selection-subset.integration.ps1
-```
-
-For the earlier `all` smoke check, run:
+This machine has one reliable non-interactive Delphi build path for the hook bridge:
 
 ```powershell
-pwsh -File tests/xedit-cli/module-selection-all.integration.ps1
+$p = Start-Process -FilePath "C:\Program Files (x86)\Embarcadero\Studio\23.0\bin\bds.exe" `
+    -ArgumentList @('-b', 'D:\awesome-bgs-mod-master\.worktrees\xedit-step1-hooks\tools\xedit-hook-bridge\src\xEditHookBridge.dproj') `
+    -Wait -PassThru
+
+$p.ExitCode
+Get-Item "D:\awesome-bgs-mod-master\.worktrees\xedit-step1-hooks\tools\xedit-hook-bridge\src\xEditHookBridge.dll" |
+  Select-Object FullName, Length, LastWriteTime
 ```
 
-The subset verification builds a temporary `FO4Edit.exe` WinForms fixture with a checkbox tree, launches it through `xedit-cli process launch --load-mode only|exclude`, loads the compiled bridge DLL, opens a live `Module Selection` dialog, and expects the hook session status file to report `module-selection-confirmed` plus `selected_modules=` and either `forced_dependencies=` or `blocked_exclusions=`.
+Why this matters:
 
-## Verification
+- direct `dcc32.exe` is license-blocked on this machine and reports `This version of the product does not support command line compiling.`
+- `msbuild` can still produce false-green output even when `dcc32` did not really refresh the DLL
+- `bds.exe -b <project.dproj>` is the path that has produced fresh `xEditHookBridge.dll` updates during this slice
 
-When a command-line Delphi compiler is available, the following PowerShell command can still verify the handshake success path without Delphi CE:
+Use this as the preferred rebuild command before asking the user to open RAD manually.
+
+## Manual RAD Fallback
+
+If `bds.exe -b` is unavailable or does not refresh the DLL, use this manual loop:
+
+1. Open `tools/xedit-hook-bridge/src/xEditHookBridge.dpr` in RAD Studio / Delphi.
+2. Choose `Win32` and `Release`.
+3. Make sure the editor has reloaded any externally modified `HookMain.pas`, `HookStatus.pas`, and `HookSession.pas` source before building.
+4. Build `xEditHookBridge`.
+5. Confirm the built DLL appears at `tools/xedit-hook-bridge/src/xEditHookBridge.dll` with a fresh timestamp.
+
+## Repo-Side Verification Commands
+
+The synthetic load-only verification path is:
 
 ```powershell
-$repoRoot = (Resolve-Path .).Path
-$bridgeRoot = Join-Path $repoRoot 'tools/xedit-hook-bridge'
-$sourceRoot = Join-Path $bridgeRoot 'src'
-$compiler = @('dcc64', 'dcc32') | ForEach-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
-if (-not $compiler) {
-    throw 'Tooling blocker: no Delphi DLL compiler (dcc32/dcc64) is available on PATH.'
-}
-
-$buildRoot = Join-Path $env:TEMP ('xedit-hook-bridge-build-' + [guid]::NewGuid().ToString('N'))
-$null = New-Item -ItemType Directory -Path $buildRoot -Force
-$compileOutput = & $compiler.Source (Join-Path $sourceRoot 'xEditHookBridge.dpr') ('-E' + $buildRoot) ('-N0' + $buildRoot) 2>&1
-if ($LASTEXITCODE -ne 0) {
-    throw "Compilation failed.`n$($compileOutput -join [Environment]::NewLine)"
-}
-
-$dllPath = Join-Path $buildRoot 'xEditHookBridge.dll'
-if (-not (Test-Path $dllPath -PathType Leaf)) {
-    throw 'Compilation did not produce xEditHookBridge.dll.'
-}
-
-$sessionPath = Join-Path $env:TEMP ('xedit-hook-session-' + [guid]::NewGuid().ToString('N'))
-$null = New-Item -ItemType Directory -Path $sessionPath -Force
-$env:XEDIT_CLI_HOOK_SESSION_ID = 'handshaketest'
-$env:XEDIT_CLI_HOOK_SESSION_PATH = $sessionPath
-$env:XEDIT_CLI_HOOK_LOAD_MODE = 'only'
-$env:XEDIT_CLI_HOOK_PLUGINS = 'Example.esm|Another.esp'
-
-$kernel32 = @"
-using System;
-using System.Runtime.InteropServices;
-public static class NativeMethods {
-    [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
-    public static extern IntPtr LoadLibrary(string lpFileName);
-
-    [DllImport("kernel32", SetLastError = true)]
-    public static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
-
-    [DllImport("kernel32", SetLastError = true)]
-    public static extern bool FreeLibrary(IntPtr hModule);
-}
-
-[UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
-public delegate bool InitDelegate(int logLevel, string profileName);
-"@
-
-Add-Type -TypeDefinition $kernel32
-$module = [NativeMethods]::LoadLibrary($dllPath)
-if ($module -eq [IntPtr]::Zero) {
-    throw 'Failed to load compiled hook DLL.'
-}
-
-try {
-    $proc = [NativeMethods]::GetProcAddress($module, 'Init')
-    if ($proc -eq [IntPtr]::Zero) {
-        throw 'Compiled hook DLL does not export Init.'
-    }
-
-    $init = [Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($proc, [InitDelegate])
-    if (-not ($init.Invoke(0, "handshaketest"))) {
-        throw 'Init returned failure.'
-    }
-
-    $statusPath = Join-Path $sessionPath 'hook-status.txt'
-    if (-not (Test-Path $statusPath -PathType Leaf)) {
-        throw 'Init did not write hook-status.txt.'
-    }
-
-    $status = Get-Content $statusPath -Raw
-    foreach ($expected in @('status=loaded', 'session_id=handshaketest', 'load_mode=only', 'plugins=Example.esm|Another.esp')) {
-        if ($status -notmatch [regex]::Escape($expected)) {
-            throw "Missing status marker: $expected"
-        }
-    }
-
-    Write-Host 'xedit hook bridge handshake passed.'
-}
-finally {
-    [NativeMethods]::FreeLibrary($module) | Out-Null
-}
+pwsh -NoProfile -File tests/xedit-cli/module-selection-contract.test.ps1
+pwsh -NoProfile -File tests/xedit-cli/module-selection-all.integration.ps1
 ```
 
-If no Delphi DLL compiler is available, treat that as the expected tooling blocker for this slice and stop before deeper native implementation work.
+The real MO2 sandbox verification path is:
+
+```powershell
+pwsh -NoProfile -File tests/xedit-cli/mo2-sandbox-model-selection-real.test.ps1 -AllowLiveSandbox -EnsureBridge -RestartMo2
+```
 
 ## Fallback Note
 
@@ -172,5 +116,3 @@ If `XEDIT_CLI_HOOK_SESSION_PATH` is missing, the bridge does not silently fail. 
 
 - `<sanitized-session-id>-hook-status.txt`
 - `missing-session-hook-status.txt`
-
-The main verification command above only proves the success path. When a Delphi compiler is available, do a separate fallback spot-check by omitting `XEDIT_CLI_HOOK_SESSION_PATH` or forcing it to an unwritable location, then inspect `%TEMP%\xedit-hook-bridge-blockers\` for the expected blocker file.

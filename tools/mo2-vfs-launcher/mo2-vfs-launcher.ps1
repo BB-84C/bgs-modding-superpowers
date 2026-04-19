@@ -40,6 +40,9 @@ function ConvertTo-Mo2VfsLauncherOptions {
             "--wait-mode" {
                 $options[$token] = $value
             }
+            "--transport-mode" {
+                $options[$token] = $value
+            }
             "--stdout-file" {
                 $options[$token] = $value
             }
@@ -74,8 +77,7 @@ function Test-Mo2VfsLauncherRequiredOptions {
     }
 
     if ($missing.Count -gt 0) {
-        Write-Host "Missing required options: $($missing -join ', ')"
-        return $false
+        throw "Missing required options: $($missing -join ', ')"
     }
 
     return $true
@@ -99,6 +101,27 @@ function ConvertTo-Mo2VfsLauncherEnvironment {
     }
 
     return $environment
+}
+
+function Get-Mo2VfsLauncherProcessEnvironment {
+    $environment = @{}
+    foreach ($entry in [System.Environment]::GetEnvironmentVariables().GetEnumerator()) {
+        $environment[[string]$entry.Key] = [string]$entry.Value
+    }
+
+    return $environment
+}
+
+function Get-Mo2VfsLauncherTransportMode {
+    param(
+        [hashtable]$Options
+    )
+
+    if ($Options.ContainsKey("--transport-mode") -and -not [string]::IsNullOrWhiteSpace([string]$Options["--transport-mode"])) {
+        return [string]$Options["--transport-mode"]
+    }
+
+    return 'broker'
 }
 
 function Write-Mo2VfsLauncherState {
@@ -299,6 +322,104 @@ function Invoke-Mo2VfsLauncherBrokerTransport {
     }
 }
 
+function Invoke-Mo2VfsLauncherDirectChildTransport {
+    param(
+        [string]$TargetPath,
+        [string]$SessionId,
+        [string[]]$TargetArguments,
+        [hashtable]$Environment,
+        [string]$WaitMode,
+        [string]$StdoutFile,
+        [string]$StderrFile,
+        [Nullable[int]]$TimeoutSeconds
+    )
+
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.UseShellExecute = $false
+    $startInfo.WorkingDirectory = Split-Path -Path $TargetPath -Parent
+    $startInfo.RedirectStandardOutput = -not [string]::IsNullOrWhiteSpace($StdoutFile)
+    $startInfo.RedirectStandardError = -not [string]::IsNullOrWhiteSpace($StderrFile)
+
+    if ([System.IO.Path]::GetExtension($TargetPath).ToLowerInvariant() -eq '.ps1') {
+        $startInfo.FileName = 'pwsh'
+        $null = $startInfo.ArgumentList.Add('-NoProfile')
+        $null = $startInfo.ArgumentList.Add('-File')
+        $null = $startInfo.ArgumentList.Add($TargetPath)
+    }
+    else {
+        $startInfo.FileName = $TargetPath
+    }
+
+    foreach ($targetArgument in $TargetArguments) {
+        $null = $startInfo.ArgumentList.Add([string]$targetArgument)
+    }
+
+    foreach ($name in $Environment.Keys) {
+        $startInfo.Environment[[string]$name] = [string]$Environment[$name]
+    }
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    $null = $process.Start()
+
+    $stdoutTask = $null
+    $stderrTask = $null
+    if ($startInfo.RedirectStandardOutput) {
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    }
+
+    if ($startInfo.RedirectStandardError) {
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+    }
+
+    if ($WaitMode -eq 'spawned') {
+        return [pscustomobject]@{
+            State = (New-Mo2VfsLauncherState -Status 'spawned' -SessionId $SessionId -StatePid $process.Id -TargetPath $TargetPath -Arguments $TargetArguments)
+            ExitCode = 0
+        }
+    }
+
+    $timedOut = $false
+    if ($null -ne $TimeoutSeconds) {
+        $timedOut = -not $process.WaitForExit($TimeoutSeconds * 1000)
+        if ($timedOut) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            $null = $process.WaitForExit(5000)
+        }
+    }
+    else {
+        $process.WaitForExit()
+    }
+
+    if ($null -ne $stdoutTask) {
+        Write-Mo2VfsLauncherOutputFile -Path $StdoutFile -Content $stdoutTask.GetAwaiter().GetResult()
+    }
+
+    if ($null -ne $stderrTask) {
+        Write-Mo2VfsLauncherOutputFile -Path $StderrFile -Content $stderrTask.GetAwaiter().GetResult()
+    }
+
+    if ($timedOut) {
+        return [pscustomobject]@{
+            State = (New-Mo2VfsLauncherState -Status 'failed' -SessionId $SessionId -StatePid $process.Id -TargetPath $TargetPath -Arguments $TargetArguments -Error ("Timed out after {0} seconds" -f $TimeoutSeconds))
+            ExitCode = 1
+        }
+    }
+
+    $exitCode = $process.ExitCode
+    if ($exitCode -eq 0) {
+        return [pscustomobject]@{
+            State = (New-Mo2VfsLauncherState -Status 'exited' -SessionId $SessionId -StatePid $process.Id -TargetPath $TargetPath -Arguments $TargetArguments -ExitCode $exitCode)
+            ExitCode = 0
+        }
+    }
+
+    return [pscustomobject]@{
+        State = (New-Mo2VfsLauncherState -Status 'failed' -SessionId $SessionId -StatePid $process.Id -TargetPath $TargetPath -Arguments $TargetArguments -Error ("Target exited with code {0}" -f $exitCode) -ExitCode $exitCode)
+        ExitCode = $exitCode
+    }
+}
+
 function Get-Mo2VfsLauncherTimeoutSeconds {
     param(
         [hashtable]$Options
@@ -325,13 +446,21 @@ $targetArguments = @()
 
 try {
     $options = ConvertTo-Mo2VfsLauncherOptions -Arguments $args
-    if (-not (Test-Mo2VfsLauncherRequiredOptions -Options $options -Names @("--target-path", "--session-id", "--state-file"))) {
-        exit 1
+
+    if ($options.ContainsKey("--target-path")) {
+        $targetPath = $options["--target-path"]
     }
 
-    $targetPath = $options["--target-path"]
-    $sessionId = $options["--session-id"]
-    $stateFile = $options["--state-file"]
+    if ($options.ContainsKey("--session-id")) {
+        $sessionId = $options["--session-id"]
+    }
+
+    if ($options.ContainsKey("--state-file")) {
+        $stateFile = $options["--state-file"]
+    }
+
+    Test-Mo2VfsLauncherRequiredOptions -Options $options -Names @("--target-path", "--session-id", "--state-file") | Out-Null
+
     if ($options.ContainsKey("--wait-mode")) {
         $waitMode = $options["--wait-mode"]
     }
@@ -350,16 +479,29 @@ try {
 
     $targetPath = (Resolve-Path $targetPath).Path
     $targetArguments = @($options["--target-arg"])
-    $environment = ConvertTo-Mo2VfsLauncherEnvironment -Values $options["--env"]
+    $environment = Get-Mo2VfsLauncherProcessEnvironment
+    foreach ($entry in (ConvertTo-Mo2VfsLauncherEnvironment -Values $options["--env"]).GetEnumerator()) {
+        $environment[[string]$entry.Key] = [string]$entry.Value
+    }
     $stdoutFile = Resolve-Mo2VfsLauncherOutputPath -Path $options["--stdout-file"]
     $stderrFile = Resolve-Mo2VfsLauncherOutputPath -Path $options["--stderr-file"]
     $timeoutSeconds = Get-Mo2VfsLauncherTimeoutSeconds -Options $options
 
-    if (-not $script:Mo2VfsLauncherBrokerAvailable) {
-        throw "Broker launch functions are unavailable"
+    $transportMode = Get-Mo2VfsLauncherTransportMode -Options $options
+    if (@('broker', 'direct-child') -notcontains $transportMode) {
+        throw "Invalid --transport-mode: $transportMode. Supported transport modes: broker, direct-child"
     }
 
-    $transportResult = Invoke-Mo2VfsLauncherBrokerTransport -TargetPath $targetPath -SessionId $sessionId -TargetArguments $targetArguments -Environment $environment -WaitMode $waitMode -StdoutFile $stdoutFile -StderrFile $stderrFile -TimeoutSeconds $timeoutSeconds
+    if ($transportMode -eq 'direct-child') {
+        $transportResult = Invoke-Mo2VfsLauncherDirectChildTransport -TargetPath $targetPath -SessionId $sessionId -TargetArguments $targetArguments -Environment $environment -WaitMode $waitMode -StdoutFile $stdoutFile -StderrFile $stderrFile -TimeoutSeconds $timeoutSeconds
+    }
+    else {
+        if (-not $script:Mo2VfsLauncherBrokerAvailable) {
+            throw "Broker launch functions are unavailable"
+        }
+
+        $transportResult = Invoke-Mo2VfsLauncherBrokerTransport -TargetPath $targetPath -SessionId $sessionId -TargetArguments $targetArguments -Environment $environment -WaitMode $waitMode -StdoutFile $stdoutFile -StderrFile $stderrFile -TimeoutSeconds $timeoutSeconds
+    }
 
     Write-Mo2VfsLauncherState -StateFile $stateFile -State $transportResult.State
     exit $transportResult.ExitCode

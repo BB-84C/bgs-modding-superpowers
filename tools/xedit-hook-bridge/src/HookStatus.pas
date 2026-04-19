@@ -6,7 +6,7 @@ uses
   HookSession;
 
 procedure WriteLoadStatus(const Session: THookSession; const Status: string; const Detail: string);
-procedure WriteModuleSelectionStatus(const Session: THookSession; const Status: string; const Detail: string; const SelectionDetected: LongBool; const SelectionConfirmed: LongBool; const SelectionMethod: string; const SelectedModules: string; const ForcedDependencies: string; const BlockedExclusions: string);
+procedure WriteModuleSelectionStatus(const Session: THookSession; const Status: string; const Detail: string; const SelectionDetected: LongBool; const SelectionConfirmed: LongBool; const SelectedModules: string; const Diagnostics: string = '');
 
 implementation
 
@@ -115,50 +115,55 @@ begin
     Result := 'false';
 end;
 
-procedure WriteStatusLines(const Session: THookSession; const StatusPath: string; const Status: string; const Detail: string; const SelectionDetected: LongBool; const SelectionConfirmed: LongBool; const SelectionMethod: string; const SelectedModules: string; const ForcedDependencies: string; const BlockedExclusions: string; const IncludeSelectionState: Boolean);
+procedure WriteStatusLines(const Session: THookSession; const StatusPath: string; const Status: string; const Detail: string; const SelectionDetected: LongBool; const SelectionConfirmed: LongBool; const SelectedModules: string; const Diagnostics: string; const IncludeSelectionState: Boolean);
 var
   Lines: TStringList;
+  DiagnosticLines: TStringList;
+  DiagnosticIndex: Integer;
 begin
   Lines := TStringList.Create;
   try
     Lines.Add('status=' + Status);
     Lines.Add('session_id=' + Session.SessionId);
-    Lines.Add('load_mode=' + Session.LoadMode);
-    if Session.Plugins <> '' then
-      Lines.Add('plugins=' + Session.Plugins);
     if IncludeSelectionState then
     begin
       Lines.Add('selection_detected=' + BoolToStatusValue(SelectionDetected));
       Lines.Add('selection_confirmed=' + BoolToStatusValue(SelectionConfirmed));
-      if SelectionMethod <> '' then
-        Lines.Add('selection_method=' + SelectionMethod);
       if SelectedModules <> '' then
         Lines.Add('selected_modules=' + SelectedModules);
-      if ForcedDependencies <> '' then
-        Lines.Add('forced_dependencies=' + ForcedDependencies);
-      if BlockedExclusions <> '' then
-        Lines.Add('blocked_exclusions=' + BlockedExclusions);
     end;
     if Detail <> '' then
       Lines.Add('detail=' + Detail);
+    if Diagnostics <> '' then
+    begin
+      DiagnosticLines := TStringList.Create;
+      try
+        DiagnosticLines.Text := Diagnostics;
+        for DiagnosticIndex := 0 to DiagnosticLines.Count - 1 do
+          if Trim(DiagnosticLines[DiagnosticIndex]) <> '' then
+            Lines.Add(DiagnosticLines[DiagnosticIndex]);
+      finally
+        DiagnosticLines.Free;
+      end;
+    end;
     Lines.SaveToFile(StatusPath);
   finally
     Lines.Free;
   end;
 end;
 
-procedure WriteStatusFile(const Session: THookSession; const Status: string; const Detail: string; const SelectionDetected: LongBool; const SelectionConfirmed: LongBool; const SelectionMethod: string; const SelectedModules: string; const ForcedDependencies: string; const BlockedExclusions: string; const IncludeSelectionState: Boolean);
+procedure WriteStatusFile(const Session: THookSession; const Status: string; const Detail: string; const SelectionDetected: LongBool; const SelectionConfirmed: LongBool; const SelectedModules: string; const Diagnostics: string; const IncludeSelectionState: Boolean);
 var
   StatusPath: string;
   FallbackPath: string;
 begin
   StatusPath := GetHookStatusPath(Session);
   try
-    WriteStatusLines(Session, StatusPath, Status, Detail, SelectionDetected, SelectionConfirmed, SelectionMethod, SelectedModules, ForcedDependencies, BlockedExclusions, IncludeSelectionState);
+    WriteStatusLines(Session, StatusPath, Status, Detail, SelectionDetected, SelectionConfirmed, SelectedModules, Diagnostics, IncludeSelectionState);
   except
     FallbackPath := GetFallbackStatusPath(Session);
     if not SameText(FallbackPath, StatusPath) then
-      WriteStatusLines(Session, FallbackPath, Status, Detail, SelectionDetected, SelectionConfirmed, SelectionMethod, SelectedModules, ForcedDependencies, BlockedExclusions, IncludeSelectionState)
+      WriteStatusLines(Session, FallbackPath, Status, Detail, SelectionDetected, SelectionConfirmed, SelectedModules, Diagnostics, IncludeSelectionState)
     else
       raise;
   end;
@@ -166,12 +171,12 @@ end;
 
 procedure WriteLoadStatus(const Session: THookSession; const Status: string; const Detail: string);
 begin
-  WriteStatusFile(Session, Status, Detail, False, False, '', '', '', '', False);
+  WriteStatusFile(Session, Status, Detail, False, False, '', '', False);
 end;
 
-procedure WriteModuleSelectionStatus(const Session: THookSession; const Status: string; const Detail: string; const SelectionDetected: LongBool; const SelectionConfirmed: LongBool; const SelectionMethod: string; const SelectedModules: string; const ForcedDependencies: string; const BlockedExclusions: string);
+procedure WriteModuleSelectionStatus(const Session: THookSession; const Status: string; const Detail: string; const SelectionDetected: LongBool; const SelectionConfirmed: LongBool; const SelectedModules: string; const Diagnostics: string = '');
 begin
-  WriteStatusFile(Session, Status, Detail, SelectionDetected, SelectionConfirmed, SelectionMethod, SelectedModules, ForcedDependencies, BlockedExclusions, True);
+  WriteStatusFile(Session, Status, Detail, SelectionDetected, SelectionConfirmed, SelectedModules, Diagnostics, True);
 end;
 
 end.

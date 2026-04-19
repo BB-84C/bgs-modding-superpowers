@@ -42,61 +42,89 @@ function ConvertTo-XeditCliOptionMap {
     return $options
 }
 
-function Get-XeditCliNormalizedSelectionPolicy {
+function Get-XeditCliDefaultPluginsFilePath {
+    param(
+        [string]$GameMode
+    )
+
+    $directoryName = switch ($GameMode) {
+        'Fallout4' { 'Fallout4' }
+        'Skyrim' { 'Skyrim' }
+        'SkyrimSE' { 'Skyrim Special Edition' }
+        'Starfield' { 'Starfield' }
+        default { $null }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($directoryName)) {
+        return $null
+    }
+
+    return Join-Path (Join-Path $env:LOCALAPPDATA $directoryName) 'plugins.txt'
+}
+
+function Get-XeditCliMo2ProfilePluginsFilePath {
+    param(
+        [string]$Profile,
+        [string]$SandboxRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Profile)) {
+        return $null
+    }
+
+    $resolvedSandboxRoot = if ([string]::IsNullOrWhiteSpace($SandboxRoot)) {
+        Get-XeditCliDefaultMo2SandboxRoot
+    }
+    else {
+        $SandboxRoot
+    }
+
+    return Join-Path (Join-Path (Join-Path $resolvedSandboxRoot 'profiles') $Profile) 'plugins.txt'
+}
+
+function Get-XeditCliUnsupportedLegacyLaunchOptions {
     param(
         [hashtable]$Options
     )
 
-    $loadMode = $null
-    if ($Options.ContainsKey("--load-mode")) {
-        $loadMode = [string]$Options["--load-mode"]
+    $unsupportedOptions = @()
+    foreach ($optionName in @('--load-mode', '--plugin')) {
+        if ($Options.ContainsKey($optionName)) {
+            $unsupportedOptions += $optionName
+        }
     }
 
-    if ([string]::IsNullOrWhiteSpace($loadMode)) {
-        Write-Host "Missing required options: --load-mode"
-        return $null
-    }
+    return $unsupportedOptions
+}
 
-    $normalizedLoadMode = $loadMode.Trim().ToLowerInvariant()
-    if (@("all", "only", "exclude") -notcontains $normalizedLoadMode) {
-        Write-Host "Unsupported load mode: $loadMode. Supported load modes: all, only, exclude"
-        return $null
-    }
+function Get-XeditCliResolvedPluginSource {
+    param(
+        [hashtable]$Options,
+        [string]$GameMode,
+        [string]$MoProfile,
+        [string]$SandboxRoot
+    )
 
-    $plugins = @()
-    if ($Options.ContainsKey("--plugin")) {
-        $plugins = @($Options["--plugin"])
-    }
-
-    $deduplicatedPlugins = @()
-    $seenPlugins = @{}
-    foreach ($plugin in $plugins) {
-        if ([string]::IsNullOrWhiteSpace([string]$plugin)) {
-            Write-Host "Plugin names must be non-empty filenames"
+    $pluginsFilePath = $null
+    if ($Options.ContainsKey('--plugins-file')) {
+        $pluginsFilePath = [string]$Options['--plugins-file']
+        if ([string]::IsNullOrWhiteSpace($pluginsFilePath)) {
+            Write-Host 'Plugins file path must be non-empty'
             return $null
         }
-
-        if ($seenPlugins.ContainsKey($plugin)) {
-            continue
-        }
-
-        $seenPlugins[$plugin] = $true
-        $deduplicatedPlugins += $plugin
     }
 
-    if ($normalizedLoadMode -eq "all" -and $deduplicatedPlugins.Count -gt 0) {
-        Write-Host "Load mode 'all' does not accept --plugin"
+    $profilePluginFilePath = Get-XeditCliMo2ProfilePluginsFilePath -Profile $MoProfile -SandboxRoot $SandboxRoot
+    if ([string]::IsNullOrWhiteSpace($profilePluginFilePath)) {
+        $profilePluginFilePath = Get-XeditCliDefaultPluginsFilePath -GameMode $GameMode
+    }
+
+    try {
+        return Resolve-XeditCliPluginSource -PluginFilePath $pluginsFilePath -ProfilePluginFilePath $profilePluginFilePath
+    }
+    catch {
+        Write-Host $_.Exception.Message
         return $null
-    }
-
-    if (@("only", "exclude") -contains $normalizedLoadMode -and $deduplicatedPlugins.Count -eq 0) {
-        Write-Host "Load mode '$normalizedLoadMode' requires at least one --plugin"
-        return $null
-    }
-
-    return [pscustomobject]@{
-        LoadMode = $normalizedLoadMode
-        Plugins = $deduplicatedPlugins
     }
 }
 
