@@ -18,3 +18,4 @@ tools/xedit-hook-bridge/src/*.dll
 tools/xedit-hook-bridge/src/*.dproj.local
 tools/xedit-hook-bridge/src/*.identcache
 tools/xedit-hook-bridge/src/*.res
+/.external-resource
