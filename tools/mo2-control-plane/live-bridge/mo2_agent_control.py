@@ -39,7 +39,23 @@ RUNTIME_PIPE_NAME_OVERRIDE = None
 RUNTIME_STATUS_FILE = "status.json"
 RUNTIME_CAPABILITIES_FILE = "capabilities.json"
 RUNTIME_ENDPOINT_FILE = "endpoint.json"
+BLOCKER_EVENTS_FILE = "blocker-events.jsonl"
 PROTOCOL_VERSION = "1"
+
+KNOWN_BLOCKER_DIALOGS = (
+    {
+        "type": "unlock",
+        "title": "ModOrganizer",
+        "textPrefix": "Mod Organizer is locked while the application is running.\n",
+        "buttons": ("Unlock",),
+    },
+    {
+        "type": "exit-now",
+        "title": "ModOrganizer",
+        "textPrefix": "Mod Organizer is waiting on an application to close before exiting.\n",
+        "buttons": ("Exit Now", "Cancel"),
+    },
+)
 
 NAMED_PIPE_BUFFER_SIZE = 4096
 NAMED_PIPE_PREFIX = "\\\\.\\pipe\\"
@@ -120,6 +136,11 @@ KERNEL32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
 KERNEL32.TerminateProcess.restype = ctypes.c_int
 
 _ACTIVE_NAMED_PIPE_TRANSPORTS: list[dict[str, object]] = []
+_SEEN_BLOCKER_DIALOG_FINGERPRINTS: dict[str, set[str]] = {
+    "handled": set(),
+    "ignored": set(),
+    "failed": set(),
+}
 
 
 class MainThreadCall:
@@ -417,6 +438,200 @@ def import_qt_core_module():
     raise RuntimeError("Organizer-backed launches require PyQt5/PyQt6 QtCore for main-thread pumping")
 
 
+def import_qt_widgets_module():
+    """Import a QtWidgets module compatible with the MO2 Python host."""
+
+    for module_name in ("PyQt6.QtWidgets", "PyQt5.QtWidgets"):
+        try:
+            module = __import__(module_name, fromlist=["QApplication", "QDialog", "QPushButton"])
+        except ImportError:
+            continue
+
+        if all(hasattr(module, name) for name in ("QApplication", "QDialog", "QPushButton")):
+            return module
+
+    raise RuntimeError("Blocker dialog watcher requires PyQt5/PyQt6 QtWidgets")
+
+
+def extract_dialog_snapshot(dialog):
+    """Return the normalized snapshot used for whitelist matching."""
+
+    qt_widgets = import_qt_widgets_module()
+    buttons = [str(button.text()) for button in dialog.findChildren(qt_widgets.QPushButton)]
+    return {
+        "title": str(dialog.windowTitle() or ""),
+        "text": str(dialog.text() or ""),
+        "buttons": buttons,
+    }
+
+
+def find_button_by_text(dialog, expected_text):
+    """Return the first dialog button with an exact text match."""
+
+    qt_widgets = import_qt_widgets_module()
+    for button in dialog.findChildren(qt_widgets.QPushButton):
+        if str(button.text()) == str(expected_text):
+            return button
+
+    return None
+
+
+def is_dialog_candidate(dialog):
+    """Return True only for visible top-level Qt dialogs."""
+
+    qt_widgets = import_qt_widgets_module()
+    if not isinstance(dialog, qt_widgets.QDialog):
+        return False
+
+    try:
+        if not bool(dialog.isVisible()):
+            return False
+    except Exception:
+        return False
+
+    for attribute_name in ("windowTitle", "text", "findChildren"):
+        try:
+            attribute = getattr(dialog, attribute_name)
+        except Exception:
+            return False
+
+        if not callable(attribute):
+            return False
+
+    return True
+
+
+def build_dialog_fingerprint(snapshot):
+    """Build a stable fingerprint for one dialog appearance."""
+
+    return json.dumps(
+        {
+            "title": str(snapshot.get("title") or ""),
+            "text": str(snapshot.get("text") or ""),
+            "buttons": [str(button) for button in list(snapshot.get("buttons") or [])],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def create_blocker_event(snapshot, *, result: str, source: str, matched_dialog=None):
+    """Build one persisted blocker-event record from a dialog snapshot."""
+
+    event = {
+        "type": str((matched_dialog or {}).get("type") or result),
+        "title": str(snapshot.get("title") or ""),
+        "text": str(snapshot.get("text") or ""),
+        "buttons": [str(button) for button in list(snapshot.get("buttons") or [])],
+        "result": str(result),
+        "source": str(source),
+    }
+    if matched_dialog is not None and matched_dialog.get("type") is not None:
+        event["matchedType"] = str(matched_dialog["type"])
+
+    return event
+
+
+def handle_known_blocker_dialog(dialog, runtime_root=None) -> str:
+    """Click the whitelisted blocker dialog action button once when matched."""
+
+    snapshot = extract_dialog_snapshot(dialog)
+    matched_dialog = match_blocker_dialog(snapshot["title"], snapshot["text"], snapshot["buttons"])
+    if matched_dialog is None:
+        append_blocker_event(
+            runtime_root,
+            create_blocker_event(snapshot, result="ignored", source="candidate-dialog"),
+        )
+        return "ignored"
+
+    expected_button_text = matched_dialog["buttons"][0]
+    button = find_button_by_text(dialog, expected_button_text)
+    if button is None:
+        append_blocker_event(
+            runtime_root,
+            create_blocker_event(
+                snapshot,
+                result="failed",
+                source="matched-dialog",
+                matched_dialog=matched_dialog,
+            ),
+        )
+        return "failed"
+
+    try:
+        button.click()
+    except Exception:
+        append_blocker_event(
+            runtime_root,
+            create_blocker_event(
+                snapshot,
+                result="failed",
+                source="matched-dialog",
+                matched_dialog=matched_dialog,
+            ),
+        )
+        return "failed"
+
+    append_blocker_event(
+        runtime_root,
+        create_blocker_event(
+            snapshot,
+            result="handled",
+            source="matched-dialog",
+            matched_dialog=matched_dialog,
+        ),
+    )
+    return "handled"
+
+
+def scan_for_known_blocker_dialogs(runtime_root=None) -> int:
+    """Scan visible top-level dialogs and handle strict whitelist matches only once per appearance."""
+
+    qt_widgets = import_qt_widgets_module()
+    application = qt_widgets.QApplication.instance()
+    if application is None:
+        return 0
+
+    current_fingerprints = set()
+    handled_count = 0
+    outcome_groups = tuple(_SEEN_BLOCKER_DIALOG_FINGERPRINTS.values())
+    for widget in application.topLevelWidgets():
+        if not is_dialog_candidate(widget):
+            continue
+
+        snapshot = extract_dialog_snapshot(widget)
+        fingerprint = build_dialog_fingerprint(snapshot)
+        current_fingerprints.add(fingerprint)
+        if any(fingerprint in fingerprints for fingerprints in outcome_groups):
+            continue
+
+        outcome = handle_known_blocker_dialog(widget, runtime_root=runtime_root)
+        if outcome == "handled":
+            _SEEN_BLOCKER_DIALOG_FINGERPRINTS["handled"].add(fingerprint)
+            handled_count += 1
+        elif outcome == "failed":
+            _SEEN_BLOCKER_DIALOG_FINGERPRINTS["failed"].add(fingerprint)
+        else:
+            _SEEN_BLOCKER_DIALOG_FINGERPRINTS["ignored"].add(fingerprint)
+
+    for outcome_name, fingerprints in _SEEN_BLOCKER_DIALOG_FINGERPRINTS.items():
+        _SEEN_BLOCKER_DIALOG_FINGERPRINTS[outcome_name] = fingerprints.intersection(current_fingerprints)
+
+    return handled_count
+
+
+def install_blocker_watcher_timer(runtime_root=None, interval_ms=100):
+    """Install a Qt timer that scans for whitelisted blocker dialogs."""
+
+    qt_core = import_qt_core_module()
+    application = qt_core.QCoreApplication.instance()
+    timer = qt_core.QTimer(application) if application is not None else qt_core.QTimer()
+    timer.setInterval(interval_ms)
+    timer.timeout.connect(lambda: scan_for_known_blocker_dialogs(runtime_root=runtime_root))
+    timer.start()
+    return timer
+
+
 def install_main_thread_pump_timer(main_thread_pump: MainThreadCallPump, interval_ms: int = 10):
     """Install a Qt timer that drains queued calls on the plugin main thread."""
 
@@ -494,6 +709,51 @@ def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def get_blocker_events_path(runtime_root: str | Path | None = None) -> Path:
+    """Return the runtime blocker-event log path."""
+
+    root = Path(runtime_root) if runtime_root is not None else get_runtime_root()
+    return root / BLOCKER_EVENTS_FILE
+
+
+def match_blocker_dialog(title, text, buttons):
+    """Return the whitelisted blocker dialog descriptor or None."""
+
+    normalized_title = str(title or "")
+    normalized_text = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    normalized_buttons = tuple(str(button) for button in (buttons or []))
+
+    for candidate in KNOWN_BLOCKER_DIALOGS:
+        if normalized_title != candidate["title"]:
+            continue
+
+        if normalized_buttons != tuple(candidate["buttons"]):
+            continue
+
+        if not normalized_text.startswith(str(candidate["textPrefix"])):
+            continue
+
+        return {
+            "type": candidate["type"],
+            "title": normalized_title,
+            "text": normalized_text,
+            "buttons": list(normalized_buttons),
+        }
+
+    return None
+
+
+def append_blocker_event(runtime_root, event):
+    """Append one blocker event record to the runtime JSONL log."""
+
+    blocker_events_path = get_blocker_events_path(runtime_root)
+    blocker_events_path.parent.mkdir(parents=True, exist_ok=True)
+    with blocker_events_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(dict(event), ensure_ascii=False) + "\n")
+
+    return blocker_events_path
 
 
 def create_launch_registry() -> dict[str, dict[str, dict[str, object]]]:
@@ -1224,6 +1484,7 @@ class Mo2AgentControlPlugin(mobase.IPluginTool):
         self._organizer = None
         self._main_thread_pump = None
         self._main_thread_timer = None
+        self._blocker_watcher_timer = None
         self._transport = None
 
     def init(self, organizer) -> bool:
@@ -1231,6 +1492,7 @@ class Mo2AgentControlPlugin(mobase.IPluginTool):
         self._main_thread_pump = MainThreadCallPump()
         self._main_thread_timer = install_main_thread_pump_timer(self._main_thread_pump)
         runtime_root = publish_runtime_bootstrap()
+        self._blocker_watcher_timer = install_blocker_watcher_timer(runtime_root)
         self._transport = start_transport(
             runtime_root,
             organizer=organizer,

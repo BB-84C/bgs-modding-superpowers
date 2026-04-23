@@ -4,6 +4,8 @@ This document describes the controlled live xEdit invocation established in the 
 
 The runtime target is `xedit-cli -> control plane -> mo2-vfs-launcher -> xEdit`. xedit-cli should launch through the MO2 control plane, with mo2-vfs-launcher as the generic VFS-side child launcher. The control plane owns the brokered MO2 launch handshake, mo2-vfs-launcher owns the generic VFS-side child launch, MO2/usvfs owns the real plugin/file-tree semantics, and real verification uses the project-local MO2 sandbox at `.artifacts/mo2` as the authoritative real verification sandbox.
 
+For agent/bash automation, the preferred entrypoint is `xedit-cli process launch --mo-profile <name>`. That organizer-backed path returns prompt launch metadata (`xedit-pid`, launch artifacts, backend) while xEdit continues running under MO2. Direct raw `ModOrganizer.exe -p <profile> run -e "OpenCode xEdit Automation Serve"` may still keep the caller shell occupied even when the MO2-side GUI blocker is no longer the thing failing.
+
 ## Phase 1 Launch Arguments
 
 The wrapper should reach xEdit only through the control plane chain rather than relying on a manually opened session.

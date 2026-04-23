@@ -38,6 +38,13 @@
 - Scope stays tight in this slice: the named-pipe round-trip now covers `system.*` plus harmless `launch.*` process control. Real `usvfs`-aware launch behavior remains for later slices.
 - The endpoint stays local-only; do not treat it as a remote service.
 
+## Agent-Safe Launch Guidance
+
+- The MO2-side blocker handling now targets the known `Unlock` and `Exit Now` dialogs inside the live bridge.
+- For automation, prefer organizer-backed control-plane launches that return a PID/artifact response immediately instead of waiting on a raw shell wrapper.
+- The practical bash-safe path for xEdit is `pwsh -NoProfile -File tools/xedit-cli/bin/xedit-cli.ps1 process launch --launcher-path <xEdit.exe> --game-mode Fallout4 --mo-profile Default`.
+- Treat raw `ModOrganizer.exe -p <profile> run -e ...` commands as diagnostic/manual seams; they can still tie up the calling shell even when MO2 itself no longer remains blocked.
+
 ## Verify Plugin Load
 
 1. Start `.artifacts/mo2/ModOrganizer.exe`.

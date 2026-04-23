@@ -12,6 +12,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $liveMo2Root = "D:\awesome-bgs-mod-master\.artifacts\mo2"
 $liveRepoRoot = (Split-Path (Split-Path $liveMo2Root -Parent) -Parent)
 $mo2ExecutablePath = Join-Path $liveMo2Root "ModOrganizer.exe"
+$modOrganizerIniPath = Join-Path $liveMo2Root "ModOrganizer.ini"
 $pluginsRoot = Join-Path $liveMo2Root "plugins"
 $moInterfaceLogPath = Join-Path $liveMo2Root "logs\mo_interface.log"
 $bridgePath = Join-Path $pluginsRoot "mo2_agent_control.py"
@@ -106,6 +107,19 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw "Deploying the live bridge into the real sandbox should succeed."
         }
+    }
+
+    if (-not (Test-Path $modOrganizerIniPath -PathType Leaf)) {
+        throw "Missing live sandbox MO2 configuration: $modOrganizerIniPath"
+    }
+
+    $modOrganizerIni = Get-Content -Path $modOrganizerIniPath -Raw
+    if ($modOrganizerIni -notmatch '(?m)^lock_gui=false$') {
+        throw "Live sandbox should keep lock_gui=false in ModOrganizer.ini"
+    }
+
+    if ($modOrganizerIni -match '(?m)^lock_gui=true$') {
+        throw "Live sandbox should not regress to lock_gui=true in ModOrganizer.ini"
     }
 
     $moInterfaceLogBaseline = if (Test-Path $moInterfaceLogPath -PathType Leaf) {
