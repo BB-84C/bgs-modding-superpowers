@@ -42,7 +42,7 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 | test session guide | Scaffolded | `skills/test-session-guide/SKILL.md` defines test-session outputs but not yet automated orchestration. |
 | modpack dev log workflow | Scaffolded | `skills/write-dev-log/SKILL.md` plus `templates/modpack/dev-log-template.md` and `templates/modpack/dev-log-index-template.md` are ready as durable workflow assets. |
 | release changelog workflow | Scaffolded | `skills/write-release-changelog/SKILL.md` plus `templates/modpack/release-changelog-template.md` are present. |
-| xedit-cli | Specified | `tools/xedit-cli/README.md` and `tools/xedit-cli/CONTRACT.md` define a read-only-first wrapper contract. |
+| native xEdit outer client | Foundation in place | tools/mo2-vfs-launcher/xedit-client.ps1 launches native xEdit automation under MO2 and preserves session/plugin-file/launch artifacts. |
 | MCP integrations | Specified | `mcps/xedit-readonly.md`, `mcps/nexus-metadata.md`, `mcps/loot-metadata.md`, and `mcps/translation-memory.md` hold planned integration contracts. |
 | knowledge base/research distillation | Foundation in place | The repo layout reserves `knowledge/` for promoted guidance and `research/summaries/` for source-derived findings, including future game-specific risk notes, mod-quality heuristics, and localization glossary strategy. |
 | safety hooks | Foundation in place | `hooks/runtime-compatibility.md`, `hooks/repo-cleanliness.md`, `hooks/scope-guard.md`, and `hooks/dev-log-reminder.md` provide baseline safety checks. |
@@ -51,7 +51,7 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 ## Phase Ladder
 
 1. Phase 0 bootstrap foundation: repository layout, standards, scaffold docs, hook specs, skill shells, templates, contracts, and bootstrap verification.
-2. Phase 1 read-only xEdit conflict inspection vertical slice: deliver the first real workflow through `conflict-auditor` backed by the `xedit-cli` contract.
+2. Phase 1 read-only xEdit conflict inspection vertical slice: deliver the first real workflow through `conflict-auditor` backed by the native xEdit outer client boundary in `tools/mo2-vfs-launcher/xedit-client.md`.
 3. Phase 2 file/archive reasoning and install planning: connect install planning to archive precedence, overwrite reasoning, and controlled incremental installation.
 4. Phase 3 mod evaluation and intake: make the front-end selection workflow usable before deeper automation expands.
 5. Phase 4 modpack dev-log workflow: turn internal decision capture into a real maintained workflow rather than a template-only asset.
@@ -64,7 +64,7 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 ## Dependency / Blocker Map
 
 - OpenCode plugin format blocks final OpenCode packaging and install metadata beyond the bootstrap notes already in `.opencode/`.
-- The first real xEdit workflow depends on a safe read-only bridge between `skills/conflict-auditor/SKILL.md`, `tools/xedit-cli/CONTRACT.md`, and `mcps/xedit-readonly.md`.
+- The first real xEdit workflow depends on a safe read-only bridge between `skills/conflict-auditor/SKILL.md`, the native xEdit outer client boundary in `tools/mo2-vfs-launcher/xedit-client.md`, and `mcps/xedit-readonly.md`.
 - Release changelog workflow depends on a real dev-log workflow first, or it will have no trustworthy internal source of truth.
 - Localization should follow stable install/conflict/test flows so translation work is applied to a reasonably settled baseline.
 - Metadata integrations should come after conflict truth, not before; source metadata is useful, but it cannot replace actual conflict inspection.
@@ -76,9 +76,9 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 ## Not Yet Real
 
 - There is no functioning plugin package yet.
-- There are no working command entrypoints yet.
+- There are no working command entrypoints for the OpenCode plugin yet.
 - There are no real MCP adapters yet.
-- There is no real xEdit wrapper yet.
+- There is no completed read-only xEdit conflict-inspection workflow yet.
 - There is no usable end-to-end curator workflow yet.
 - There is no save-safety automation yet.
 - There is no write-capable patch generation yet.
@@ -96,7 +96,7 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 - Core workflow skill scaffolds exist, including `skills/conflict-auditor/SKILL.md` and the related curator workflow skills.
 - Safety baseline hooks are present in `hooks/runtime-compatibility.md`, `hooks/repo-cleanliness.md`, `hooks/scope-guard.md`, and `hooks/dev-log-reminder.md`.
 - Durable documentation templates already ship in `templates/modpack/dev-log-template.md`, `templates/modpack/dev-log-index-template.md`, and `templates/modpack/release-changelog-template.md`.
-- Read-only tool and integration contracts already exist in `tools/xedit-cli/CONTRACT.md` and `mcps/xedit-readonly.md`.
+- Read-only tool and integration contracts already exist in `tools/mo2-vfs-launcher/xedit-client.md` and `mcps/xedit-readonly.md`.
 - Bootstrap verification is already wired through `tests/bootstrap/verify-foundation.ps1` and `tests/bootstrap/verify-all.ps1`.
 
 ## Current Focus
@@ -113,5 +113,6 @@ Recommended next target: the first real workflow, specifically read-only xEdit c
 - `docs/plans/2026-04-10-roadmap-refresh.md` for the implementation steps behind this roadmap refresh.
 - `templates/README.md` for shipped template resources.
 - `tools/README.md` for implementation code and automation placement.
+- `tools/mo2-vfs-launcher/xedit-client.md` for the native xEdit outer-client boundary.
 - `mcps/README.md` for MCP specs and contracts only.
 - `tests/README.md` for bootstrap verification and future test coverage direction.

@@ -4,12 +4,11 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\")).Path
 
 $requiredPaths = @(
     "tools/README.md",
-    "tools/xedit-cli/README.md",
-    "tools/xedit-cli/CONTRACT.md",
-    "tools/xedit-cli/live-integration.md",
     "tools/mo2-vfs-launcher/mo2-vfs-launcher.ps1",
     "tools/mo2-vfs-launcher/mo2-vfs-launcher.cmd",
     "tools/mo2-vfs-launcher/README.md",
+    "tools/mo2-vfs-launcher/xedit-client.ps1",
+    "tools/mo2-vfs-launcher/xedit-client.md",
     "tools/mo2-control-plane/README.md",
     "tools/mo2-control-plane/live-integration.md",
     "tools/mo2-control-plane/live-bridge/README.md",
@@ -52,206 +51,22 @@ function Assert-ContainsNone {
     }
 }
 
-$xeditReadme = Get-Content (Join-Path $repoRoot "tools/xedit-cli/README.md") -Raw
-Assert-ContainsAll -Content $xeditReadme -Label 'tools/xedit-cli/README.md' -Phrases @(
-    "wrapper",
-    "orchestrates upstream xEdit",
-    "keep xEdit external",
-    'xedit-cli -> control plane -> mo2-vfs-launcher -> xEdit',
-    'launch through the MO2 control plane',
-    'mo2-vfs-launcher as the generic VFS-side child launcher',
-    'MO2/usvfs owns the real plugin/file-tree semantics',
-    'hook.dll owns only xEdit in-process automation',
-    '.artifacts/mo2',
-    'authoritative real verification sandbox',
-    'approved step-1 target contract',
-    "step-1 hook bridge",
-    "Module Selection",
-    'single `load` semantic',
-    'session-scoped `plugins.txt`',
-    'xEdit native `-P:` seam',
-    'real MO2 profile `plugins.txt` remains untouched',
-    'auto-confirm and diagnostics only',
-    "MO2-backed",
-    "source of truth for full plugin order",
-    'caller provides or implies the plugin set for the launch',
-    "no-fork",
-    "hook.dll",
-    "launcher path",
-    'require authoritative `--game-mode`',
-    'primary trust and control signal',
-    'maps `Fallout4` to `-FO4`, `Skyrim` to `-TES5`, `SkyrimSE` to `-SSE`, and `Starfield` to `-SF1`',
-    '`-FO4`',
-    '`-TES5`',
-    '`-SSE`',
-    '`-SF1`',
-    'diagnostic only',
-    "PID-based",
-    "target contract",
-    "conflict indexing",
-    "inspection",
-    "SQLite-backed",
-    "drilldown"
-)
-
-Assert-ContainsNone -Content $xeditReadme -Label 'tools/xedit-cli/README.md' -Phrases @(
-    '--load-mode',
-    'all|only|exclude',
-    'repeatable `--plugin`',
-    '`all` forbids `--plugin`',
-    '`only` and `exclude` require at least one repeatable `--plugin` argument',
-    '`only`/`exclude`',
-    'selection_method=model-layer',
-    'blocked_exclusions',
-    'small xEdit-side patch',
-    'no-fork path with a different seam'
-)
-
-$contract = Get-Content (Join-Path $repoRoot "tools/xedit-cli/CONTRACT.md") -Raw
-foreach ($heading in @(
-    '## Goals',
-    '## Read-Only Commands',
-    '## Future Write Commands',
-    '## Safety Rules',
-    '### `xedit-cli doctor env`',
-    '### `xedit-cli conflicts index`',
-    '### `xedit-cli conflicts inspect`',
-    '### `xedit-cli process launch`',
-    '### `xedit-cli process status`',
-    '### `xedit-cli process wait`',
-    '### `xedit-cli process stop`'
-)) {
-    if ($contract -notmatch [regex]::Escape($heading)) {
-        throw "xedit-cli contract is missing heading: $heading"
-    }
-}
-
-Assert-ContainsAll -Content $contract -Label 'xedit-cli contract' -Phrases @(
-    'target contract',
-    'xedit-cli -> control plane -> mo2-vfs-launcher -> xEdit',
-    'launch through the MO2 control plane',
-    'mo2-vfs-launcher as the generic VFS-side child launcher',
-    'MO2/usvfs owns the real plugin/file-tree semantics',
-    'hook.dll owns only xEdit in-process automation',
-    '.artifacts/mo2',
-    'authoritative real verification sandbox',
-    'step-1 hook bridge',
-    'Module Selection',
-    'single `load` semantic',
-    'session-scoped `plugins.txt`',
-    'xEdit native `-P:` seam',
-    'real MO2 profile `plugins.txt` remains untouched',
-    'auto-confirm and diagnostics only',
-    'source of truth for full plugin order',
-    'caller provides or implies the plugin set for the launch',
-    'no-fork',
-    'hook.dll',
-    'route xEdit launch through the MO2 control plane',
-    'caller-provided launcher path',
-    'launcher path',
-    'raw PID',
-    'MO2 discovery outside the CLI',
-    'Current-slice implementation:',
-    '--launcher-path',
-    '--game-mode',
-    '--xedit-pid',
-    'require authoritative `--game-mode`',
-    'primary trust and control signal',
-    'authoritative `--game-mode`',
-    'explicit mapped mode argument instead of filename inference',
-    '`Fallout4 -> -FO4`, `Skyrim -> -TES5`, `SkyrimSE -> -SSE`, and `Starfield -> -SF1`',
-    'maps supported game modes to explicit xEdit mode arguments',
-    '`SkyrimSE` to `-SSE`',
-    'diagnostic only',
-    'simple `.bat`/`.cmd` wrappers',
-    'complex wrappers fail closed',
-    'later Phase 1 work',
-    'Target flow:',
-    'Target command surface:'
-)
-
-Assert-ContainsNone -Content $contract -Label 'xedit-cli contract' -Phrases @(
-    '--load-mode',
-    'all|only|exclude',
-    'repeatable `--plugin`',
-    '`all` forbids `--plugin`',
-    '`only` and `exclude` require at least one repeatable `--plugin` argument',
-    'Plugin names must match the MO2-backed active set',
-    '`only` preserves MO2 order among requested roots',
-    '`exclude` starts from the MO2-backed active set',
-    '`only`/`exclude`',
-    'model layer',
-    'AllModules',
-    'SelectFlag',
-    'SimulateLoad',
-    'selection_method=model-layer',
-    'blocked_exclusions',
-    'small xEdit-side patch',
-    'no-fork path with a different seam'
-)
-
-if ($contract -match [regex]::Escape('launcher arguments')) {
-    throw 'xedit-cli contract should use launcher path wording instead of launcher arguments'
-}
-
-$liveIntegration = Get-Content (Join-Path $repoRoot "tools/xedit-cli/live-integration.md") -Raw
-Assert-ContainsAll -Content $liveIntegration -Label 'tools/xedit-cli/live-integration.md' -Phrases @(
-    'later Phase 1 work',
-    'xedit-cli -> control plane -> mo2-vfs-launcher -> xEdit',
-    'launch through the MO2 control plane',
-    'mo2-vfs-launcher as the generic VFS-side child launcher',
-    'MO2/usvfs owns the real plugin/file-tree semantics',
-    'hook.dll owns only xEdit in-process automation',
-    '.artifacts/mo2',
-    'authoritative real verification sandbox',
-    'step-1 hook bridge',
-    'Module Selection',
-    'single `load` semantic',
-    'session-scoped `plugins.txt`',
-    'xEdit native `-P:` seam',
-    'real MO2 profile `plugins.txt` remains untouched',
-    'auto-confirm and diagnostics only',
-    'source of truth for full plugin order',
-    'caller provides or implies the plugin set for the launch',
-    'no-fork',
-    'hook.dll',
-    'caller-provided launcher path',
-    'raw PID',
-    'raw PID outputs',
-    'require authoritative `--game-mode`',
-    'primary trust and control signal',
-    'direct `.exe` launchers',
-    '`Fallout4 -> -FO4`, `Skyrim -> -TES5`, `SkyrimSE -> -SSE`, and `Starfield -> -SF1`',
-    '`SkyrimSE` to `-SSE`',
-    'diagnostic only',
-    'The first live `conflicts index` launch path requires both `--launcher-path` and authoritative `--game-mode`',
-    'launched process exits non-zero',
-    'normalized to explicit launch commands',
-    'complex wrappers fail closed'
-)
-
-Assert-ContainsNone -Content $liveIntegration -Label 'tools/xedit-cli/live-integration.md' -Phrases @(
-    '--load-mode',
-    'all|only|exclude',
-    'repeatable `--plugin`',
-    '`all` forbids `--plugin`',
-    '`only` and `exclude` require repeatable `--plugin` args',
-    'plugin names must match the MO2-backed active set',
-    '`exclude` starts from the MO2-backed active set',
-    'subset results preserve MO2 order',
-    '`only`/`exclude`',
-    'model layer',
-    'AllModules',
-    'SelectFlag',
-    'SimulateLoad',
-    'selection_method=model-layer',
-    'blocked_exclusions',
-    'small xEdit-side patch',
-    'no-fork path with a different seam'
+$xeditClientDoc = Get-Content (Join-Path $repoRoot "tools/mo2-vfs-launcher/xedit-client.md") -Raw
+Assert-ContainsAll -Content $xeditClientDoc -Label 'tools/mo2-vfs-launcher/xedit-client.md' -Phrases @(
+    'xedit-client.ps1',
+    'MO2-facing outer client for native xEdit automation',
+    'It does not own records, conflicts, jobs, scripts, or patch semantics.',
+    'native xEdit in `D:\TES5Edit-contrib`',
+    'session-scoped `plugins.txt` generation',
+    'game-mode and launcher normalization',
+    'MO2/control-plane launch',
+    'native serve readiness detection',
+    'native automation-call request/response artifact handling',
+    'PID lifecycle'
 )
 
 $mo2LauncherReadme = Get-Content (Join-Path $repoRoot "tools/mo2-vfs-launcher/README.md") -Raw
-foreach ($phrase in @(
+Assert-ContainsAll -Content $mo2LauncherReadme -Label 'tools/mo2-vfs-launcher/README.md' -Phrases @(
     'target path',
     '--target-path',
     'environment injection',
@@ -262,73 +77,60 @@ foreach ($phrase in @(
     '--wait-mode',
     'failure behavior',
     'writes a failed state',
-    'MO2 `run -e OpenCodeVfsLauncher`'
-)) {
-    if ($mo2LauncherReadme -notmatch [regex]::Escape($phrase)) {
-        throw "tools/mo2-vfs-launcher/README.md is missing phrase: $phrase"
-    }
-}
+    'MO2 `run -e OpenCodeVfsLauncher`',
+    '## xEdit outer client',
+    'xedit-client.ps1',
+    'MO2-facing client for native xEdit automation',
+    'generic launcher remains tool-agnostic',
+    'neighboring outer-client layer'
+)
 
 $toolsReadme = Get-Content (Join-Path $repoRoot "tools/README.md") -Raw
-foreach ($phrase in @(
+Assert-ContainsAll -Content $toolsReadme -Label 'tools/README.md' -Phrases @(
     'MO2 control plane',
     'broker CLI',
-    'plugin kernel'
-)) {
-    if ($toolsReadme -notmatch [regex]::Escape($phrase)) {
-        throw "tools/README.md is missing phrase: $phrase"
-    }
-}
+    'plugin kernel',
+    'generic VFS launcher',
+    'xEdit outer client layer'
+)
 
 $controlPlaneReadme = Get-Content (Join-Path $repoRoot "tools/mo2-control-plane/README.md") -Raw
-foreach ($phrase in @(
+Assert-ContainsAll -Content $controlPlaneReadme -Label 'tools/mo2-control-plane/README.md' -Phrases @(
     'control plane',
     'broker CLI',
     'plugin kernel'
-)) {
-    if ($controlPlaneReadme -notmatch [regex]::Escape($phrase)) {
-        throw "tools/mo2-control-plane/README.md is missing phrase: $phrase"
-    }
-}
+)
 
 $brokerReadme = Get-Content (Join-Path $repoRoot "tools/mo2-control-plane/broker/README.md") -Raw
-foreach ($phrase in @(
+Assert-ContainsAll -Content $brokerReadme -Label 'tools/mo2-control-plane/broker/README.md' -Phrases @(
     'broker CLI',
     'capability discovery',
     'session/artifact'
-)) {
-    if ($brokerReadme -notmatch [regex]::Escape($phrase)) {
-        throw "tools/mo2-control-plane/broker/README.md is missing phrase: $phrase"
-    }
-}
+)
 
 $pluginReadme = Get-Content (Join-Path $repoRoot "tools/mo2-control-plane/plugin/README.md") -Raw
-foreach ($phrase in @(
+Assert-ContainsAll -Content $pluginReadme -Label 'tools/mo2-control-plane/plugin/README.md' -Phrases @(
     'plugin kernel',
     'capability discovery',
     'safe-read'
-)) {
-    if ($pluginReadme -notmatch [regex]::Escape($phrase)) {
-        throw "tools/mo2-control-plane/plugin/README.md is missing phrase: $phrase"
-    }
-}
+)
 
 $controlPlaneLiveIntegration = Get-Content (Join-Path $repoRoot "tools/mo2-control-plane/live-integration.md") -Raw
-foreach ($phrase in @(
+Assert-ContainsAll -Content $controlPlaneLiveIntegration -Label 'tools/mo2-control-plane/live-integration.md' -Phrases @(
     '.artifacts/mo2/',
     '.external-resource/Mod.Organizer-2.5.3dev7.exe',
     'endpoint',
     'usvfs',
     'instance-specific',
-    'mutex'
-)) {
-    if ($controlPlaneLiveIntegration -notmatch [regex]::Escape($phrase)) {
-        throw "tools/mo2-control-plane/live-integration.md is missing phrase: $phrase"
-    }
-}
+    'mutex',
+    'pwsh -NoProfile -File tools/mo2-vfs-launcher/xedit-client.ps1 process launch --launcher-path <xedit.exe> --game-mode Fallout4 --mo-profile Default'
+)
+Assert-ContainsNone -Content $controlPlaneLiveIntegration -Label 'tools/mo2-control-plane/live-integration.md' -Phrases @(
+    'tools/xedit-cli/bin/xedit-cli.ps1 process launch'
+)
 
 $liveBridgeReadme = Get-Content (Join-Path $repoRoot "tools/mo2-control-plane/live-bridge/README.md") -Raw
-foreach ($phrase in @(
+Assert-ContainsAll -Content $liveBridgeReadme -Label 'tools/mo2-control-plane/live-bridge/README.md' -Phrases @(
     'live bridge',
     '.artifacts/mo2/plugins/',
     '.artifacts/mo2/plugins/mo2_agent_control.py',
@@ -336,49 +138,15 @@ foreach ($phrase in @(
     'scaffold-only',
     'instance-specific',
     'named-pipe server'
-)) {
-    if ($liveBridgeReadme -notmatch [regex]::Escape($phrase)) {
-        throw "tools/mo2-control-plane/live-bridge/README.md is missing phrase: $phrase"
-    }
-}
+)
 
 $controlPlaneDesign = Get-Content (Join-Path $repoRoot "docs/plans/2026-04-16-mo2-agent-control-plane-design.md") -Raw
-foreach ($phrase in @(
+Assert-ContainsAll -Content $controlPlaneDesign -Label 'MO2 control-plane design' -Phrases @(
     'control plane',
     'plugin kernel',
     'broker CLI',
     'capability discovery',
     'session/artifact'
-)) {
-    if ($controlPlaneDesign -notmatch [regex]::Escape($phrase)) {
-        throw "MO2 control-plane design is missing phrase: $phrase"
-    }
-}
-
-if ($contract -match [regex]::Escape('validates the caller-provided launcher path and game mode before a scan starts')) {
-    throw 'xedit-cli contract should not describe launcher-path validation as the current implementation before Task 2 lands'
-}
-
-foreach ($check in @(
-    @{ Content = $xeditReadme; Pattern = '(?i)step 1 adds|the CLI loads a no-fork `hook\.dll` bridge'; Message = 'tools/xedit-cli/README.md should frame the hook material as target-contract language, not shipped behavior' },
-    @{ Content = $contract; Pattern = '(?i)Step 1 extends that launch contract with a step-1 hook bridge\.'; Message = 'xedit-cli contract should frame step 1 as a target contract, not an already-shipped extension' },
-    @{ Content = $liveIntegration; Pattern = '(?i)Step 1 adds a step-1 hook bridge'; Message = 'tools/xedit-cli/live-integration.md should frame step 1 as a target contract, not shipped behavior' },
-    @{ Content = $xeditReadme; Pattern = '(?i)direct(?:ly)?\s+launch(?:es|ing)?\s+xedit|launch(?:es|ing)?\s+xedit\s+itself|provided launcher with the explicit mapped mode argument'; Message = 'tools/xedit-cli/README.md should not drift back to direct xEdit launch semantics' },
-    @{ Content = $contract; Pattern = '(?i)direct(?:ly)?\s+launch(?:es|ing)?\s+xedit|launch(?:es|ing)?\s+xedit\s+itself|provided launcher with the explicit mapped mode argument'; Message = 'xedit-cli contract should not drift back to direct xEdit launch semantics' },
-    @{ Content = $liveIntegration; Pattern = '(?i)direct(?:ly)?\s+launch(?:es|ing)?\s+xedit|launch(?:es|ing)?\s+xedit\s+itself|provided launcher with the explicit mapped mode argument'; Message = 'tools/xedit-cli/live-integration.md should not drift back to direct xEdit launch semantics' },
-    @{ Content = $xeditReadme; Pattern = '(?i)real verification uses the project-local MO2 sandbox at `\.artifacts/mo2`\.'; Message = 'tools/xedit-cli/README.md should frame .artifacts/mo2 as the authoritative real verification sandbox' },
-    @{ Content = $contract; Pattern = '(?i)real verification uses the project-local MO2 sandbox at `\.artifacts/mo2`\.'; Message = 'xedit-cli contract should frame .artifacts/mo2 as the authoritative real verification sandbox' },
-    @{ Content = $liveIntegration; Pattern = '(?i)real verification uses the project-local MO2 sandbox at `\.artifacts/mo2`\.'; Message = 'tools/xedit-cli/live-integration.md should frame .artifacts/mo2 as the authoritative real verification sandbox' },
-    @{ Content = $xeditReadme; Pattern = '(?i)optional\s+`?--game-mode`?|optional\s+game\s+mode|--game-mode\s+may\s+be\s+omitted|`--game-mode`\s+can\s+be\s+omitted'; Message = 'tools/xedit-cli/README.md should not describe --game-mode as optional' },
-    @{ Content = $contract; Pattern = '(?i)optional\s+`?--game-mode`?|optional\s+game\s+mode|--game-mode\s+may\s+be\s+omitted|`--game-mode`\s+can\s+be\s+omitted'; Message = 'xedit-cli contract should not describe --game-mode as optional' },
-    @{ Content = $liveIntegration; Pattern = '(?i)optional\s+`?--game-mode`?|optional\s+game\s+mode|--game-mode\s+may\s+be\s+omitted|`--game-mode`\s+can\s+be\s+omitted'; Message = 'tools/xedit-cli/live-integration.md should not describe --game-mode as optional' },
-    @{ Content = $xeditReadme; Pattern = '(?i)executable-name\s+inference|filename-based\s+inference|infer.*FO4Edit|infer.*SSEEdit|infer.*SF1Edit|infer.*launcher\s+path|infer.*launcher\s+name|auto-detect.*launcher\s+name|derive.*basename'; Message = 'tools/xedit-cli/README.md should not drift toward filename inference' },
-    @{ Content = $contract; Pattern = '(?i)executable-name\s+inference|filename-based\s+inference|infer.*FO4Edit|infer.*SSEEdit|infer.*SF1Edit|infer.*launcher\s+path|infer.*launcher\s+name|auto-detect.*launcher\s+name|derive.*basename'; Message = 'xedit-cli contract should not drift toward filename inference' },
-    @{ Content = $liveIntegration; Pattern = '(?i)executable-name\s+inference|filename-based\s+inference|infer.*FO4Edit|infer.*SSEEdit|infer.*SF1Edit|infer.*launcher\s+path|infer.*launcher\s+name|auto-detect.*launcher\s+name|derive.*basename'; Message = 'tools/xedit-cli/live-integration.md should not drift toward filename inference' }
-)) {
-    if ($check.Content -match $check.Pattern) {
-        throw $check.Message
-    }
-}
+)
 
 Write-Host "Spec bootstrap checks passed."

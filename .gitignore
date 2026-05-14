@@ -11,11 +11,4 @@ docs/initial_pormpt.pdf
 Thumbs.db
 Desktop.ini
 
-# Delphi build artifacts
-tools/xedit-hook-bridge/src/__recovery/
-tools/xedit-hook-bridge/src/*.dcu
-tools/xedit-hook-bridge/src/*.dll
-tools/xedit-hook-bridge/src/*.dproj.local
-tools/xedit-hook-bridge/src/*.identcache
-tools/xedit-hook-bridge/src/*.res
 /.external-resource

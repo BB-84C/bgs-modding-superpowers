@@ -35,6 +35,20 @@ function Assert-ContainsSignals {
     }
 }
 
+function Assert-ContainsNoSignals {
+    param(
+        [string]$SectionName,
+        [string]$Content,
+        [string[]]$Signals
+    )
+
+    foreach ($signal in $Signals) {
+        if ($Content -match [regex]::Escape($signal)) {
+            throw "$SectionName contains stale signal: $signal"
+        }
+    }
+}
+
 function Assert-MatchesAnyConcept {
     param(
         [string]$SectionName,
@@ -229,7 +243,7 @@ Assert-ContainsSignals -SectionName "docs/roadmap.md capability map" -Content $c
     "conflict auditor",
     "localization assistant",
     "test session guide",
-    "xedit-cli",
+    "native xEdit outer client",
     "safety hooks"
 )
 
@@ -267,10 +281,16 @@ Assert-ContainsSignals -SectionName "docs/roadmap.md phase ladder" -Content $pha
     "Phase 0",
     "Phase 9",
     "xEdit",
+    "native xEdit outer client",
     "localization",
     "dev-log",
     "release changelog",
     "packaging"
+)
+
+Assert-ContainsNoSignals -SectionName "docs/roadmap.md phase ladder" -Content $phaseLadderSection -Signals @(
+    "`xedit-cli` contract",
+    "tools/xedit-cli/CONTRACT.md"
 )
 
 Assert-ContainsPattern -SectionName "docs/roadmap.md phase ladder" -Content $phaseLadderSection -Pattern "Phase\s+0"
@@ -283,8 +303,15 @@ if ($phaseMatches.Count -lt 10) {
 
 Assert-ContainsSignals -SectionName "docs/roadmap.md dependency map" -Content $dependencySection -Signals @(
     "xEdit",
+    "native xEdit outer client",
+    "tools/mo2-vfs-launcher/xedit-client.md",
     "MCP",
     "localization"
+)
+
+Assert-ContainsNoSignals -SectionName "docs/roadmap.md dependency map" -Content $dependencySection -Signals @(
+    "`xedit-cli` contract",
+    "tools/xedit-cli/CONTRACT.md"
 )
 
 Assert-ContainsConceptFamilies -SectionName "docs/roadmap.md dependency map" -Content $dependencySection -Families @(
@@ -299,7 +326,7 @@ Assert-ContainsSignals -SectionName "docs/roadmap.md not yet real section" -Cont
     "no functioning plugin package",
     "no working command entrypoints",
     "no real MCP adapters",
-    "no real xEdit wrapper",
+    "no completed read-only xEdit conflict-inspection workflow",
     "no usable end-to-end curator workflow",
     "no save-safety automation",
     "no write-capable patch generation"
@@ -323,7 +350,7 @@ Assert-ContainsSignals -SectionName "docs/roadmap.md completed foundations secti
     "skills/conflict-auditor/SKILL.md",
     "hooks/runtime-compatibility.md",
     "templates/modpack/dev-log-template.md",
-    "tools/xedit-cli/CONTRACT.md",
+    "tools/mo2-vfs-launcher/xedit-client.md",
     "mcps/xedit-readonly.md",
     "tests/bootstrap/verify-all.ps1"
 )
@@ -339,6 +366,7 @@ Assert-ContainsSignals -SectionName "docs/roadmap.md supporting docs section" -C
     "docs/standards/repo-hygiene.md",
     "templates/README.md",
     "tools/README.md",
+    "tools/mo2-vfs-launcher/xedit-client.md",
     "mcps/README.md",
     "tests/README.md"
 )

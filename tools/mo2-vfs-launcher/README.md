@@ -53,3 +53,7 @@ Probe usage:
 ```powershell
 pwsh -NoProfile -File .\tools\mo2-vfs-launcher\mo2-vfs-probe.ps1 --path .\tools\mo2-vfs-launcher\some-target.ps1 --result-path .\probe-result.json
 ```
+
+## xEdit outer client
+
+`xedit-client.ps1` lives beside the generic launcher and provides the MO2-facing client for native xEdit automation. The generic launcher remains tool-agnostic; xEdit-specific process and request logic belongs in the neighboring outer-client layer.
