@@ -44,7 +44,7 @@ export interface EnvelopeOk extends EnvelopeBase {
   ok: true;
   data?: unknown;
   changed?: ChangedSet;
-  status?: EnvelopeStatus;
+  status?: Exclude<EnvelopeStatus, "refused">;
   snapshotId?: string;
   dirty?: { files: string[]; unsavedChangeCount: number };
   readback?: { kind: "snapshot" | "resource"; ref: string };
@@ -56,6 +56,7 @@ export interface EnvelopeOk extends EnvelopeBase {
 export interface EnvelopeRefusal extends EnvelopeBase {
   ok: false;
   code: McpErrorCode;
+  status?: "refused";
   severity?: Severity;
   hint?: string;
   rationale?: string;

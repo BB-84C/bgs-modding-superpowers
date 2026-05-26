@@ -19,4 +19,24 @@ describe("types", () => {
     expect(ok.ok).toBe(true);
     expect(bad.ok).toBe(false);
   });
+
+  it("Envelope narrows so refusal-only fields are inaccessible on ok branch", () => {
+    const refusal: Envelope = {
+      ok: false, tool: "x", summary: "s", warnings: [],
+      code: "invalid_request", hint: "h",
+    };
+    if (!refusal.ok) {
+      // code is reachable on the refusal branch
+      expect(refusal.code).toBe("invalid_request");
+    }
+
+    const success: Envelope = { ok: true, tool: "x", summary: "s", warnings: [] };
+    if (success.ok) {
+      // @ts-expect-error code does not exist on EnvelopeOk
+      success.code;
+      // @ts-expect-error hint does not exist on EnvelopeOk
+      success.hint;
+    }
+    expect(success.ok).toBe(true);
+  });
 });
