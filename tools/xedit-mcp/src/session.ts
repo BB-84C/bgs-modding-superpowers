@@ -11,13 +11,18 @@ export interface BuildContextOptions {
 export async function buildContext(opts: BuildContextOptions): Promise<ToolContext> {
   const { adapter, sessionId } = opts;
 
-  const describeRes = await adapter.call({ command: "system.describe", args: {} });
-  const capsRes = await adapter.call({ command: "system.capabilities", args: {} });
-  const filesRes = await adapter.call({ command: "files.list", args: {} });
+  const [describeRes, capsRes, filesRes] = await Promise.all([
+    adapter.call({ command: "system.describe", args: {} }),
+    adapter.call({ command: "system.capabilities", args: {} }),
+    adapter.call({ command: "files.list", args: {} }),
+  ]);
 
   const describe = describeRes.ok ? (describeRes.result as Record<string, unknown>) : {};
   const caps = capsRes.ok ? (capsRes.result as Record<string, unknown>) : {};
-  const files = filesRes.ok ? (filesRes.result as { files?: string[] }) : { files: [] };
+  const filesResult = filesRes.ok ? (filesRes.result as { files?: unknown }) : {};
+  const loadOrder = Array.isArray(filesResult.files)
+    ? (filesResult.files as unknown[]).filter((f): f is string => typeof f === "string")
+    : [];
 
   const supports = (caps.supports ?? {}) as Record<string, unknown>;
 
@@ -33,7 +38,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ToolConte
     sessionId,
     daemonPid: opts.daemonPid,
     mcpModeActive: opts.mcpModeActive ?? false,
-    loadOrder: files.files ?? [],
+    loadOrder,
     consentEnabled: supports.iKnowWhatImDoing === true,
     capabilities,
   };
