@@ -10,6 +10,12 @@ describe("capabilities digest", () => {
     expect(CAPABILITIES_DIGEST.groups.length).toBeGreaterThanOrEqual(7);
   });
 
+  it("has the expected total command count and no duplicates", () => {
+    const cmds = allDigestCommands();
+    expect(cmds.length).toBe(49);
+    expect(new Set(cmds).size).toBe(49); // no duplicate command names
+  });
+
   it("enumerates the read-only commands needed for Batch 1 (W2 conflict audit)", () => {
     const cmds = new Set(allDigestCommands());
     [
