@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { writeFile, readFile, mkdir } from "node:fs/promises";
+import { writeFile, readFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -45,37 +45,59 @@ export interface PowershellAdapterOptions {
  */
 export function createPowershellAdapter(opts: PowershellAdapterOptions): DaemonAdapter {
   const pwsh = opts.pwshExe ?? "pwsh";
+  const timeoutSeconds = opts.timeoutSeconds ?? 30;
+  if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+    throw new Error(`Invalid timeoutSeconds: ${opts.timeoutSeconds}. Must be a positive finite number.`);
+  }
   return {
     async call({ command, args, requestId }: DaemonCall): Promise<NativeEnvelope> {
       const scratch = opts.scratchDir ?? join(tmpdir(), "xedit-mcp-calls");
       await mkdir(scratch, { recursive: true });
-      const id = requestId ?? randomUUID();
-      const reqPath = join(scratch, `${id}.req.json`);
-      const resPath = join(scratch, `${id}.res.json`);
-      const request: Record<string, unknown> = { command, args: args ?? {}, requestId: id };
+      const fileId = randomUUID();
+      const reqPath = join(scratch, `${fileId}.req.json`);
+      const resPath = join(scratch, `${fileId}.res.json`);
+      const request: Record<string, unknown> = {
+        command,
+        args: args ?? {},
+        requestId: requestId ?? fileId,
+      };
       if (opts.mcpToken) request.mcpToken = opts.mcpToken;
-      await writeFile(reqPath, JSON.stringify(request), "utf8");
 
-      await runPwsh(pwsh, [
-        "-NoProfile",
-        "-File",
-        opts.clientScript,
-        // Subcommand discovered from xedit-client.ps1 dispatch.
-        "automation",
-        "call",
-        // Flag names verified against xedit-client.call.ps1 param block.
-        "--xedit-pid",
-        String(opts.pid),
-        "--request-file",
-        reqPath,
-        "--response-file",
-        resPath,
-        "--timeout-seconds",
-        String(opts.timeoutSeconds ?? 30),
-      ]);
+      try {
+        await writeFile(reqPath, JSON.stringify(request), "utf8");
 
-      const raw = await readFile(resPath, "utf8");
-      return JSON.parse(raw) as NativeEnvelope;
+        await runPwsh(pwsh, [
+          "-NoProfile",
+          "-File",
+          opts.clientScript,
+          // Subcommand discovered from xedit-client.ps1 dispatch.
+          "automation",
+          "call",
+          // Flag names verified against xedit-client.call.ps1 param block.
+          "--xedit-pid",
+          String(opts.pid),
+          "--request-file",
+          reqPath,
+          "--response-file",
+          resPath,
+          "--timeout-seconds",
+          String(timeoutSeconds),
+        ]);
+
+        const raw = await readFile(resPath, "utf8");
+        try {
+          return JSON.parse(raw) as NativeEnvelope;
+        } catch (parseErr) {
+          throw new Error(
+            `Daemon response at ${resPath} was not valid JSON: ${(parseErr as Error).message}. ` +
+              `First 200 bytes: ${raw.slice(0, 200)}`,
+          );
+        }
+      } finally {
+        // Best-effort cleanup so the token-bearing request file never lingers.
+        await unlink(reqPath).catch(() => {});
+        await unlink(resPath).catch(() => {});
+      }
     },
   };
 }
@@ -83,12 +105,24 @@ export function createPowershellAdapter(opts: PowershellAdapterOptions): DaemonA
 function runPwsh(pwsh: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(pwsh, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
     let stderr = "";
+    child.stdout.on("data", (d) => (stdout += d.toString()));
     child.stderr.on("data", (d) => (stderr += d.toString()));
     child.on("error", reject);
     child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`xedit-client.ps1 exited ${code}: ${stderr.slice(0, 500)}`));
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const tail = (s: string) => s.trim().slice(-500);
+      reject(
+        new Error(
+          `xedit-client.ps1 exited ${code}.\n` +
+            (stderr ? `[stderr] ${tail(stderr)}\n` : "") +
+            (stdout ? `[stdout] ${tail(stdout)}\n` : ""),
+        ),
+      );
     });
   });
 }

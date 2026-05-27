@@ -19,4 +19,43 @@ describe("daemon adapter (mock contract)", () => {
     if (res.ok) throw new Error("expected error");
     expect(res.error.code).toBe("unknown_command");
   });
+
+  describe("createPowershellAdapter validation", () => {
+    it("throws on non-positive timeoutSeconds at construction time", async () => {
+      const { createPowershellAdapter } = await import("../../src/daemon-adapter.js");
+      expect(() =>
+        createPowershellAdapter({
+          clientScript: "x",
+          pid: 1,
+          timeoutSeconds: 0,
+        }),
+      ).toThrow(/Invalid timeoutSeconds/);
+      expect(() =>
+        createPowershellAdapter({
+          clientScript: "x",
+          pid: 1,
+          timeoutSeconds: -5,
+        }),
+      ).toThrow(/Invalid timeoutSeconds/);
+      expect(() =>
+        createPowershellAdapter({
+          clientScript: "x",
+          pid: 1,
+          timeoutSeconds: Number.POSITIVE_INFINITY,
+        }),
+      ).toThrow(/Invalid timeoutSeconds/);
+    });
+
+    it("accepts a valid timeoutSeconds and omitted default", async () => {
+      const { createPowershellAdapter } = await import("../../src/daemon-adapter.js");
+      expect(() => createPowershellAdapter({ clientScript: "x", pid: 1 })).not.toThrow();
+      expect(() =>
+        createPowershellAdapter({
+          clientScript: "x",
+          pid: 1,
+          timeoutSeconds: 60,
+        }),
+      ).not.toThrow();
+    });
+  });
 });
