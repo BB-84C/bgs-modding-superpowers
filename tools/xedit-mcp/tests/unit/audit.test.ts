@@ -11,7 +11,8 @@ describe("audit logger", () => {
   });
 
   it("writes one JSONL line per record under YYYY-MM-DD.jsonl", async () => {
-    const logger = createAuditLogger({ baseDir: dir });
+    const fixedDate = new Date("2026-05-26T12:34:56.789Z");
+    const logger = createAuditLogger({ baseDir: dir, now: () => fixedDate });
     await logger.append({
       tool: "xedit_session",
       argsHash: "abc123",
@@ -26,8 +27,7 @@ describe("audit logger", () => {
       code: "rule_LOAD001",
     });
 
-    const today = new Date().toISOString().slice(0, 10);
-    const filePath = join(dir, `${today}.jsonl`);
+    const filePath = join(dir, "2026-05-26.jsonl");
     expect(existsSync(filePath)).toBe(true);
 
     const lines = readFileSync(filePath, "utf8").trim().split("\n");
@@ -35,7 +35,7 @@ describe("audit logger", () => {
     const first = JSON.parse(lines[0]);
     expect(first.tool).toBe("xedit_session");
     expect(first.ok).toBe(true);
-    expect(typeof first.ts).toBe("string");
+    expect(first.ts).toBe("2026-05-26T12:34:56.789Z");
     const second = JSON.parse(lines[1]);
     expect(second.code).toBe("rule_LOAD001");
   });
@@ -55,5 +55,19 @@ describe("audit logger", () => {
     });
     await logger.append({ tool: "x", argsHash: "h", decision: "ok", ok: true });
     expect(errors.length).toBe(1);
+  });
+
+  it("logger-owned ts overrides any caller-provided ts field", async () => {
+    const fixedDate = new Date("2026-05-26T01:02:03.000Z");
+    const logger = createAuditLogger({ baseDir: dir, now: () => fixedDate });
+    // Caller maliciously passes ts; logger's ts must win.
+    await logger.append({
+      tool: "x", argsHash: "h", decision: "ok", ok: true,
+      ...({ ts: "1999-01-01T00:00:00.000Z" } as Record<string, unknown>),
+    });
+    const filePath = join(dir, "2026-05-26.jsonl");
+    const line = readFileSync(filePath, "utf8").trim();
+    const parsed = JSON.parse(line);
+    expect(parsed.ts).toBe("2026-05-26T01:02:03.000Z");
   });
 });
