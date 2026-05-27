@@ -5,7 +5,7 @@ import { defaultRegistry } from "../../src/rules/registry.js";
 import { createAuditLogger } from "../../src/audit.js";
 import { makeMockAdapter } from "../fixtures/daemon-mock.js";
 import type { ToolContext } from "../../src/types.js";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -77,5 +77,27 @@ describe("pipeline.compose.runTool", () => {
     });
     if (env.ok) throw new Error("expected refusal");
     expect(env.code).toBe("rule_LOAD001");
+  });
+
+  it("catches unexpected throws → internal_error envelope + writes audit line", async () => {
+    const throwingAdapter = {
+      async call(): Promise<never> { throw new Error("boom"); },
+    };
+    const errDir = mkdtempSync(join(tmpdir(), "xedit-mcp-compose-err-"));
+    const errAudit = createAuditLogger({ baseDir: errDir });
+    const env = await runTool(spec, {
+      args: { file: "Patch.esp", formId: "0x012345" },
+      ctx, adapter: throwingAdapter, registry, audit: errAudit,
+    });
+    if (env.ok) throw new Error("expected refusal");
+    expect(env.code).toBe("internal_error");
+    expect(env.hint).toBe("boom");
+
+    const today = new Date().toISOString().slice(0, 10);
+    const lines = readFileSync(join(errDir, `${today}.jsonl`), "utf8").trim().split("\n");
+    expect(lines.length).toBeGreaterThanOrEqual(1);
+    const last = JSON.parse(lines[lines.length - 1]);
+    expect(last.code).toBe("internal_error");
+    expect(last.tool).toBe("xedit_read_record");
   });
 });
