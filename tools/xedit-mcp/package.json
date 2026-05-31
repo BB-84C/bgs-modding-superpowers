@@ -10,9 +10,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "test": "vitest run",
+    "test": "vitest run --exclude tests/integration",
     "test:watch": "vitest",
-    "test:integration": "vitest run tests/integration",
+    "test:integration": "cross-env XEDIT_MCP_INTEGRATION=1 vitest run tests/integration",
     "typecheck": "tsc -p tsconfig.test.json --noEmit"
   },
   "dependencies": {
@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "cross-env": "^7.0.3",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
   },

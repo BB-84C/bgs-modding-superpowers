@@ -1,0 +1,8 @@
+{
+  "_help": "Three representative records for W2 acceptance. Edit if these are unstable in this MO2 instance. expectedVerdict can be 'any' to accept whatever the daemon reports (still asserts the envelope structure is valid).",
+  "records": [
+    { "file": "Fallout4.esm", "formId": "0x0000003C", "expectedVerdict": "any", "note": "TES4 header — always present; verdict typically no_conflict unless a header-override mod is loaded" },
+    { "file": "Fallout4.esm", "formId": "0x00000007", "expectedVerdict": "any", "note": "Player NPC record — often overridden by UFO4P / mods; verdict varies" },
+    { "file": "Fallout4.esm", "formId": "0x000003E9", "expectedVerdict": "any", "note": "Vanilla low-FormID record; verdict varies" }
+  ]
+}
