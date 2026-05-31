@@ -101,7 +101,47 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 
 ## Current Focus
 
-Recommended next target: the first real workflow, specifically read-only xEdit conflict inspection through `conflict-auditor`. That step exercises the most important curator signal path without committing the project to early write automation.
+Batch 1 of the xEdit skills + harness MCP track is **SHIPPED** (see closeout below). Recommended next target: Batch 2 read-only completion — fold the oracle v2 follow-ups (W2 representative matrix, full audit uniformity, manual GUI parity) into the next read-only slice, then move into the validation-job surface.
+
+## 2026-05-31 — Batch 1 closeout (xEdit Skills + Harness MCP)
+
+**Delivered**
+
+- TypeScript MCP package at `tools/xedit-mcp/` with the 7-stage harness pipeline (stages [1][2][3][6][7] live; snapshot [4] and preview [5] reserved for Batch 3).
+- Six MCP intent tools (`xedit_session`, `xedit_list_capabilities`, `xedit_find_record`, `xedit_read_record`, `xedit_inspect_conflicts`) plus `xedit_call` atomic passthrough closing the CLI-bypass hole.
+- Seed rule `LOAD001` (CRITICAL) and decoupled rule registry mechanism.
+- Append-only JSONL audit logger with a never-throws contract.
+- Curated 49-command capabilities digest, `keyArgs` independently verified against the xEdit fork source.
+- Skills layer under `.opencode/skills/`: hub `xedit-automation` + knowledgebase + W2 task skill `xedit-conflict-audit`.
+- Live W2 semantic acceptance against the MO2-backed xEdit daemon: 3/3 integration tests pass, real `caConflict` / `caOnlyOne` verdicts derived from real `conflict.all` values, real override chains and referenced_by populated.
+- Oracle re-review verdict: `accept_with_followups`.
+
+**Now known (from real implementation)**
+
+- xEdit's automation daemon writes response files as UTF-8 *with BOM* on Windows; `JSON.parse` requires the leading `0xFEFF` stripped first.
+- `system.describe` returns the friendly game label as `gameName`, not `gameMode` (which is the internal `gmFO4` token).
+- `files.list` returns an array of objects (`{name, loadOrder, fileName, isESM, ...}`), not strings.
+- The daemon rejects `0x`-prefixed FormIDs and answers `invalid_request`; MCP must strip the prefix at the edge.
+- `records.conflict_status` returns the conflict label under `result.conflict.all` using the xEdit `caXxx` enum, not as a top-level flat `result.status`.
+- `xedit-client.ps1` verified subcommand surface is `process launch | status | wait | stop` plus `automation call`, with `automation call --xedit-pid <pid> --request-file <reqPath> --response-file <resPath> --timeout-seconds <n>`. `process launch` accepts `--launcher-path / --game-mode / --mo-profile`. Codified in `AGENTS.md`.
+- The working live-test launch shape is: pre-launch MO2 with `Start-Process` (no tool arg) so the Mo2AgentControl plugin loads and writes the bootstrap files; then `xedit-client.ps1 process launch` triggers the broker's `launch.start` which runs xEdit-as-tool via `OpenCodeVfsLauncher`. Direct `ModOrganizer.exe ... run -e <tool>` against an already-running MO2 does **not** dispatch the tool.
+
+**Implications for later phases**
+
+- Batch 2 (read-only completion): reuse the formId normalization, `files.list` object-shape handling, and BOM-strip patterns already in the adapter/session/tools — do not re-derive them per tool.
+- Batch 2 must fold in oracle v2 follow-ups: representative W2 matrix (add a `breaking` fixture), audit uniformity (session + list_capabilities still don't write audit lines), and manual GUI parity evidence preservation.
+- Batch 3 (mutating jobs with snapshot + preview): the composer already supports stages [4] and [5] insertion points; the top-level try/catch in `runTool` keeps the audit + envelope shape uniform on unexpected throws.
+- Batch 3+: `save → fresh daemon restart → readback` durability semantics become mandatory before any mutating workflow can claim acceptance.
+- xEdit fork coordination (`-automation-mcp-mode` + `mcpToken` enforcement) remains the prerequisite for declaring the harness mandatory, not a Batch 1 blocker.
+
+**Carry-forwards (full list in `docs/superpowers/plans/2026-05-26-xedit-skills-and-harness-mcp-batch1.STATUS.md`)**
+
+- runRules silently discards MEDIUM findings — must surface as warnings before the first MEDIUM rule lands.
+- `precheck.targetFileFromArg` is unused after Batch 1 — decide whether to retire it or document its future use.
+- `mapVerdict` should lift to a shared `src/verdict.ts` once more record-side tools land.
+- Daemon-adapter PowerShell-hop latency (~1-2s per call) is fine for Batch 1's read-only flows but needs measurement before snapshot/preview-heavy mutating flows.
+
+The Batch 1 plan, spec, full STATUS file, and acceptance artifacts are preserved at the paths listed above.
 
 ## Supporting Docs
 
