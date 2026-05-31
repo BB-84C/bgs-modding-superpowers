@@ -28,7 +28,10 @@ export async function buildContext(opts: BuildContextOptions): Promise<ToolConte
 
   const capabilities: CapabilitiesSnapshot = {
     contractVersion: String(caps.contractVersion ?? "unknown"),
-    gameMode: String(describe.gameMode ?? "unknown"),
+    // Prefer the friendly `gameName` ("Fallout4") over the internal `gameMode`
+    // token ("gmFO4"). Fall back to gameMode for adapters/tests that only set
+    // the latter (e.g. the existing unit test mock).
+    gameMode: String(describe.gameName ?? describe.gameMode ?? "unknown"),
     commands: Array.isArray(caps.commands) ? (caps.commands as string[]) : [],
     supports,
     fetchedAt: new Date().toISOString(),

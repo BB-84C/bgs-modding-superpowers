@@ -85,12 +85,15 @@ export function createPowershellAdapter(opts: PowershellAdapterOptions): DaemonA
         ]);
 
         const raw = await readFile(resPath, "utf8");
+        // xEdit writes the response file as UTF-8 *with BOM* on Windows; strip the
+        // leading 0xFEFF so JSON.parse doesn't choke on the first byte.
+        const stripped = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
         try {
-          return JSON.parse(raw) as NativeEnvelope;
+          return JSON.parse(stripped) as NativeEnvelope;
         } catch (parseErr) {
           throw new Error(
             `Daemon response at ${resPath} was not valid JSON: ${(parseErr as Error).message}. ` +
-              `First 200 bytes: ${raw.slice(0, 200)}`,
+              `First 200 bytes: ${stripped.slice(0, 200)}`,
           );
         }
       } finally {
