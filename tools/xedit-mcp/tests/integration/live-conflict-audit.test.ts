@@ -36,7 +36,7 @@ describe.runIf(ENABLED)("W2 conflict audit — live daemon", () => {
       auditDir: resolve(ARTIFACT_DIR, "audit"),
       daemonPid: daemon.pid,
     });
-  }, 120_000);
+  }, 240_000);
 
   afterAll(async () => {
     await daemon?.stop();

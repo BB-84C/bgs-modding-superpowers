@@ -4,6 +4,16 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createPowershellAdapter, type DaemonAdapter } from "./daemon-adapter.js";
 
+/**
+ * Launch options for the broker / OpenCodeVfsLauncher path.
+ *
+ * Why this path: `xedit-client.ps1 process launch` is the canonical outer client.
+ * Internally it goes through the MO2 control-plane live bridge (which must already
+ * be running — i.e. MO2 must be alive with the Mo2AgentControl plugin loaded so the
+ * bootstrap files at `.artifacts/mo2/plugins/Mo2AgentControl/bootstrap/runtime/`
+ * exist). The harness assumption is: caller starts MO2 first, then calls
+ * `launchDaemon` to spawn the xEdit-as-tool inside that MO2 session.
+ */
 export interface LaunchOptions {
   /** Absolute path to tools/mo2-vfs-launcher/xedit-client.ps1. */
   clientScript: string;
@@ -13,7 +23,7 @@ export interface LaunchOptions {
   gameMode: string;
   /** MO2 profile name; defaults to "Default". */
   moProfile?: string;
-  /** Readiness/liveness wait budget after process launch returns; defaults to 90 seconds. */
+  /** Total wait budget for daemon-ready + plugins-loaded; defaults to 180 seconds. */
   readyTimeoutMs?: number;
   /** PowerShell executable; defaults to "pwsh". */
   pwshExe?: string;
@@ -26,19 +36,24 @@ export interface LaunchedDaemon {
 }
 
 /**
- * Launches the MO2-backed xEdit automation daemon via xedit-client.ps1.
+ * Launches the MO2-backed xEdit automation daemon via `xedit-client.ps1 process launch`
+ * and waits for both daemon readiness AND plugins-loaded confirmation.
  *
- * Flag names verified against tools/mo2-vfs-launcher/lib/xedit-client.launch.ps1:
- * - process launch: --launcher-path, --game-mode, --mo-profile
- * - process wait: --xedit-pid, --timeout-seconds
- * - process stop: --xedit-pid
+ * Flag names verified against `tools/mo2-vfs-launcher/lib/xedit-client.launch.ps1`:
+ *  - process launch: --launcher-path, --game-mode, --mo-profile
+ *  - process wait:   --xedit-pid, --timeout-seconds
+ *  - process stop:   --xedit-pid
  *
- * process launch already calls Wait-XeditClientAutomationReady before returning;
- * the follow-up process wait call is a liveness guard for the returned PID.
+ * Plugin-load wait: `process launch` returns as soon as the daemon accepts a pipe
+ * connection (system.describe ok), but xEdit may still be loading plugins. We poll
+ * `files.list` here until either it reports a non-empty load order or the deadline
+ * passes. A daemon that reports 0 plugins after the full budget is still returned —
+ * the integration test can then surface that as a semantic failure.
  */
 export async function launchDaemon(opts: LaunchOptions): Promise<LaunchedDaemon> {
   const pwsh = opts.pwshExe ?? "pwsh";
   const profile = opts.moProfile ?? "Default";
+  const deadline = Date.now() + (opts.readyTimeoutMs ?? 180_000);
 
   const launchOut = await runPwshCapture(pwsh, [
     "-NoProfile",
@@ -55,11 +70,13 @@ export async function launchDaemon(opts: LaunchOptions): Promise<LaunchedDaemon>
   ]);
 
   const pid = parseLaunchPid(launchOut);
-  if (!pid) throw new Error(`xedit-client process launch returned no pid: ${launchOut.slice(0, 600)}`);
+  if (!pid) {
+    throw new Error(`xedit-client process launch returned no pid: ${launchOut.slice(0, 600)}`);
+  }
 
-  const deadline = Date.now() + (opts.readyTimeoutMs ?? 90_000);
-  let ready = false;
-  let lastWaitError: unknown;
+  // Phase A: process wait until the daemon answers (or refuses with exited).
+  let dwReady = false;
+  let lastWaitErr: unknown;
   while (Date.now() < deadline) {
     try {
       const waitOut = await runPwshCapture(pwsh, [
@@ -74,18 +91,18 @@ export async function launchDaemon(opts: LaunchOptions): Promise<LaunchedDaemon>
         "1",
       ]);
       if (!/^status:\s*exited\s*$/im.test(waitOut)) {
-        ready = true;
+        dwReady = true;
         break;
       }
-      lastWaitError = new Error(`Daemon exited before readiness confirmation: ${waitOut.slice(0, 400)}`);
+      lastWaitErr = new Error(`Daemon exited before readiness confirmation: ${waitOut.slice(0, 400)}`);
     } catch (err) {
-      lastWaitError = err;
+      lastWaitErr = err;
     }
     await sleep(750);
   }
-  if (!ready) {
-    const detail = lastWaitError instanceof Error ? ` Last error: ${lastWaitError.message}` : "";
-    throw new Error(`Daemon not ready within ${opts.readyTimeoutMs ?? 90_000} ms (pid=${pid}).${detail}`);
+  if (!dwReady) {
+    const detail = lastWaitErr instanceof Error ? ` Last error: ${lastWaitErr.message}` : "";
+    throw new Error(`Daemon not ready within ${opts.readyTimeoutMs ?? 180_000} ms (pid=${pid}).${detail}`);
   }
 
   const adapter = createPowershellAdapter({
@@ -94,6 +111,28 @@ export async function launchDaemon(opts: LaunchOptions): Promise<LaunchedDaemon>
     scratchDir: join(tmpdir(), "xedit-mcp-calls", String(pid)),
     pwshExe: pwsh,
   });
+
+  // Phase B: poll files.list until it reports a non-empty load order.
+  // xEdit may serve the pipe before plugin load completes; this guards against the race.
+  let lastFilesCount = 0;
+  while (Date.now() < deadline) {
+    try {
+      const res = await adapter.call({ command: "files.list", args: {} });
+      if (res.ok) {
+        const files = (res.result as { files?: unknown }).files;
+        if (Array.isArray(files)) {
+          lastFilesCount = files.length;
+          if (files.length > 0) break;
+        }
+      }
+    } catch {
+      /* swallow; we'll keep polling */
+    }
+    await sleep(1_500);
+  }
+  // Note: returns even if lastFilesCount is still 0 after the budget — the caller
+  // sees an empty load order via xedit_session and the integration test fails the
+  // appropriate assertion with the empty envelope captured as semantic-RED evidence.
 
   return {
     pid,
@@ -110,7 +149,7 @@ export async function launchDaemon(opts: LaunchOptions): Promise<LaunchedDaemon>
           String(pid),
         ]);
       } catch {
-        /* best-effort shutdown for integration cleanup */
+        /* best-effort */
       }
     },
   };
@@ -130,7 +169,6 @@ function parseLaunchPid(output: string): number | undefined {
     }
     return normalizePid(launchRes.pid ?? launchRes.data?.pid ?? launchRes.result?.pid);
   }
-
   const textPid = /^xedit-pid:\s*(\d+)\s*$/im.exec(output)?.[1];
   return normalizePid(textPid);
 }
