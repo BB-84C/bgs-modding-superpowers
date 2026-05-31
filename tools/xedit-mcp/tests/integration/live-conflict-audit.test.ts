@@ -75,5 +75,5 @@ describe.runIf(ENABLED)("W2 conflict audit — live daemon", () => {
       (r) => (r as { inspect: { ok: boolean } }).inspect.ok,
     );
     expect(anyOk).toBe(true);
-  });
+  }, 60_000);
 });
