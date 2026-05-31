@@ -20,8 +20,21 @@ export async function buildContext(opts: BuildContextOptions): Promise<ToolConte
   const describe = describeRes.ok ? (describeRes.result as Record<string, unknown>) : {};
   const caps = capsRes.ok ? (capsRes.result as Record<string, unknown>) : {};
   const filesResult = filesRes.ok ? (filesRes.result as { files?: unknown }) : {};
+  // The daemon returns files as an array of objects (`{name, loadOrder, fileName, ...}`),
+  // while unit-test mocks supply a plain `string[]`. Accept both shapes and extract the
+  // canonical plugin name (preferring `name`, falling back to `fileName`).
   const loadOrder = Array.isArray(filesResult.files)
-    ? (filesResult.files as unknown[]).filter((f): f is string => typeof f === "string")
+    ? (filesResult.files as unknown[])
+        .map((f) => {
+          if (typeof f === "string") return f;
+          if (f && typeof f === "object") {
+            const obj = f as Record<string, unknown>;
+            if (typeof obj.name === "string") return obj.name;
+            if (typeof obj.fileName === "string") return obj.fileName;
+          }
+          return "";
+        })
+        .filter((s) => s.length > 0)
     : [];
 
   const supports = (caps.supports ?? {}) as Record<string, unknown>;
