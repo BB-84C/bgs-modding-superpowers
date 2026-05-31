@@ -11,8 +11,16 @@ import { runRules } from "../pipeline/rules.js";
 
 const Args = z.object({
   file: z.string().min(1),
-  formId: z.string().regex(/^0x[0-9a-fA-F]{1,8}$/),
+  // Accept both "0x0000003C" and bare "0000003C" — strip 0x before forwarding to daemon.
+  formId: z.string().regex(/^(0x)?[0-9a-fA-F]{1,8}$/),
 });
+
+/** Returns args with `formId` stripped of any leading "0x" prefix. */
+function stripFormIdPrefix(args: Record<string, unknown>): Record<string, unknown> {
+  if (typeof args.formId !== "string") return args;
+  const f = args.formId;
+  return f.startsWith("0x") || f.startsWith("0X") ? { ...args, formId: f.slice(2) } : args;
+}
 
 export type Verdict = "no_conflict" | "itpo" | "itm" | "minor" | "breaking";
 
@@ -45,10 +53,11 @@ export function makeInspectConflictsHandler(opts: InspectConflictsOptions) {
     const r = await runRules({ tool: "xedit_inspect_conflicts", args, ctx, registry: opts.registry });
     if (r) return r;
 
+    const daemonArgs = stripFormIdPrefix(args);
     const [conflict, winning, referencedBy] = await Promise.all([
-      opts.adapter.call({ command: "records.conflict_status", args }),
-      opts.adapter.call({ command: "records.winning_override", args }),
-      opts.adapter.call({ command: "records.referenced_by", args }),
+      opts.adapter.call({ command: "records.conflict_status", args: daemonArgs }),
+      opts.adapter.call({ command: "records.winning_override", args: daemonArgs }),
+      opts.adapter.call({ command: "records.referenced_by", args: daemonArgs }),
     ]);
 
     if (!conflict.ok) {

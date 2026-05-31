@@ -9,8 +9,17 @@ import { MCP_ERROR_CODES } from "../types.js";
 
 const ByFormId = z.object({
   file: z.string().min(1),
-  formId: z.string().regex(/^0x[0-9a-fA-F]{1,8}$/),
+  // Accept both "0x0000003C" and bare "0000003C" — the daemon wants no 0x prefix; we
+  // strip it before forwarding so agents can use either style.
+  formId: z.string().regex(/^(0x)?[0-9a-fA-F]{1,8}$/),
 });
+
+/** Returns args with `formId` stripped of any leading "0x" prefix. */
+function stripFormIdPrefix(args: Record<string, unknown>): Record<string, unknown> {
+  if (typeof args.formId !== "string") return args;
+  const f = args.formId;
+  return f.startsWith("0x") || f.startsWith("0X") ? { ...args, formId: f.slice(2) } : args;
+}
 const ByEditorId = z.object({
   editorId: z.string().min(1),
   signature: z.string().optional(),
@@ -45,14 +54,15 @@ export function makeFindRecordHandler(opts: FindRecordOptions) {
     }
 
     if (typeof args.formId === "string" && typeof args.file === "string") {
+      const daemonArgs = stripFormIdPrefix(args);
       return runTool(
         {
           ...findRecordSpec,
           command: "records.find_by_form_id",
-          needs: { daemon: true },
+          needs: { daemon: true, targetFileFromArg: "file" },
           shape: (result) => ({ locators: [normalizeLocator(result, args)] }),
         },
-        { args, ctx, adapter: opts.adapter, registry: opts.registry, audit: opts.audit },
+        { args: daemonArgs, ctx, adapter: opts.adapter, registry: opts.registry, audit: opts.audit },
       );
     }
 
