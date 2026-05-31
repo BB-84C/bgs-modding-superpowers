@@ -35,23 +35,22 @@ export function makeInspectConflictsHandler(opts: InspectConflictsOptions) {
   return async (args: Record<string, unknown>): Promise<Envelope> => {
     const ctx = opts.getContext();
     if (!ctx) {
-      return refuse({
+      const env = refuse({
         tool: "xedit_inspect_conflicts",
         summary: "Session not established",
         code: MCP_ERROR_CODES.STATE_VIOLATION,
         hint: "Call xedit_session first.",
       });
+      // No audit logger before session context exists.
+      return env;
     }
-
     const v = validateArgs(Args, args, { tool: "xedit_inspect_conflicts" });
-    if (v) return v;
-
+    if (v) { await auditLine(opts, "xedit_inspect_conflicts", args, v); return v; }
     // precheck uses daemon only; load-order owned by LOAD001 rule.
     const p = precheck({ tool: "xedit_inspect_conflicts", args }, { ctx, needs: { daemon: true } });
-    if (p) return p;
-
+    if (p) { await auditLine(opts, "xedit_inspect_conflicts", args, p); return p; }
     const r = await runRules({ tool: "xedit_inspect_conflicts", args, ctx, registry: opts.registry });
-    if (r) return r;
+    if (r) { await auditLine(opts, "xedit_inspect_conflicts", args, r); return r; }
 
     const daemonArgs = stripFormIdPrefix(args);
     const [conflict, winning, referencedBy] = await Promise.all([
@@ -61,37 +60,99 @@ export function makeInspectConflictsHandler(opts: InspectConflictsOptions) {
     ]);
 
     if (!conflict.ok) {
-      return refuse({
+      const env = refuse({
         tool: "xedit_inspect_conflicts",
         summary: `records.conflict_status failed: ${conflict.error.code}`,
         code: MCP_ERROR_CODES.DAEMON_ERROR,
         hint: conflict.error.message,
       });
+      await auditLine(opts, "xedit_inspect_conflicts", args, env);
+      return env;
     }
 
-    const status = String((conflict.result as { status?: string }).status ?? "unknown");
-    const verdict: Verdict = mapVerdict(status);
+    // The live daemon returns conflict information under `result.conflict.all`
+    // (xEdit `caXxx` enum). Fall back to `result.status` for unit-test mocks that
+    // still use a flat status field.
+    const conflictResult = conflict.result as {
+      conflict?: { all?: string; this?: string; participants?: unknown[] };
+      status?: string;
+    };
+    const rawStatus = String(conflictResult.conflict?.all ?? conflictResult.status ?? "unknown");
+    const verdict: Verdict = mapVerdict(rawStatus);
+    const participants = Array.isArray(conflictResult.conflict?.participants)
+      ? conflictResult.conflict.participants
+      : [];
 
-    return okEnv({
+    const env = okEnv({
       tool: "xedit_inspect_conflicts",
       summary: `verdict ${verdict} for ${String(args.formId)}`,
       status: "completed",
       data: {
         verdict,
-        rawStatus: status,
+        rawStatus,
+        participants,
         winningOverride: winning.ok ? winning.result : null,
         referencedBy: referencedBy.ok ? referencedBy.result : null,
       },
     });
+    await auditLine(opts, "xedit_inspect_conflicts", args, env);
+    return env;
   };
 }
 
+async function auditLine(
+  opts: InspectConflictsOptions,
+  tool: string,
+  args: Record<string, unknown>,
+  env: Envelope,
+) {
+  await opts.audit.append({
+    tool,
+    argsHash: simpleHash(args),
+    decision: env.ok ? "ok" : "refused",
+    ok: env.ok,
+    code: env.ok ? undefined : env.code,
+  });
+}
+
+function simpleHash(args: Record<string, unknown>): string {
+  let h = 0;
+  const s = JSON.stringify(args);
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h).toString(16);
+}
+/**
+ * Map xEdit's conflict-all enum (or legacy flat status strings) to MCP verdict.
+ *
+ * xEdit conflict-all enum (from `records.conflict_status` -> `result.conflict.all`):
+ *  - caUnknown / caOnlyOne / caNoConflict   -> no_conflict
+ *  - caITM                                  -> itm   (identical to master)
+ *  - caITPO                                 -> itpo  (identical to previous override)
+ *  - caOverride / caConflictBenign          -> minor (override present, content benign)
+ *  - caConflict                             -> minor (real semantic conflict)
+ *  - caConflictCritical                     -> breaking
+ *
+ * Legacy flat string statuses (e.g. unit-test mocks that send "no_conflict",
+ * "conflict_critical", "ITPO") are still recognized.
+ */
 function mapVerdict(status: string): Verdict {
   const s = status.toLowerCase();
-  if (s.includes("itpo")) return "itpo";
-  if (s.includes("itm")) return "itm";
-  if (s === "no_conflict" || s === "no conflict") return "no_conflict";
-  if (s.includes("critical") || s.includes("breaking")) return "breaking";
+  if (s === "caitpo" || s.includes("itpo")) return "itpo";
+  if (s === "caitm" || s.includes("itm")) return "itm";
+  if (
+    s === "caunknown" ||
+    s === "caonlyone" ||
+    s === "canoconflict" ||
+    s === "no_conflict" ||
+    s === "no conflict"
+  ) {
+    return "no_conflict";
+  }
+  if (s === "caconflictcritical" || s.includes("critical") || s.includes("breaking")) {
+    return "breaking";
+  }
+  if (s === "caoverride" || s === "caconflictbenign") return "minor";
+  if (s === "caconflict") return "minor";
   if (s.includes("conflict")) return "minor";
   return "minor";
 }

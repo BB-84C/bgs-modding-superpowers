@@ -71,9 +71,22 @@ describe.runIf(ENABLED)("W2 conflict audit — live daemon", () => {
       results.push({ fixture: r, inspect: envInspect, read: envRead });
     }
     await writeFile(resolve(ARTIFACT_DIR, "03-audit-results.json"), JSON.stringify(results, null, 2));
-    const anyOk = results.some(
-      (r) => (r as { inspect: { ok: boolean } }).inspect.ok,
-    );
-    expect(anyOk).toBe(true);
-  }, 60_000);
+    // Tightened per Task 24 oracle review (rejected 'anyOk' soft assertion):
+    //   1. every fixture must `inspect.ok && read.ok` — record_not_found is a fail
+    //   2. each verdict must be semantically derived (rawStatus not literal "unknown")
+    type FixtureResult = {
+      inspect: { ok: boolean; data?: { verdict?: string; rawStatus?: string } };
+      read: { ok: boolean };
+    };
+    const r = results as FixtureResult[];
+    const allInspectOk = r.every((x) => x.inspect.ok);
+    const allReadOk = r.every((x) => x.read.ok);
+    const allVerdictsDerived = r.every((x) => {
+      const raw = x.inspect.data?.rawStatus?.toLowerCase() ?? "unknown";
+      return raw !== "unknown";
+    });
+    expect(allInspectOk).toBe(true);
+    expect(allReadOk).toBe(true);
+    expect(allVerdictsDerived).toBe(true);
+  }, 90_000);
 });
