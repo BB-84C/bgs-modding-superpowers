@@ -78,24 +78,52 @@ export function buildServerToolset(opts: ServerToolsetOptions): ServerToolset {
   };
 }
 
-// Production entry: stdio MCP server with lazy daemon launch.
+// =============================================================================
+// Production stdio MCP server: NON-BLOCKING state machine.
+// =============================================================================
 //
-// The daemon (xEdit via MO2 control-plane) is expensive to start (~60-180s) so
-// we do not launch at server startup. Instead, the first tool call triggers
-// launchDaemon, buildServerToolset wraps the resulting adapter, and subsequent
-// calls reuse the cached toolset. The first tool call can take minutes; ensure
-// the MCP client's timeout is set generously (OpenCode plugin sets 240s).
+// Why non-blocking: launching xEdit through MO2's control plane takes 60-180s
+// because xEdit has to parse the active load order before its automation-serve
+// pipe answers. If tool calls block on that, every MCP client hits its turn
+// timeout and the agent sees a wall of errors. Instead, the server tracks
+// the daemon's lifecycle in memory and ALL tool calls return immediately.
 //
-// Launch configuration comes from env vars (preferred) or relative auto-detect
-// for the dev sandbox layout. Required for production use:
-//   BGS_XEDIT_CLIENT_SCRIPT  absolute path to tools/mo2-vfs-launcher/xedit-client.ps1
-//   BGS_XEDIT_LAUNCHER_PATH  absolute path to xEdit.exe (typically <MO2>/tools/xEdit/)
-//   BGS_XEDIT_GAME_MODE      xEdit game mode string, e.g. "Fallout4"
-//   BGS_MO2_PROFILE          optional, defaults to "Default"
+// Tool surface (9 total):
 //
-// Pre-req for any tool call to succeed: MO2 must already be running with the
-// Mo2AgentControl plugin loaded (the setting-up-bgs-modding-environment skill
-// installs the plugin; the user starts MO2 themselves).
+//   LIFECYCLE / HEALTH (3)
+//     xedit_status   pure read — returns { status: "not_started" | "starting" | "ready" | "failed", ... }
+//                    Never blocks. Never modifies state. Use this to poll.
+//     xedit_start    if not_started/failed: kick off background launch.
+//                    Returns immediately with current status.
+//     xedit_health   when ready: send system.ping through the named pipe to
+//                    confirm the daemon is still responsive (vs zombie).
+//                    Otherwise: returns the same shape as xedit_status.
+//
+//   DOMAIN TOOLS (6)
+//     xedit_session            non-blocking. If status=ready: returns the rich
+//                              session envelope. If status=not_started: auto-
+//                              kicks-off launch. Otherwise: returns current
+//                              status + hint to poll xedit_status.
+//     xedit_list_capabilities  status=ready required, otherwise fast-fail with
+//     xedit_find_record        code "not_ready". The fast-fail envelope carries
+//     xedit_read_record        the current status so the agent knows whether to
+//     xedit_inspect_conflicts  poll or kick off a launch.
+//     xedit_call
+//
+// Launch configuration:
+//   Env vars (preferred):
+//     BGS_XEDIT_CLIENT_SCRIPT  absolute path to tools/mo2-vfs-launcher/xedit-client.ps1
+//     BGS_XEDIT_LAUNCHER_PATH  absolute path to xEdit.exe (typically <MO2>/tools/xEdit/)
+//     BGS_XEDIT_GAME_MODE      xEdit game mode string, e.g. "Fallout4"
+//     BGS_MO2_PROFILE          optional, defaults to "Default"
+//   Auto-detect fallback (dev sandbox layout):
+//     <plugin-root>/tools/mo2-vfs-launcher/xedit-client.ps1
+//     <plugin-root>/.artifacts/mo2/tools/xEdit/xEdit.exe
+//
+// Pre-req for any successful launch: MO2 must already be running with the
+// Mo2AgentControl Python plugin loaded. The setting-up-bgs-modding-environment
+// skill installs the Python plugin and launches MO2 visibly via
+// scripts/start-mo2.ps1.
 
 interface ResolvedLaunchOpts extends LaunchOptions {}
 
@@ -114,8 +142,6 @@ function resolveLaunchOpts(): ResolvedLaunchOpts | { error: string } {
     };
   }
 
-  // Auto-detect: src/index.js lives at <plugin-root>/tools/xedit-mcp/dist/index.js
-  // (or src/index.ts during tests). Walk up three levels to plugin root.
   try {
     const thisFile = fileURLToPath(import.meta.url);
     const pluginRoot = resolve(dirname(thisFile), "..", "..", "..");
@@ -142,13 +168,48 @@ function resolveLaunchOpts(): ResolvedLaunchOpts | { error: string } {
 }
 
 const TOOL_DEFINITIONS = [
-  { name: "xedit_session", description: "Ensure daemon, return session summary (gameMode, loadOrderSize, daemonPid). Call first every conversation." },
-  { name: "xedit_list_capabilities", description: "Curated 49-command digest + live drift report against the daemon." },
-  { name: "xedit_find_record", description: "Locate records by {file, formId} or {editorId}." },
-  { name: "xedit_read_record", description: "Composite read: record + winning override + base record + conflict status." },
-  { name: "xedit_inspect_conflicts", description: "Conflict audit verdict (no_conflict / itpo / itm / minor / breaking) + winning + referencedBy." },
-  { name: "xedit_call", description: "Atomic passthrough for any of the 49 native daemon commands. Still traverses the full harness pipeline. Use when an intent tool does not fit." },
+  { name: "xedit_status", description: "Returns the current xEdit daemon lifecycle state without blocking. status is one of 'not_started' | 'starting' | 'ready' | 'failed'. Use this to poll while waiting for a launch." },
+  { name: "xedit_start", description: "Kicks off an asynchronous xEdit daemon launch (if not already starting/ready). Returns immediately with the current status. Subsequent xedit_status calls report progress." },
+  { name: "xedit_health", description: "When the daemon is ready, sends system.ping through the named pipe to confirm it is still responsive (catches zombie daemons). Otherwise returns the same shape as xedit_status." },
+  { name: "xedit_session", description: "Non-blocking. If the daemon is ready: returns gameMode, loadOrderSize, daemonPid. If not_started: auto-initiates launch. Otherwise: returns current status + hint to poll xedit_status." },
+  { name: "xedit_list_capabilities", description: "Requires the daemon to be ready. Returns the curated 49-command digest + live drift report. Fast-fails with code='not_ready' otherwise." },
+  { name: "xedit_find_record", description: "Requires the daemon to be ready. Locates records by {file, formId} or {editorId}. Fast-fails with code='not_ready' otherwise." },
+  { name: "xedit_read_record", description: "Requires the daemon to be ready. Composite read: record + winning override + base record + conflict status. Fast-fails with code='not_ready' otherwise." },
+  { name: "xedit_inspect_conflicts", description: "Requires the daemon to be ready. Conflict audit verdict + winning + referencedBy. Fast-fails with code='not_ready' otherwise." },
+  { name: "xedit_call", description: "Requires the daemon to be ready. Atomic passthrough for any native daemon command, still in-harness. Fast-fails with code='not_ready' otherwise." },
 ].map((t) => ({ ...t, inputSchema: { type: "object" as const, additionalProperties: true } }));
+
+// State machine
+type LaunchState =
+  | { status: "not_started" }
+  | { status: "starting"; startedAt: number }
+  | { status: "ready"; pid: number; since: number }
+  | { status: "failed"; error: string; at: number };
+
+// Helper to build the MCP CallTool response. Return type is loose so the
+// SDK's expected ServerResult shape is satisfied without import-coupling.
+function jsonResult(body: unknown, isError = false) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(body) }],
+    isError,
+  };
+}
+
+function statusFields(state: LaunchState, daemon: LaunchedDaemon | null): Record<string, unknown> {
+  const out: Record<string, unknown> = { status: state.status };
+  if (state.status === "starting") {
+    out.startedAt = state.startedAt;
+    out.elapsedSeconds = Math.round((Date.now() - state.startedAt) / 1000);
+  } else if (state.status === "ready") {
+    out.pid = state.pid;
+    out.readySince = state.since;
+    if (daemon) out.daemonPid = daemon.pid;
+  } else if (state.status === "failed") {
+    out.error = state.error;
+    out.failedAt = state.at;
+  }
+  return out;
+}
 
 export async function main(): Promise<void> {
   const server = new Server(
@@ -156,41 +217,43 @@ export async function main(): Promise<void> {
     { capabilities: { tools: {} } },
   );
 
-  let cachedToolset: ServerToolset | null = null;
-  let cachedDaemon: LaunchedDaemon | null = null;
-  let cachedFatal: string | null = null;
-  let inflightLaunch: Promise<ServerToolset | { error: string }> | null = null;
+  let state: LaunchState = { status: "not_started" };
+  let toolset: ServerToolset | null = null;
+  let daemonRef: LaunchedDaemon | null = null;
 
-  async function ensureToolset(): Promise<ServerToolset | { error: string }> {
-    if (cachedToolset) return cachedToolset;
-    if (cachedFatal) return { error: cachedFatal };
-    if (inflightLaunch) return inflightLaunch;
+  function kickoffLaunch(): { kicked: boolean; reason?: string } {
+    if (state.status === "starting") return { kicked: false, reason: "already_starting" };
+    if (state.status === "ready") return { kicked: false, reason: "already_ready" };
 
-    inflightLaunch = (async () => {
-      const opts = resolveLaunchOpts();
-      if ("error" in opts) {
-        cachedFatal = opts.error;
-        return opts;
-      }
+    const opts = resolveLaunchOpts();
+    if ("error" in opts) {
+      state = { status: "failed", error: opts.error, at: Date.now() };
+      return { kicked: false, reason: opts.error };
+    }
+
+    state = { status: "starting", startedAt: Date.now() };
+
+    // Fire-and-forget: this promise resolves in the background while tool calls
+    // return immediately. State is mutated in the closures below.
+    void (async () => {
       try {
-        cachedDaemon = await launchDaemon(opts);
-        cachedToolset = buildServerToolset({
-          adapter: cachedDaemon.adapter,
+        const daemon = await launchDaemon(opts);
+        daemonRef = daemon;
+        toolset = buildServerToolset({
+          adapter: daemon.adapter,
           sessionId: `mcp-${process.pid}-${Date.now()}`,
-          daemonPid: cachedDaemon.pid,
+          daemonPid: daemon.pid,
         });
-        return cachedToolset;
+        state = { status: "ready", pid: daemon.pid, since: Date.now() };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        // Do NOT cache transient launch failures (e.g., MO2 not running yet);
-        // let the next tool call retry.
-        return { error: `Daemon launch failed: ${msg}` };
-      } finally {
-        inflightLaunch = null;
+        state = { status: "failed", error: msg, at: Date.now() };
+        daemonRef = null;
+        toolset = null;
       }
     })();
 
-    return inflightLaunch;
+    return { kicked: true };
   }
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -201,43 +264,124 @@ export async function main(): Promise<void> {
     const name = req.params.name;
     const args = (req.params.arguments ?? {}) as Record<string, unknown>;
 
-    const tsOrErr = await ensureToolset();
-    if ("error" in tsOrErr) {
-      const envelope = {
+    // ---- LIFECYCLE / HEALTH tools (always non-blocking) ----
+
+    if (name === "xedit_status") {
+      return jsonResult({ ok: true, tool: name, data: statusFields(state, daemonRef) });
+    }
+
+    if (name === "xedit_start") {
+      const kick = kickoffLaunch();
+      const body = {
+        ok: true,
+        tool: name,
+        data: statusFields(state, daemonRef),
+        kicked: kick.kicked,
+        message: kick.kicked
+          ? "Daemon launch initiated in the background. Poll xedit_status until status='ready'."
+          : kick.reason === "already_ready"
+            ? "Daemon is already ready."
+            : kick.reason === "already_starting"
+              ? "Daemon launch already in progress. Poll xedit_status until status='ready'."
+              : (kick.reason ?? "Launch could not be initiated."),
+      };
+      return jsonResult(body);
+    }
+
+    if (name === "xedit_health") {
+      if (state.status !== "ready" || !daemonRef) {
+        return jsonResult({
+          ok: true,
+          tool: name,
+          data: { ...statusFields(state, daemonRef), responsive: false },
+          hint: state.status === "not_started"
+            ? "Daemon not started. Call xedit_start."
+            : state.status === "starting"
+              ? "Daemon still starting. Poll xedit_status."
+              : "Daemon failed to start; inspect data.error.",
+        });
+      }
+      try {
+        const ping = await daemonRef.adapter.call({ command: "system.ping", args: {} });
+        return jsonResult({
+          ok: true,
+          tool: name,
+          data: {
+            ...statusFields(state, daemonRef),
+            responsive: ping.ok === true,
+            pingEnvelope: ping,
+          },
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return jsonResult({
+          ok: true,
+          tool: name,
+          data: {
+            ...statusFields(state, daemonRef),
+            responsive: false,
+            pingError: msg,
+          },
+          hint: "Daemon claimed ready but did not respond to system.ping. It may be a zombie; consider restarting MO2.",
+        });
+      }
+    }
+
+    // ---- DOMAIN tools ----
+
+    if (name === "xedit_session") {
+      if (state.status === "ready" && toolset) {
+        try {
+          const env = await toolset.invoke("xedit_session", args);
+          return jsonResult(env, !env.ok);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return jsonResult({ ok: false, tool: name, code: "internal_error", summary: msg, hint: msg }, true);
+        }
+      }
+      // Not ready: auto-kick the launch if not yet started, then surface status.
+      if (state.status === "not_started") {
+        kickoffLaunch();
+      }
+      return jsonResult({
+        ok: true,
+        tool: name,
+        data: statusFields(state, daemonRef),
+        hint: state.status === "failed"
+          ? "Launch failed; inspect data.error. Call xedit_start to retry."
+          : "Daemon not ready yet; poll xedit_status until status='ready'.",
+      });
+    }
+
+    // Other domain tools require ready
+    if (state.status !== "ready" || !toolset) {
+      return jsonResult({
         ok: false,
         tool: name,
-        code: "launch_failed",
-        summary: tsOrErr.error,
-        hint: tsOrErr.error,
-      };
-      return {
-        content: [{ type: "text", text: JSON.stringify(envelope) }],
-        isError: true,
-      };
+        code: "not_ready",
+        summary: `Daemon is not ready (status='${state.status}').`,
+        data: statusFields(state, daemonRef),
+        hint: state.status === "not_started"
+          ? "Call xedit_start, then poll xedit_status until status='ready'."
+          : state.status === "starting"
+            ? "Launch in progress. Poll xedit_status."
+            : "Launch failed; inspect data.error. Call xedit_start to retry.",
+      }, true);
     }
 
     try {
-      const envelope = await tsOrErr.invoke(name, args);
-      return {
-        content: [{ type: "text", text: JSON.stringify(envelope) }],
-        isError: !envelope.ok,
-      };
+      const env = await toolset.invoke(name, args);
+      return jsonResult(env, !env.ok);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({ ok: false, tool: name, code: "internal_error", summary: msg, hint: msg }),
-        }],
-        isError: true,
-      };
+      return jsonResult({ ok: false, tool: name, code: "internal_error", summary: msg, hint: msg }, true);
     }
   });
 
   const shutdown = async (signal: string) => {
     process.stderr.write(`xedit-mcp received ${signal}, shutting down...\n`);
-    if (cachedDaemon) {
-      try { await cachedDaemon.stop(); } catch { /* best effort */ }
+    if (daemonRef) {
+      try { await daemonRef.stop(); } catch { /* best effort */ }
     }
     process.exit(0);
   };
@@ -247,11 +391,9 @@ export async function main(): Promise<void> {
   await server.connect(new StdioServerTransport());
 }
 
-// Detect "invoked as the main entry" cross-platform.
-// On Windows the naive `file://${argv[1]}` form has backslashes and only 2
-// slashes, while import.meta.url is forward-slash + 3 slashes — string compare
-// never matches and main() silently no-ops, causing MCP hosts to see a
-// connection-closed (-32000) on startup. Use pathToFileURL to normalize.
+// Detect "invoked as the main entry" cross-platform. On Windows, naive string
+// compare against `file://${argv[1]}` fails because of backslash + slash-count
+// differences. Use pathToFileURL to normalize. (See earlier P5 bugfix commit.)
 const invokedAsMain = (() => {
   const argv = process.argv[1];
   if (!argv) return false;

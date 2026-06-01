@@ -3,15 +3,24 @@
 Deploys the bgs-modding-superpowers MO2 control plane into the user's MO2 install.
 
 .DESCRIPTION
-The control plane is the combination of:
-  - mo2_agent_control.py  (Python MO2 plugin loader)
-  - Mo2AgentControl.dll   (C++ MO2 plugin; built from tools/mo2-control-plane/plugin/src/)
-  - broker/bin/mo2-cli.ps1 + broker/lib/ (PowerShell broker for IPC)
-  - ModOrganizer.ini lock_gui=false normalization (so MO2 can stay open under agent control)
+The control plane is a Python MO2 plugin plus a PowerShell broker. There is NO
+C++ DLL to build or deploy at v0.1.
 
-The C++ DLL is shipped pre-built when present. If the DLL is missing from this
-checkout, the installer warns and skips that step; the rest of the deployment
-still lands so the Python plugin half can be exercised.
+What this script installs:
+  - mo2_agent_control.py  -> <MO2Root>/plugins/  (Python MO2 plugin loader)
+  - Mo2AgentControl/      -> <MO2Root>/plugins/  (bootstrap runtime support dir)
+  - ModOrganizer.ini lock_gui=false normalization (so MO2 can stay open under
+    agent control)
+
+What this script does NOT install:
+  - Mo2AgentControl.dll. There is no production C++ MO2 plugin in this repo at
+    v0.1. The Python plugin above IS the agent's MO2 integration. A C++ kernel
+    skeleton exists under docs/internal/future-c-kernel/ as a design note for
+    later perf-critical paths; it is intentionally unbuilt and not deployed.
+
+After this script returns and MO2 is launched (use scripts/start-mo2.ps1), MO2
+will load mo2_agent_control.py as a regular Python plugin and start publishing
+the agent-control named pipe + bootstrap runtime files.
 
 .PARAMETER MO2Root
 Absolute path to the user's MO2 install root (the directory containing
@@ -51,49 +60,21 @@ Write-Host "  Plugin root: $pluginRoot"
 Write-Host "  MO2 root:    $resolvedRoot"
 Write-Host ""
 
-# --- 1. Deploy Python loader + ModOrganizer.ini lock_gui normalize ---------
+# --- 1. Deploy the Python MO2 plugin + lock_gui normalization --------------
 
 $liveBridgeScript = Join-Path $pluginRoot "tools\mo2-control-plane\live-bridge\deploy-live-bridge.ps1"
 if (-not (Test-Path $liveBridgeScript -PathType Leaf)) {
     throw "Missing live-bridge deploy script: $liveBridgeScript"
 }
 
-Write-Host "[1/3] Deploying Python loader + ModOrganizer.ini normalization..."
+Write-Host "[1/2] Deploying mo2_agent_control.py + ModOrganizer.ini normalization..."
 & $liveBridgeScript -Mo2Root $resolvedRoot
 
-# --- 2. Deploy C++ MO2 plugin DLL (when available) -------------------------
-
-$dllCandidates = @(
-    (Join-Path $pluginRoot "tools\mo2-control-plane\plugin\dist\Mo2AgentControl.dll"),
-    (Join-Path $pluginRoot "tools\mo2-control-plane\plugin\build\Mo2AgentControl.dll"),
-    (Join-Path $pluginRoot "tools\mo2-control-plane\plugin\bin\Mo2AgentControl.dll")
-)
-$dllSource = $dllCandidates | Where-Object { Test-Path $_ -PathType Leaf } | Select-Object -First 1
-$dllTarget = Join-Path $resolvedRoot "plugins\Mo2AgentControl.dll"
-
-Write-Host ""
-Write-Host "[2/3] Deploying Mo2AgentControl.dll..."
-if ($dllSource) {
-    if ((Test-Path $dllTarget) -and -not $Force) {
-        Write-Host "  DLL already deployed at $dllTarget (use -Force to overwrite)"
-    } else {
-        Copy-Item -Path $dllSource -Destination $dllTarget -Force
-        Write-Host "  Deployed: $dllTarget"
-    }
-} else {
-    Write-Warning "  Mo2AgentControl.dll not pre-built in this checkout."
-    Write-Warning "  Searched:"
-    foreach ($c in $dllCandidates) { Write-Warning "    $c" }
-    Write-Warning "  Build the DLL from tools/mo2-control-plane/plugin/ first."
-    Write-Warning "  See docs/internal/repo-bootstrap.md for build instructions."
-    Write-Warning "  (The Python loader half of the control plane is already deployed.)"
-}
-
-# --- 3. Report broker availability -----------------------------------------
+# --- 2. Report broker availability (no copy step; runs from plugin checkout)
 
 $brokerSource = Join-Path $pluginRoot "tools\mo2-control-plane\broker"
 Write-Host ""
-Write-Host "[3/3] Broker (PowerShell) source location:"
+Write-Host "[2/2] Broker (PowerShell) source location:"
 if (Test-Path $brokerSource -PathType Container) {
     Write-Host "  $brokerSource"
     Write-Host "  Broker runs from the plugin checkout; no copy step required."
@@ -108,10 +89,12 @@ Write-Host "==========================================================="
 Write-Host "MO2 control plane deployment summary"
 Write-Host "==========================================================="
 Write-Host "  MO2 root:           $resolvedRoot"
-Write-Host "  Python loader:      $(Join-Path $resolvedRoot 'plugins\mo2_agent_control.py')"
-Write-Host "  Plugin DLL:         $dllTarget" -NoNewline
-if ($dllSource) { Write-Host "" } else { Write-Host "  (NOT DEPLOYED — see warnings above)" }
+Write-Host "  Python plugin:      $(Join-Path $resolvedRoot 'plugins\mo2_agent_control.py')"
 Write-Host "  Support directory:  $(Join-Path $resolvedRoot 'plugins\Mo2AgentControl\')"
 Write-Host "  Broker source:      $brokerSource"
 Write-Host ""
-Write-Host "[OK] Restart MO2 to load the Mo2AgentControl plugin." -ForegroundColor Green
+Write-Host "[OK] Control plane installed." -ForegroundColor Green
+Write-Host "     Next: start MO2 visibly so it loads the Python plugin."
+Write-Host "     -> scripts\start-mo2.ps1 -MO2Root `"$resolvedRoot`""
+Write-Host "     When MO2 boots, watch for status.json under"
+Write-Host "     <MO2Root>\plugins\Mo2AgentControl\bootstrap\runtime\ to confirm the plugin is live."

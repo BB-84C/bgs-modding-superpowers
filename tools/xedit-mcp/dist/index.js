@@ -70,8 +70,6 @@ function resolveLaunchOpts() {
             moProfile: envProfile,
         };
     }
-    // Auto-detect: src/index.js lives at <plugin-root>/tools/xedit-mcp/dist/index.js
-    // (or src/index.ts during tests). Walk up three levels to plugin root.
     try {
         const thisFile = fileURLToPath(import.meta.url);
         const pluginRoot = resolve(dirname(thisFile), "..", "..", "..");
@@ -97,52 +95,79 @@ function resolveLaunchOpts() {
     }
 }
 const TOOL_DEFINITIONS = [
-    { name: "xedit_session", description: "Ensure daemon, return session summary (gameMode, loadOrderSize, daemonPid). Call first every conversation." },
-    { name: "xedit_list_capabilities", description: "Curated 49-command digest + live drift report against the daemon." },
-    { name: "xedit_find_record", description: "Locate records by {file, formId} or {editorId}." },
-    { name: "xedit_read_record", description: "Composite read: record + winning override + base record + conflict status." },
-    { name: "xedit_inspect_conflicts", description: "Conflict audit verdict (no_conflict / itpo / itm / minor / breaking) + winning + referencedBy." },
-    { name: "xedit_call", description: "Atomic passthrough for any of the 49 native daemon commands. Still traverses the full harness pipeline. Use when an intent tool does not fit." },
+    { name: "xedit_status", description: "Returns the current xEdit daemon lifecycle state without blocking. status is one of 'not_started' | 'starting' | 'ready' | 'failed'. Use this to poll while waiting for a launch." },
+    { name: "xedit_start", description: "Kicks off an asynchronous xEdit daemon launch (if not already starting/ready). Returns immediately with the current status. Subsequent xedit_status calls report progress." },
+    { name: "xedit_health", description: "When the daemon is ready, sends system.ping through the named pipe to confirm it is still responsive (catches zombie daemons). Otherwise returns the same shape as xedit_status." },
+    { name: "xedit_session", description: "Non-blocking. If the daemon is ready: returns gameMode, loadOrderSize, daemonPid. If not_started: auto-initiates launch. Otherwise: returns current status + hint to poll xedit_status." },
+    { name: "xedit_list_capabilities", description: "Requires the daemon to be ready. Returns the curated 49-command digest + live drift report. Fast-fails with code='not_ready' otherwise." },
+    { name: "xedit_find_record", description: "Requires the daemon to be ready. Locates records by {file, formId} or {editorId}. Fast-fails with code='not_ready' otherwise." },
+    { name: "xedit_read_record", description: "Requires the daemon to be ready. Composite read: record + winning override + base record + conflict status. Fast-fails with code='not_ready' otherwise." },
+    { name: "xedit_inspect_conflicts", description: "Requires the daemon to be ready. Conflict audit verdict + winning + referencedBy. Fast-fails with code='not_ready' otherwise." },
+    { name: "xedit_call", description: "Requires the daemon to be ready. Atomic passthrough for any native daemon command, still in-harness. Fast-fails with code='not_ready' otherwise." },
 ].map((t) => ({ ...t, inputSchema: { type: "object", additionalProperties: true } }));
+// Helper to build the MCP CallTool response. Return type is loose so the
+// SDK's expected ServerResult shape is satisfied without import-coupling.
+function jsonResult(body, isError = false) {
+    return {
+        content: [{ type: "text", text: JSON.stringify(body) }],
+        isError,
+    };
+}
+function statusFields(state, daemon) {
+    const out = { status: state.status };
+    if (state.status === "starting") {
+        out.startedAt = state.startedAt;
+        out.elapsedSeconds = Math.round((Date.now() - state.startedAt) / 1000);
+    }
+    else if (state.status === "ready") {
+        out.pid = state.pid;
+        out.readySince = state.since;
+        if (daemon)
+            out.daemonPid = daemon.pid;
+    }
+    else if (state.status === "failed") {
+        out.error = state.error;
+        out.failedAt = state.at;
+    }
+    return out;
+}
 export async function main() {
     const server = new Server({ name: "xedit-mcp", version: "0.1.0" }, { capabilities: { tools: {} } });
-    let cachedToolset = null;
-    let cachedDaemon = null;
-    let cachedFatal = null;
-    let inflightLaunch = null;
-    async function ensureToolset() {
-        if (cachedToolset)
-            return cachedToolset;
-        if (cachedFatal)
-            return { error: cachedFatal };
-        if (inflightLaunch)
-            return inflightLaunch;
-        inflightLaunch = (async () => {
-            const opts = resolveLaunchOpts();
-            if ("error" in opts) {
-                cachedFatal = opts.error;
-                return opts;
-            }
+    let state = { status: "not_started" };
+    let toolset = null;
+    let daemonRef = null;
+    function kickoffLaunch() {
+        if (state.status === "starting")
+            return { kicked: false, reason: "already_starting" };
+        if (state.status === "ready")
+            return { kicked: false, reason: "already_ready" };
+        const opts = resolveLaunchOpts();
+        if ("error" in opts) {
+            state = { status: "failed", error: opts.error, at: Date.now() };
+            return { kicked: false, reason: opts.error };
+        }
+        state = { status: "starting", startedAt: Date.now() };
+        // Fire-and-forget: this promise resolves in the background while tool calls
+        // return immediately. State is mutated in the closures below.
+        void (async () => {
             try {
-                cachedDaemon = await launchDaemon(opts);
-                cachedToolset = buildServerToolset({
-                    adapter: cachedDaemon.adapter,
+                const daemon = await launchDaemon(opts);
+                daemonRef = daemon;
+                toolset = buildServerToolset({
+                    adapter: daemon.adapter,
                     sessionId: `mcp-${process.pid}-${Date.now()}`,
-                    daemonPid: cachedDaemon.pid,
+                    daemonPid: daemon.pid,
                 });
-                return cachedToolset;
+                state = { status: "ready", pid: daemon.pid, since: Date.now() };
             }
             catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
-                // Do NOT cache transient launch failures (e.g., MO2 not running yet);
-                // let the next tool call retry.
-                return { error: `Daemon launch failed: ${msg}` };
-            }
-            finally {
-                inflightLaunch = null;
+                state = { status: "failed", error: msg, at: Date.now() };
+                daemonRef = null;
+                toolset = null;
             }
         })();
-        return inflightLaunch;
+        return { kicked: true };
     }
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools: TOOL_DEFINITIONS,
@@ -150,43 +175,120 @@ export async function main() {
     server.setRequestHandler(CallToolRequestSchema, async (req) => {
         const name = req.params.name;
         const args = (req.params.arguments ?? {});
-        const tsOrErr = await ensureToolset();
-        if ("error" in tsOrErr) {
-            const envelope = {
+        // ---- LIFECYCLE / HEALTH tools (always non-blocking) ----
+        if (name === "xedit_status") {
+            return jsonResult({ ok: true, tool: name, data: statusFields(state, daemonRef) });
+        }
+        if (name === "xedit_start") {
+            const kick = kickoffLaunch();
+            const body = {
+                ok: true,
+                tool: name,
+                data: statusFields(state, daemonRef),
+                kicked: kick.kicked,
+                message: kick.kicked
+                    ? "Daemon launch initiated in the background. Poll xedit_status until status='ready'."
+                    : kick.reason === "already_ready"
+                        ? "Daemon is already ready."
+                        : kick.reason === "already_starting"
+                            ? "Daemon launch already in progress. Poll xedit_status until status='ready'."
+                            : (kick.reason ?? "Launch could not be initiated."),
+            };
+            return jsonResult(body);
+        }
+        if (name === "xedit_health") {
+            if (state.status !== "ready" || !daemonRef) {
+                return jsonResult({
+                    ok: true,
+                    tool: name,
+                    data: { ...statusFields(state, daemonRef), responsive: false },
+                    hint: state.status === "not_started"
+                        ? "Daemon not started. Call xedit_start."
+                        : state.status === "starting"
+                            ? "Daemon still starting. Poll xedit_status."
+                            : "Daemon failed to start; inspect data.error.",
+                });
+            }
+            try {
+                const ping = await daemonRef.adapter.call({ command: "system.ping", args: {} });
+                return jsonResult({
+                    ok: true,
+                    tool: name,
+                    data: {
+                        ...statusFields(state, daemonRef),
+                        responsive: ping.ok === true,
+                        pingEnvelope: ping,
+                    },
+                });
+            }
+            catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                return jsonResult({
+                    ok: true,
+                    tool: name,
+                    data: {
+                        ...statusFields(state, daemonRef),
+                        responsive: false,
+                        pingError: msg,
+                    },
+                    hint: "Daemon claimed ready but did not respond to system.ping. It may be a zombie; consider restarting MO2.",
+                });
+            }
+        }
+        // ---- DOMAIN tools ----
+        if (name === "xedit_session") {
+            if (state.status === "ready" && toolset) {
+                try {
+                    const env = await toolset.invoke("xedit_session", args);
+                    return jsonResult(env, !env.ok);
+                }
+                catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    return jsonResult({ ok: false, tool: name, code: "internal_error", summary: msg, hint: msg }, true);
+                }
+            }
+            // Not ready: auto-kick the launch if not yet started, then surface status.
+            if (state.status === "not_started") {
+                kickoffLaunch();
+            }
+            return jsonResult({
+                ok: true,
+                tool: name,
+                data: statusFields(state, daemonRef),
+                hint: state.status === "failed"
+                    ? "Launch failed; inspect data.error. Call xedit_start to retry."
+                    : "Daemon not ready yet; poll xedit_status until status='ready'.",
+            });
+        }
+        // Other domain tools require ready
+        if (state.status !== "ready" || !toolset) {
+            return jsonResult({
                 ok: false,
                 tool: name,
-                code: "launch_failed",
-                summary: tsOrErr.error,
-                hint: tsOrErr.error,
-            };
-            return {
-                content: [{ type: "text", text: JSON.stringify(envelope) }],
-                isError: true,
-            };
+                code: "not_ready",
+                summary: `Daemon is not ready (status='${state.status}').`,
+                data: statusFields(state, daemonRef),
+                hint: state.status === "not_started"
+                    ? "Call xedit_start, then poll xedit_status until status='ready'."
+                    : state.status === "starting"
+                        ? "Launch in progress. Poll xedit_status."
+                        : "Launch failed; inspect data.error. Call xedit_start to retry.",
+            }, true);
         }
         try {
-            const envelope = await tsOrErr.invoke(name, args);
-            return {
-                content: [{ type: "text", text: JSON.stringify(envelope) }],
-                isError: !envelope.ok,
-            };
+            const env = await toolset.invoke(name, args);
+            return jsonResult(env, !env.ok);
         }
         catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            return {
-                content: [{
-                        type: "text",
-                        text: JSON.stringify({ ok: false, tool: name, code: "internal_error", summary: msg, hint: msg }),
-                    }],
-                isError: true,
-            };
+            return jsonResult({ ok: false, tool: name, code: "internal_error", summary: msg, hint: msg }, true);
         }
     });
     const shutdown = async (signal) => {
         process.stderr.write(`xedit-mcp received ${signal}, shutting down...\n`);
-        if (cachedDaemon) {
+        if (daemonRef) {
             try {
-                await cachedDaemon.stop();
+                await daemonRef.stop();
             }
             catch { /* best effort */ }
         }
@@ -196,11 +298,9 @@ export async function main() {
     process.on("SIGTERM", () => void shutdown("SIGTERM"));
     await server.connect(new StdioServerTransport());
 }
-// Detect "invoked as the main entry" cross-platform.
-// On Windows the naive `file://${argv[1]}` form has backslashes and only 2
-// slashes, while import.meta.url is forward-slash + 3 slashes — string compare
-// never matches and main() silently no-ops, causing MCP hosts to see a
-// connection-closed (-32000) on startup. Use pathToFileURL to normalize.
+// Detect "invoked as the main entry" cross-platform. On Windows, naive string
+// compare against `file://${argv[1]}` fails because of backslash + slash-count
+// differences. Use pathToFileURL to normalize. (See earlier P5 bugfix commit.)
 const invokedAsMain = (() => {
     const argv = process.argv[1];
     if (!argv)

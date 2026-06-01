@@ -1,6 +1,6 @@
 ---
 name: setting-up-bgs-modding-environment
-description: "Use on first install of this plugin, when MO2 or xEdit is not yet detected, when starting a new modpack project, or when the user says 'set up', 'install', 'bootstrap', 'configure', or 'initialize' the BGS modding environment. Orchestrates: MO2 detection and control-plane install, optional xEdit download from BB-84C/TES5Edit, dev-log and release-changelog initialization, and end-to-end semantic smoke verification."
+description: "Use on first install of this plugin, when MO2 or xEdit is not yet detected, when starting a new modpack project, or when the user says 'set up', 'install', 'bootstrap', 'configure', or 'initialize' the BGS modding environment. Orchestrates: MO2 detection and control-plane install, MO2 visible launch, optional xEdit download from BB-84C/TES5Edit, dev-log and release-changelog initialization, and end-to-end semantic smoke verification."
 ---
 
 # Setting Up the BGS Modding Environment
@@ -28,6 +28,27 @@ This is the first-run bootstrap. Use it when:
 - **Pause and surface state before each install action.** The user should always
   know which MO2 root, which profile, and which file is about to be touched
   before it happens.
+- **MO2 must run visibly.** Never start MO2 in any background / hidden mode.
+  The human owner needs to see and interact with the MO2 GUI. The launch helper
+  `scripts/start-mo2.ps1` enforces this and surfaces "zombie" MO2 processes
+  (running but no window) so they can be cleaned up before a fresh start.
+
+## What the control plane actually is
+
+The "MO2 control plane" we deploy in step 3 is a **Python MO2 plugin** plus a
+**PowerShell broker**:
+
+- `tools/mo2-control-plane/live-bridge/mo2_agent_control.py` — the actual MO2
+  plugin. When MO2 loads it, the plugin opens a named pipe and starts publishing
+  bootstrap runtime files. This is what the agent harness talks to.
+- `tools/mo2-control-plane/broker/` — PowerShell IPC client used by
+  `xedit-client.ps1`. Runs from the plugin checkout; no install step.
+
+There is **no C++ DLL to build or deploy** at v0.1. A C++ kernel skeleton lives
+under `docs/internal/future-c-kernel/` as a design note for later perf-critical
+paths; it is intentionally unbuilt. If a previous agent told you to "build
+Mo2AgentControl.dll first" — that was wrong. The Python plugin is the
+integration.
 
 ## Workflow
 
@@ -67,14 +88,13 @@ proceed without the explicit verbal consent.
 
 **(c) No-MO2 mode.** If the user says "I do not need MO2 for this project"
 (e.g., they are writing modpack docs / planning without a runtime), record
-`MO2_Root = none` and skip directly to step 7 (dev-log / changelog init). Mark
+`MO2_Root = none` and skip directly to step 8 (dev-log / changelog init). Mark
 that any MO2-bound or xEdit-bound work will be unavailable until they revisit
 this skill.
 
-### Step 3 - Install the bgs-modding-superpowers MO2 control plane
+### Step 3 - Install the MO2 control plane (Python + broker)
 
-Once `MO2_Root` is known (path a or b), deploy the C++ control-plane plugin DLL,
-the Python loader, and the broker into the user's MO2:
+Once `MO2_Root` is known (path a or b), deploy the Python plugin:
 
 ```powershell
 & "<plugin-root>/scripts/install-mo2-control-plane.ps1" -MO2Root "<MO2_Root>"
@@ -82,14 +102,41 @@ the Python loader, and the broker into the user's MO2:
 
 This deploys:
 
-- `tools/mo2-control-plane/plugin/build/Mo2AgentControl.dll` -> `<MO2_Root>/plugins/`
 - `tools/mo2-control-plane/live-bridge/mo2_agent_control.py` -> `<MO2_Root>/plugins/`
-- The broker binaries -> their canonical install path under MO2.
+- The `Mo2AgentControl/` support tree -> `<MO2_Root>/plugins/`
+- `ModOrganizer.ini lock_gui=false` normalization.
 
-After the script returns, list `<MO2_Root>/plugins/` and confirm both files are
-present. If the script reports an error, stop and surface it; do not continue.
+After the script returns, list `<MO2_Root>/plugins/` and confirm
+`mo2_agent_control.py` is present. The script will NOT install a `.dll` — that
+is intentional (see "What the control plane actually is" above). If the script
+errors, stop and surface it; do not continue.
 
-### Step 4 - Ask the user whether they want xEdit
+### Step 4 - Start MO2 visibly
+
+```powershell
+& "<plugin-root>/scripts/start-mo2.ps1" -MO2Root "<MO2_Root>" -Profile "<Profile>"
+```
+
+The launcher script:
+
+- Refuses to start if a visible MO2 is already running (use that one).
+- If a zombie MO2 (running but no window) is detected, surfaces it and asks
+  before killing — use `-KillStale` to skip the prompt.
+- Starts MO2 with `-WindowStyle Normal` so the GUI is visible.
+- Waits up to 30s for the main window to appear and reports its title.
+
+Verify after launch: the user should see the MO2 GUI on their desktop. The
+plugin's bootstrap runtime files should appear at
+`<MO2_Root>/plugins/Mo2AgentControl/bootstrap/runtime/` within a few seconds:
+
+- `status.json` -> `{ schemaVersion, state: "ok", mo2Pid }`
+- `endpoint.json` -> `{ transport: "named-pipe", endpoint: "mo2-control-plane-<pid>" }`
+- `capabilities.json` -> lists `launch.*`, `system.*` methods.
+
+If those don't appear, the Python plugin didn't load. Check MO2's plugin
+settings to confirm `mo2_agent_control` is enabled.
+
+### Step 5 - Ask the user whether they want xEdit
 
 xEdit is optional but high-value. Describe what it does so the user can make
 an informed choice:
@@ -103,9 +150,9 @@ an informed choice:
 
 Then ask: "Would you like me to install xEdit?" - explicit consent gate.
 
-If the user declines, skip to step 7.
+If the user declines, skip to step 8.
 
-### Step 5 - If yes: fetch xEdit from BB-84C/TES5Edit
+### Step 6 - If yes: fetch xEdit from BB-84C/TES5Edit
 
 The forked, agent-friendly xEdit lives at https://github.com/BB-84C/TES5Edit.
 Fetch its latest release into the MO2 tools tree:
@@ -118,7 +165,7 @@ This downloads the latest release zip, extracts into
 `<MO2_Root>/tools/xEdit/`, and verifies `xEdit.exe` exists post-extract. To
 pin a specific tag, pass `-ReleaseTag v<X.Y.Z>`.
 
-### Step 6 - Deploy the xEdit hook bridge
+### Step 7 - Deploy the xEdit hook bridge
 
 `xEditHookBridge.dll` ships with THIS plugin (it is OWNED by
 `bgs-modding-superpowers`, NOT by the xEdit fork). Co-locate it with
@@ -131,7 +178,7 @@ pin a specific tag, pass `-ReleaseTag v<X.Y.Z>`.
 This copies `tools/xedit-hook-bridge/dist/xEditHookBridge.dll` into
 `<MO2_Root>/tools/xEdit/`. The xEdit daemon will find it there at runtime.
 
-### Step 7 - Initialize dev-log and release-changelog
+### Step 8 - Initialize dev-log and release-changelog
 
 Ask the user for their **modpack project root**. This is usually one of:
 
@@ -149,21 +196,43 @@ Once `<project_root>` is known, route to:
 From here on, those two skills maintain the files at runtime; do not template
 or pre-fill them in this skill.
 
-### Step 8 - Verify with a semantic smoke test
+### Step 9 - Verify with a semantic smoke test (NON-BLOCKING)
 
-Run the xEdit MCP smoke test (skip if user chose no-MO2 mode in step 2c or
-declined xEdit in step 4):
+The xEdit MCP is fully non-blocking. Do NOT call a single blocking tool and
+wait — that will time out. Instead:
 
-1. `xedit_session({})` - expect `ok: true` with `gameMode`, `loadOrderSize`,
-   and a fresh daemon PID.
-2. `xedit_list_capabilities({})` - expect ~49 commands and an empty
-   `drift.onlyInDigest`.
+1. **Kick off the daemon launch.**
+   ```
+   xedit_start({})
+   ```
+   Expect `{ ok: true, data: { status: "starting" } }` (or `"ready"` if it was
+   already up).
 
-If both pass: surface `[OK] BGS modding environment ready` with the recorded
+2. **Poll `xedit_status` until ready.** The first launch takes 60-240s because
+   xEdit must parse the active load order. Sleep 5-15s between polls.
+   ```
+   xedit_status({})  -> { status: "starting", elapsedSeconds: N }
+   xedit_status({})  -> { status: "starting", elapsedSeconds: N+5 }
+   ...
+   xedit_status({})  -> { status: "ready", pid: N, readySince: timestamp }
+   ```
+
+   If `status: "failed"`, surface `data.error` exactly and STOP. Do not declare
+   success. Common reasons: MO2 not running, MO2 not loading the Python plugin,
+   xEdit binary missing, xEdit's automation-serve mode tripping on the active
+   load order.
+
+3. **Confirm with `xedit_health`** — sends a real `system.ping` to the daemon
+   to catch zombies. Expect `{ status: "ready", responsive: true }`.
+
+4. **Confirm domain tools work.**
+   ```
+   xedit_list_capabilities({})  -> ~49 commands, empty drift.onlyInDigest
+   xedit_session({})            -> { gameMode: "Fallout4", loadOrderSize: N, daemonPid: N }
+   ```
+
+If all four pass: surface `[OK] BGS modding environment ready` with the recorded
 `MO2_Root`, xEdit path (if installed), and project root.
-
-If either fails: surface the failure exactly (error code, daemon PID, log path
-if any) and STOP. Do not declare success.
 
 ## Acceptance (semantic, not surface)
 
@@ -171,31 +240,41 @@ The setup is complete only when ALL of the following hold. Do not declare
 success otherwise:
 
 - `<MO2_Root>` is known and `<MO2_Root>/ModOrganizer.exe` exists.
-- `<MO2_Root>/plugins/Mo2AgentControl.dll` and
-  `<MO2_Root>/plugins/mo2_agent_control.py` both exist (skipped only in no-MO2
-  mode).
+- `<MO2_Root>/plugins/mo2_agent_control.py` exists (skipped only in no-MO2 mode).
+- MO2 is visibly running (process has `MainWindowHandle != 0`) and
+  `<MO2_Root>/plugins/Mo2AgentControl/bootstrap/runtime/status.json` reports
+  `state: "ok"` with a current `mo2Pid` (skipped only in no-MO2 mode).
 - If xEdit was chosen: `<MO2_Root>/tools/xEdit/xEdit.exe` AND
   `<MO2_Root>/tools/xEdit/xEditHookBridge.dll` both exist.
 - `<project_root>/docs/dev-log.md` and
   `<project_root>/docs/release-changelog.md` both exist (or user explicitly
   declined - record the decline in conversation context).
-- `xedit_session` and `xedit_list_capabilities` MCP calls both succeed
-  (skipped only if xEdit was declined or no-MO2 mode).
+- `xedit_status` eventually reports `status: "ready"`, and
+  `xedit_health.data.responsive` is `true`, and
+  `xedit_list_capabilities` returns a non-empty digest. (Skipped only if xEdit
+  was declined or no-MO2 mode.)
 
 In no-MO2 mode, only the dev-log and changelog steps need to pass.
 
 ## Common mistakes
 
-- Skipping the consent gate on step 2(b) or step 4. Both REQUIRE explicit user
+- Skipping the consent gate on step 2(b) or step 5. Both REQUIRE explicit user
   agreement; silent install or silent install-decision is forbidden.
 - Silently choosing one MO2 install when multiple are detected. Always ask.
-- Treating the absence of `Mo2AgentControl.dll` as fatal during very early
-  plugin development (before the build pipeline lands). Surface clearly; do not
-  pretend the install succeeded.
+- **Trying to build `Mo2AgentControl.dll` from `docs/internal/future-c-kernel/`.**
+  That is a skeleton, not a real MO2 plugin. The Python plugin IS the
+  integration. Build the C++ kernel only if you are deliberately moving
+  perf-critical paths out of Python in a future release.
+- **Calling `xedit_session` or any domain tool and blocking on the response.**
+  Every tool returns immediately. If you see `status: "starting"`, poll
+  `xedit_status`; do not call the same tool again in a tight loop.
+- **Starting MO2 with `Start-Process -WindowStyle Hidden`** (or any other
+  invisible/background mode). Always use the `start-mo2.ps1` helper, which
+  forces a visible window.
 - Writing into the user's vanilla game install directly instead of via MO2
   overlay. NEVER do this. See `using-bgs-modding-superpowers` rule 1.
 - Declaring success on a green script return without the semantic readback
-  (the file existence checks and the MCP smoke calls).
+  (the file existence checks and the four MCP smoke calls).
 
 ## See also
 
@@ -204,8 +283,6 @@ In no-MO2 mode, only the dev-log and changelog steps need to pass.
 - `xedit-automation` - hub skill for all xEdit work; load after this skill
   succeeds.
 - `writing-modpack-devlog`, `writing-modpack-changelog` - runtime asset skills
-  invoked from step 7.
+  invoked from step 8.
 - The installer scripts under `scripts/`: `install-mo2-control-plane.ps1`,
-  `fetch-xedit-release.ps1`, `install-xedit-hook-bridge.ps1`. These are
-  authored in plan phases P6 and P7; if they are missing, surface that we are
-  before-P6 and proceed only as far as the existing scripts allow.
+  `start-mo2.ps1`, `fetch-xedit-release.ps1`, `install-xedit-hook-bridge.ps1`.

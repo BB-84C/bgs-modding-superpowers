@@ -34,20 +34,47 @@ let the skill load.
 ## Available MCP tools
 
 The bundled `xedit` MCP server (declared in `.mcp.json` for Claude Code / Codex,
-declared via the OpenCode plugin's `config.mcp.xedit` hook) exposes six intent
-tools plus an atomic passthrough:
+declared via the OpenCode plugin's `config.mcp.xedit` hook) is fully
+**non-blocking**: every tool returns immediately. The xEdit daemon's lifecycle
+is tracked in the server's in-memory state machine, and domain tools fast-fail
+with `code: "not_ready"` if you call them before the daemon is ready.
+
+### Lifecycle / health tools (3) — always non-blocking
 
 | Tool | Use |
 |---|---|
-| `xedit_session` | Call FIRST in every conversation that touches xEdit. Returns game mode, load order size, daemon PID, capability flags. |
-| `xedit_list_capabilities` | Call once per session. Returns the curated 49-command digest plus any drift against the live daemon. |
-| `xedit_find_record` | Locate a record by `{file, formId}` or `{editorId}`. |
-| `xedit_read_record` | Read the actual record fields, base record, and winning override. |
-| `xedit_inspect_conflicts` | The W2 verdict tool. Returns `no_conflict / itpo / itm / minor / breaking`. |
-| `xedit_call(command, args)` | Atomic passthrough for any of the 49 native daemon commands. Still goes through validation, state-check, rules, audit. Use whenever the intent tools do not fit. |
+| `xedit_status` | Pure read. Returns `{ status: "not_started" \| "starting" \| "ready" \| "failed", ... }`. Never modifies state. Use this to POLL while waiting for a launch. |
+| `xedit_start` | Kicks off an asynchronous daemon launch if not already starting/ready. Returns immediately. The launch itself takes 60-240s; that work happens in the background. |
+| `xedit_health` | When ready: sends `system.ping` through the named pipe to catch zombies. Returns `responsive: true \| false`. Otherwise: returns the same shape as `xedit_status`. |
 
-The full daemon-command reference lives in
-`skills/xedit-automation/xedit-knowledgebase.md`.
+### Domain tools (6) — require ready, fast-fail otherwise
+
+| Tool | Use |
+|---|---|
+| `xedit_session` | If ready: returns the full session envelope (gameMode, loadOrderSize, daemonPid). If not_started: auto-initiates the launch. Otherwise: returns the current status. Always non-blocking. |
+| `xedit_list_capabilities` | Curated 49-command digest + live drift report. |
+| `xedit_find_record` | Locate by `{file, formId}` or `{editorId}`. |
+| `xedit_read_record` | Fields + base record + winning override. |
+| `xedit_inspect_conflicts` | W2 verdict tool: `no_conflict / itpo / itm / minor / breaking`. |
+| `xedit_call(command, args)` | Atomic passthrough for any of the 49 native daemon commands; in-harness. |
+
+### Canonical lifecycle pattern (do this every session that touches xEdit)
+
+```
+1. xedit_start({})                  -> { status: "starting" }      (or "ready")
+2. xedit_status({})                 -> poll until status="ready"   (sleep 5-15s between calls)
+3. xedit_health({})                 -> confirm responsive=true
+4. xedit_session({}) / xedit_*      -> normal domain work
+```
+
+NEVER call a domain tool in a tight loop expecting it to "wait." If
+`xedit_status` reports `status: "failed"`, surface `data.error` to the user and
+stop — common causes are MO2 not running visibly, the Python plugin not loaded,
+the xEdit binary missing, or xEdit's automation-serve tripping on the active
+load order.
+
+The full daemon-command reference (49 commands + error codes + save semantics
++ glossary) lives in `skills/xedit-automation/xedit-knowledgebase.md`.
 
 ## Hard rules (non-negotiable)
 
