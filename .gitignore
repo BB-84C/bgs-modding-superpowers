@@ -30,3 +30,11 @@ AGENTS.md
 /tools/xedit-hook-bridge/*.dproj.local
 /tools/xedit-hook-bridge/*.identcache
 /tools/xedit-hook-bridge/*.res
+
+# Codex requires plugins/<name>/ subdirectory layout (its cache-copy step
+# silently drops directory junctions). The local plugins/<name>/ tree is a
+# per-machine install workaround that holds real .codex-plugin/ + .mcp.json
+# files plus junctions to skills/tools/hooks/.opencode for browsing. The
+# absolute paths inside those copies are machine-specific. A v0.2 follow-up
+# will ship a portable Codex-shaped subdirectory; for now it stays local.
+/plugins/
