@@ -34,7 +34,13 @@ function Invoke-XeditClientAutomationCall {
 }
 
 function Wait-XeditClientAutomationReady {
-    param([string]$XeditExecutablePath, [int]$XeditPid, [string]$SessionPath, [int]$TimeoutSeconds = 30)
+    # Default bumped from 30s -> 240s because xEdit's -automation-serve mode
+    # has to parse the full active load order before answering system.describe.
+    # On a non-trivial Fallout 4 profile (10+ plugins + Stock Game masters via
+    # MO2 VFS) cold-start parsing routinely takes 60-180s; 30s would falsely
+    # report "not ready" while xEdit is still loading masters. Override per-call
+    # via -TimeoutSeconds or set BGS_XEDIT_READY_TIMEOUT_SECONDS env var.
+    param([string]$XeditExecutablePath, [int]$XeditPid, [string]$SessionPath, [int]$TimeoutSeconds = 240)
     $requestPath = Join-Path $SessionPath 'ready.request.json'
     $responsePath = Join-Path $SessionPath 'ready.response.json'
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -47,7 +53,7 @@ function Wait-XeditClientAutomationReady {
         }
         Start-Sleep -Milliseconds 500
     }
-    throw 'Timed out waiting for native xEdit automation readiness'
+    throw "Timed out waiting for native xEdit automation readiness after ${TimeoutSeconds}s. xEdit may still be parsing the load order; consider bumping the timeout further if your profile is large."
 }
 
 function Invoke-XeditClientAutomationCallCommand {

@@ -363,7 +363,15 @@ function Invoke-XeditClientProcessLaunch {
             $processId = Get-XeditClientLaunchedProcessId -WrapperProcess $process -LauncherPath $normalizedLauncherCommand.DetectionPath -StartedAt $startedAt -KnownProcessIds $knownProcessIds
         }
 
-        $null = Wait-XeditClientAutomationReady -XeditExecutablePath $normalizedLauncherCommand.DetectionPath -XeditPid $processId -SessionPath $session.SessionPath -TimeoutSeconds 30
+        # Allow env-var override; default 240s — xEdit's automation-serve needs
+        # to finish loading active masters before system.describe answers, and
+        # 30s tripped on real profiles. See Wait-XeditClientAutomationReady def.
+        $readyTimeoutSeconds = 240
+        if ($env:BGS_XEDIT_READY_TIMEOUT_SECONDS -and [int]::TryParse($env:BGS_XEDIT_READY_TIMEOUT_SECONDS, [ref]$null)) {
+            $parsed = [int]$env:BGS_XEDIT_READY_TIMEOUT_SECONDS
+            if ($parsed -gt 0) { $readyTimeoutSeconds = $parsed }
+        }
+        $null = Wait-XeditClientAutomationReady -XeditExecutablePath $normalizedLauncherCommand.DetectionPath -XeditPid $processId -SessionPath $session.SessionPath -TimeoutSeconds $readyTimeoutSeconds
 
         Write-Host 'process launch'
         Write-Host 'status: ok'
