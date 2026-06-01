@@ -2,6 +2,23 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Status (2026-06-01)
+
+| Phase | Status | Commit |
+|---|---|---|
+| Plan | [x] landed | `c08024e` |
+| P1 — manifests + bootstrap wiring | [x] landed | `e09651d` |
+| P2 — skills consolidation (incl. P3.8 advance-pull) | [x] landed | `9550c0a` |
+| P3 — doc reorganization + public top-level | [x] landed | `b0be24b` |
+| P4 — ship xedit-mcp dist/ + prepare hook | [x] landed | `3f44701` |
+| P5 — scrub dev-sandbox paths | [x] landed | `0cda287` |
+| P6 — install-mo2-control-plane + fetch-xedit-release | [x] landed | `6835f5b` |
+| P7 — ship xEditHookBridge.dll from dist/ | [x] landed | `b6089ae` |
+| P8 — end-to-end acceptance on OC/CC/Codex | [ ] **owner-driven** (see P8 section) | — |
+
+**Branch:** `reshape/superpowers-plugin-shape` (8 commits from `main@764fdd4`).
+**Final verification:** working tree clean; zero dev-path refs in shippable surfaces; all manifests present; both shipped binaries (xedit-mcp dist/ + xEditHookBridge.dll) tracked.
+
 **Goal:** Reshape this repo from its current "dev harness + scattered scaffold" form into a Superpowers-style multi-harness plugin named `bgs-modding-superpowers`, installable on OpenCode, Claude Code, and Codex, that ships the existing xEdit MCP + MO2 control-plane payload to end-user modpack builders.
 
 **Plugin name:** `bgs-modding-superpowers` (also the target GitHub repo name).
