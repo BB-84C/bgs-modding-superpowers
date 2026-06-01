@@ -61,13 +61,18 @@ export const BgsModdingSuperpowersPlugin = async () => {
       //     config.mcp surface. Use ??= so user overrides in opencode.json win.
       //     `enabled: true` is explicit per every real-world LOCAL-stdio MCP
       //     precedent observed in public opencode plugins.
+      //
+      //     timeout = 240s because the first xedit_session call lazily starts
+      //     the xEdit daemon via MO2's control plane, which takes ~60-180s.
+      //     Subsequent calls are fast (the toolset is cached for the server's
+      //     lifetime). The default 5s timeout would always trip on first call.
       config.mcp ??= {};
       config.mcp.xedit ??= {
         type: 'local',
         command: ['node', XEDIT_MCP_ENTRY],
         enabled: true,
         environment: {},
-        // timeout default is 5000ms; bump if xedit-mcp init grows slow.
+        timeout: 240000,
       };
     },
 
