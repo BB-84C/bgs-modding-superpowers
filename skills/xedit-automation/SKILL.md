@@ -73,3 +73,41 @@ After any session that produced a footgun (an unexpected refusal, a non-obvious 
 - Whenever the task description names xEdit, plugin records, FormIDs, masters, conflicts, ITM/UDR, ESL flagging, or Pascal Edit Scripts.
 
 When in doubt, load it.
+
+## Sibling skills
+
+- **`writing-bgs-load-order`** — authoritative reference for editing
+  `plugins.txt` / `loadorder.txt`. Use it whenever the task is about
+  activating, deactivating, reordering, adding, or removing plugins from the
+  load order. Do NOT edit `plugins.txt` blindly; xEdit can not change load
+  order itself (docs 2.3), so the file edit is the only path for those
+  operations, and the asterisk-format rules + hardcoded vanilla master list
+  are non-obvious.
+- **`setting-up-bgs-modding-environment`** — first-run setup including the
+  MO2 `gamePath` inspection step you must do before launching xEdit with the
+  `dataPath` override.
+
+## Launching xEdit with explicit args (NEW)
+
+The `xedit_start` MCP tool accepts optional overrides:
+
+```
+xedit_start({
+  launcherPath?: string,    // xEdit.exe path
+  gameMode?: string,        // "Fallout4", "SkyrimSE", etc.
+  dataPath?: string,        // -D: flag; MO2 <gamePath>\\Data
+  pluginsFile?: string,     // -P: flag; agent-authored plugins.txt
+  moProfile?: string,       // MO2 profile name; defaults to env
+})
+```
+
+**Always pass `dataPath`** when the user wants xEdit to see the MO2-managed
+game tree. Without it, xEdit falls back to the Windows registry, which
+returns the raw Steam install path — and your conflict audit will be against
+the wrong game data. Read MO2's `ModOrganizer.ini` `gamePath` value, append
+`\\Data`, and pass that.
+
+For load-order experimentation (test a subset of plugins to isolate a
+conflict, or rehearse a sort), generate a plugins.txt under
+`.opencode/artifacts/<task>/plugins.txt` per `writing-bgs-load-order` and
+pass it as `pluginsFile`.

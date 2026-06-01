@@ -201,12 +201,40 @@ or pre-fill them in this skill.
 The xEdit MCP is fully non-blocking. Do NOT call a single blocking tool and
 wait — that will time out. Instead:
 
+**0. Read MO2's managed gamePath before launching xEdit.** xEdit's default
+   game discovery uses the Windows registry, which points at the Steam install
+   — NOT MO2's Stock Game. To force xEdit to see MO2's projected game tree,
+   read `<MO2_Root>\ModOrganizer.ini` and extract the `gamePath` value:
+
+   ```
+   gameName=Fallout 4
+   gamePath=@ByteArray(D:\\awesome-bgs-mod-master\\.artifacts\\mo2\\Stock Game\\Fallout 4)
+   ```
+
+   Strip the `@ByteArray(...)` wrapper; the Data dir is `<gamePath>\Data`.
+   Pass this to `xedit_start` as `dataPath` in the next step. See
+   `writing-bgs-load-order` for the full reasoning + alternative load-order
+   workflows.
+
 1. **Kick off the daemon launch.**
    ```
-   xedit_start({})
+   xedit_start({
+     dataPath: "<MO2_Root>\\Stock Game\\Fallout 4\\Data",   // from step 0 above
+   })
    ```
+   Without an explicit `dataPath`, xEdit will discover the game via registry
+   and may open the wrong Data directory.
+
    Expect `{ ok: true, data: { status: "starting" } }` (or `"ready"` if it was
-   already up).
+   already up). If you want to use a custom subset of plugins (load-order
+   experimentation), also pass `pluginsFile`:
+   ```
+   xedit_start({
+     dataPath: "<MO2_Root>\\Stock Game\\Fallout 4\\Data",
+     pluginsFile: ".opencode/artifacts/<task>/plugins.txt",
+   })
+   ```
+   The `writing-bgs-load-order` skill explains how to author the file.
 
 2. **Poll `xedit_status` until ready.** The first launch takes 60-240s because
    xEdit must parse the active load order. Sleep 5-15s between polls.

@@ -23,6 +23,24 @@ export interface LaunchOptions {
   gameMode: string;
   /** MO2 profile name; defaults to "Default". */
   moProfile?: string;
+  /**
+   * Absolute path to the Data directory xEdit should use (passed as `-D:`).
+   * If omitted, xEdit auto-discovers the game install via the Windows
+   * registry — which on Steam-installed games points at the Steam library,
+   * NOT MO2's Stock Game. ALWAYS pass this when the agent wants xEdit to
+   * see the MO2-managed game tree. Read MO2's ModOrganizer.ini gamePath +
+   * "\\Data" for the canonical answer.
+   */
+  dataPath?: string;
+  /**
+   * Absolute path to a custom plugins.txt (passed as `-P:`). If omitted,
+   * xedit-client.ps1 derives a session plugins file from the MO2 profile
+   * (default) or from the `--plugin` repeat-args. Agents writing
+   * experimental load orders should generate a plugins.txt under
+   * `.opencode/artifacts/<task>/plugins.txt` and pass it here.
+   * See: skills/writing-bgs-load-order/SKILL.md for the file format.
+   */
+  pluginsFile?: string;
   /** Total wait budget for daemon-ready + plugins-loaded; defaults to 180 seconds. */
   readyTimeoutMs?: number;
   /** PowerShell executable; defaults to "pwsh". */
@@ -55,7 +73,7 @@ export async function launchDaemon(opts: LaunchOptions): Promise<LaunchedDaemon>
   const profile = opts.moProfile ?? "Default";
   const deadline = Date.now() + (opts.readyTimeoutMs ?? 180_000);
 
-  const launchOut = await runPwshCapture(pwsh, [
+  const launchArgs: string[] = [
     "-NoProfile",
     "-File",
     opts.clientScript,
@@ -67,7 +85,14 @@ export async function launchDaemon(opts: LaunchOptions): Promise<LaunchedDaemon>
     opts.gameMode,
     "--mo-profile",
     profile,
-  ]);
+  ];
+  if (opts.dataPath) {
+    launchArgs.push("--data-path", opts.dataPath);
+  }
+  if (opts.pluginsFile) {
+    launchArgs.push("--plugins-file", opts.pluginsFile);
+  }
+  const launchOut = await runPwshCapture(pwsh, launchArgs);
 
   const pid = parseLaunchPid(launchOut);
   if (!pid) {

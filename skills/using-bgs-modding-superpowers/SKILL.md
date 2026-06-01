@@ -24,6 +24,7 @@ for dev-log and release-changelog maintenance.
 | `setting-up-bgs-modding-environment` | First conversation in a project; MO2 or xEdit not yet detected; user says "set up", "install", "bootstrap", "configure" |
 | `xedit-automation` | Any task involving `.esp/.esm/.esl` plugin files, FormIDs, masters, conflicts, ESL flagging, ITM/UDR cleaning, Pascal scripts |
 | `xedit-conflict-audit` | "Why is this override not winning?", "Which plugins overlap on this record?", "Is this load order safe?" |
+| `writing-bgs-load-order` | Reading/editing/generating `plugins.txt` or `loadorder.txt`; enabling/disabling/reordering/adding/removing plugins; launching xEdit with a custom plugins file; "load order", "enable this plugin", "disable that plugin", "what does the asterisk mean" |
 | `writing-modpack-devlog` | "Log this", "record what I did", "note this change", "add to dev-log", "track this decision" |
 | `writing-modpack-changelog` | "Cut a release", "release notes", "what changed since v1.2", "prepare release for Nexus" |
 
@@ -44,7 +45,7 @@ with `code: "not_ready"` if you call them before the daemon is ready.
 | Tool | Use |
 |---|---|
 | `xedit_status` | Pure read. Returns `{ status: "not_started" \| "starting" \| "ready" \| "failed", ... }`. Never modifies state. Use this to POLL while waiting for a launch. |
-| `xedit_start` | Kicks off an asynchronous daemon launch if not already starting/ready. Returns immediately. The launch itself takes 60-240s; that work happens in the background. |
+| `xedit_start` | Kicks off an asynchronous daemon launch if not already starting/ready. Returns immediately. Accepts optional overrides: `{ launcherPath?, gameMode?, dataPath?, pluginsFile?, moProfile? }`. Use `dataPath` (MO2 `gamePath + "\\Data"`) to override xEdit's registry-discovered Steam path; use `pluginsFile` to point at a custom load order (see `writing-bgs-load-order`). The launch itself takes 60-240s; that work happens in the background. |
 | `xedit_health` | When ready: sends `system.ping` through the named pipe to catch zombies. Returns `responsive: true \| false`. Otherwise: returns the same shape as `xedit_status`. |
 
 ### Domain tools (6) — require ready, fast-fail otherwise

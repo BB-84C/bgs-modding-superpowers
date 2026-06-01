@@ -127,18 +127,37 @@ export function buildServerToolset(opts: ServerToolsetOptions): ServerToolset {
 
 interface ResolvedLaunchOpts extends LaunchOptions {}
 
-function resolveLaunchOpts(): ResolvedLaunchOpts | { error: string } {
+interface LaunchOverrides {
+  launcherPath?: string;
+  gameMode?: string;
+  dataPath?: string;
+  pluginsFile?: string;
+  moProfile?: string;
+}
+
+function resolveLaunchOpts(overrides: LaunchOverrides = {}): ResolvedLaunchOpts | { error: string } {
   const envClient = process.env.BGS_XEDIT_CLIENT_SCRIPT;
   const envLauncher = process.env.BGS_XEDIT_LAUNCHER_PATH;
   const envGameMode = process.env.BGS_XEDIT_GAME_MODE;
   const envProfile = process.env.BGS_MO2_PROFILE ?? "Default";
+  const envDataPath = process.env.BGS_XEDIT_DATA_PATH;
+  const envPluginsFile = process.env.BGS_XEDIT_PLUGINS_FILE;
 
-  if (envClient && envLauncher && envGameMode) {
+  // Resolution priority: explicit overrides (from xedit_start args) > env vars > auto-detect.
+  const launcherPath = overrides.launcherPath ?? envLauncher;
+  const gameMode = overrides.gameMode ?? envGameMode;
+  const moProfile = overrides.moProfile ?? envProfile;
+  const dataPath = overrides.dataPath ?? envDataPath;
+  const pluginsFile = overrides.pluginsFile ?? envPluginsFile;
+
+  if (envClient && launcherPath && gameMode) {
     return {
       clientScript: envClient,
-      launcherPath: envLauncher,
-      gameMode: envGameMode,
-      moProfile: envProfile,
+      launcherPath,
+      gameMode,
+      moProfile,
+      dataPath,
+      pluginsFile,
     };
   }
 
@@ -146,14 +165,16 @@ function resolveLaunchOpts(): ResolvedLaunchOpts | { error: string } {
     const thisFile = fileURLToPath(import.meta.url);
     const pluginRoot = resolve(dirname(thisFile), "..", "..", "..");
     const candidateClient = envClient ?? resolve(pluginRoot, "tools/mo2-vfs-launcher/xedit-client.ps1");
-    const candidateLauncher = envLauncher ?? resolve(pluginRoot, ".artifacts/mo2/tools/xEdit/xEdit.exe");
+    const candidateLauncher = launcherPath ?? resolve(pluginRoot, ".artifacts/mo2/tools/xEdit/xEdit.exe");
     statSync(candidateClient);
     statSync(candidateLauncher);
     return {
       clientScript: candidateClient,
       launcherPath: candidateLauncher,
-      gameMode: envGameMode ?? "Fallout4",
-      moProfile: envProfile,
+      gameMode: gameMode ?? "Fallout4",
+      moProfile,
+      dataPath,
+      pluginsFile,
     };
   } catch {
     return {
@@ -162,14 +183,16 @@ function resolveLaunchOpts(): ResolvedLaunchOpts | { error: string } {
         "BGS_XEDIT_CLIENT_SCRIPT (path to xedit-client.ps1), " +
         "BGS_XEDIT_LAUNCHER_PATH (path to xEdit.exe), " +
         "BGS_XEDIT_GAME_MODE (e.g. 'Fallout4'). " +
-        "Auto-detect fallback expects xEdit at <plugin-root>/.artifacts/mo2/tools/xEdit/xEdit.exe (dev sandbox).",
+        "Optional: BGS_XEDIT_DATA_PATH (-D: flag, MO2 Data dir), BGS_XEDIT_PLUGINS_FILE (-P: flag). " +
+        "Auto-detect fallback expects xEdit at <plugin-root>/.artifacts/mo2/tools/xEdit/xEdit.exe (dev sandbox). " +
+        "Or pass these as xedit_start({ launcherPath, gameMode, dataPath, pluginsFile, moProfile }) overrides at runtime.",
     };
   }
 }
 
 const TOOL_DEFINITIONS = [
   { name: "xedit_status", description: "Returns the current xEdit daemon lifecycle state without blocking. status is one of 'not_started' | 'starting' | 'ready' | 'failed'. Use this to poll while waiting for a launch." },
-  { name: "xedit_start", description: "Kicks off an asynchronous xEdit daemon launch (if not already starting/ready). Returns immediately with the current status. Subsequent xedit_status calls report progress." },
+  { name: "xedit_start", description: "Kicks off an asynchronous xEdit daemon launch (if not already starting/ready). Returns immediately with the current status. Optional args override the env-var defaults: { launcherPath?: string (xEdit.exe), gameMode?: string ('Fallout4' etc.), dataPath?: string (-D: Data dir; pass MO2's <gamePath>\\Data to avoid xEdit's registry-discovered Steam path), pluginsFile?: string (-P: custom plugins.txt; defaults to MO2 profile), moProfile?: string ('Default' etc.) }. Reads MO2 ModOrganizer.ini gamePath via the setting-up-bgs-modding-environment skill for the canonical dataPath." },
   { name: "xedit_health", description: "When the daemon is ready, sends system.ping through the named pipe to confirm it is still responsive (catches zombie daemons). Otherwise returns the same shape as xedit_status." },
   { name: "xedit_session", description: "Non-blocking. If the daemon is ready: returns gameMode, loadOrderSize, daemonPid. If not_started: auto-initiates launch. Otherwise: returns current status + hint to poll xedit_status." },
   { name: "xedit_list_capabilities", description: "Requires the daemon to be ready. Returns the curated 49-command digest + live drift report. Fast-fails with code='not_ready' otherwise." },
@@ -221,11 +244,11 @@ export async function main(): Promise<void> {
   let toolset: ServerToolset | null = null;
   let daemonRef: LaunchedDaemon | null = null;
 
-  function kickoffLaunch(): { kicked: boolean; reason?: string } {
+  function kickoffLaunch(overrides: LaunchOverrides = {}): { kicked: boolean; reason?: string } {
     if (state.status === "starting") return { kicked: false, reason: "already_starting" };
     if (state.status === "ready") return { kicked: false, reason: "already_ready" };
 
-    const opts = resolveLaunchOpts();
+    const opts = resolveLaunchOpts(overrides);
     if ("error" in opts) {
       state = { status: "failed", error: opts.error, at: Date.now() };
       return { kicked: false, reason: opts.error };
@@ -271,7 +294,15 @@ export async function main(): Promise<void> {
     }
 
     if (name === "xedit_start") {
-      const kick = kickoffLaunch();
+      // Extract override args (all optional). Unknown extra keys ignored.
+      const overrides: LaunchOverrides = {
+        launcherPath: typeof args.launcherPath === "string" ? args.launcherPath : undefined,
+        gameMode: typeof args.gameMode === "string" ? args.gameMode : undefined,
+        dataPath: typeof args.dataPath === "string" ? args.dataPath : undefined,
+        pluginsFile: typeof args.pluginsFile === "string" ? args.pluginsFile : undefined,
+        moProfile: typeof args.moProfile === "string" ? args.moProfile : undefined,
+      };
+      const kick = kickoffLaunch(overrides);
       const body = {
         ok: true,
         tool: name,

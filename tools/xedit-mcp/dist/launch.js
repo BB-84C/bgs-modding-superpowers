@@ -22,7 +22,7 @@ export async function launchDaemon(opts) {
     const pwsh = opts.pwshExe ?? "pwsh";
     const profile = opts.moProfile ?? "Default";
     const deadline = Date.now() + (opts.readyTimeoutMs ?? 180_000);
-    const launchOut = await runPwshCapture(pwsh, [
+    const launchArgs = [
         "-NoProfile",
         "-File",
         opts.clientScript,
@@ -34,7 +34,14 @@ export async function launchDaemon(opts) {
         opts.gameMode,
         "--mo-profile",
         profile,
-    ]);
+    ];
+    if (opts.dataPath) {
+        launchArgs.push("--data-path", opts.dataPath);
+    }
+    if (opts.pluginsFile) {
+        launchArgs.push("--plugins-file", opts.pluginsFile);
+    }
+    const launchOut = await runPwshCapture(pwsh, launchArgs);
     const pid = parseLaunchPid(launchOut);
     if (!pid) {
         throw new Error(`xedit-client process launch returned no pid: ${launchOut.slice(0, 600)}`);
