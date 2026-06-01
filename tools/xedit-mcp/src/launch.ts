@@ -10,14 +10,14 @@ import { createPowershellAdapter, type DaemonAdapter } from "./daemon-adapter.js
  * Why this path: `xedit-client.ps1 process launch` is the canonical outer client.
  * Internally it goes through the MO2 control-plane live bridge (which must already
  * be running — i.e. MO2 must be alive with the Mo2AgentControl plugin loaded so the
- * bootstrap files at `.artifacts/mo2/plugins/Mo2AgentControl/bootstrap/runtime/`
+ * bootstrap files at `<MO2_Root>/plugins/Mo2AgentControl/bootstrap/runtime/`
  * exist). The harness assumption is: caller starts MO2 first, then calls
  * `launchDaemon` to spawn the xEdit-as-tool inside that MO2 session.
  */
 export interface LaunchOptions {
   /** Absolute path to tools/mo2-vfs-launcher/xedit-client.ps1. */
   clientScript: string;
-  /** Absolute path to xEdit.exe under .artifacts/mo2/Stock Game/.../OpenCodeXEdit/. */
+  /** Absolute path to xEdit.exe; typically under `<MO2_Root>/tools/xEdit/`. */
   launcherPath: string;
   /** xEdit game mode, e.g. "Fallout4". */
   gameMode: string;

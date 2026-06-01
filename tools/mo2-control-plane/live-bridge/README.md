@@ -3,11 +3,11 @@
 This subtree holds the live bridge source for the current named-pipe discovery and real IPC slice.
 
 - Source lives in `tools/mo2-control-plane/live-bridge/`.
-- The expected deployment target for `mo2_agent_control.py` is `.artifacts/mo2/plugins/mo2_agent_control.py`.
+- The expected deployment target for `mo2_agent_control.py` is `<MO2_Root>/plugins/mo2_agent_control.py`.
 - The earlier scaffold-only slice was a source-level contract only.
 - `mo2_agent_control.py` now exposes `createPlugin()` as a real MO2 Python plugin entrypoint.
-- Support files stay under `.artifacts/mo2/plugins/Mo2AgentControl/`.
-- This slice now publishes bootstrap runtime files into `.artifacts/mo2/plugins/Mo2AgentControl/bootstrap/runtime` during plugin initialization in `init(organizer)`, not at bare import.
+- Support files stay under `<MO2_Root>/plugins/Mo2AgentControl/`.
+- This slice now publishes bootstrap runtime files into `<MO2_Root>/plugins/Mo2AgentControl/bootstrap/runtime` during plugin initialization in `init(organizer)`, not at bare import.
 - Scope stays tight: the bridge now runs a real local named-pipe server for `system.*` and harmless `launch.*` checks, but broader `usvfs`-aware launch behavior remains for later slices.
 - File-bootstrap is retained only as discovery and liveness, not as the command transport.
 - Locked runtime file names: `status.json`, `capabilities.json`, and `endpoint.json`.

@@ -47,11 +47,11 @@ Then point `opencode.json` at the local path:
 
 ## Local development checkout
 
-If you cloned this repo and want to run the plugin from your local checkout:
+If you cloned this repo and want to run the plugin from your local checkout, point `opencode.json` at the absolute path of the clone (forward slashes work on Windows):
 
 ```json
 {
-  "plugin": ["file:D:/awesome-bgs-mod-master"]
+  "plugin": ["file:/path/to/your/bgs-modding-superpowers/checkout"]
 }
 ```
 
