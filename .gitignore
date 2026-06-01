@@ -21,3 +21,12 @@ Desktop.ini
 
 # Dev-internal router (per AGENTS.md policy)
 AGENTS.md
+
+# xedit-hook-bridge: ship the DLL from dist/ only. The .pas source lives in
+# the sister xEdit fork (D:\TES5Edit-contrib), and Delphi build leftovers
+# (.dcu / .dproj.local / .identcache / .res) are dev-only artifacts.
+/tools/xedit-hook-bridge/src/
+/tools/xedit-hook-bridge/*.dcu
+/tools/xedit-hook-bridge/*.dproj.local
+/tools/xedit-hook-bridge/*.identcache
+/tools/xedit-hook-bridge/*.res

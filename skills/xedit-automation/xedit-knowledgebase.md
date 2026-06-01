@@ -7,6 +7,16 @@ This is the deep reference. Consult it when the hub skill's Top-N is not enough.
 - **UESP Creation Kit Wiki** — https://ck.uesp.net/wiki — primary source for record schema, field meanings, signature reference (KYWD, WEAP, ARMA, NPC_, MISC, etc.), and engine semantics. When you ask "what does this field actually mean," go here before guessing.
 - Forked xEdit automation contract: https://github.com/BB-84C/TES5Edit/tree/main/docs/notes/automation-contract — wire protocol, examples, COMPATIBILITY notes.
 
+## Ownership map (which artifact belongs to which repo)
+
+| Artifact | Owned by | Deployed by |
+|---|---|---|
+| xEdit.exe + runtime files | [BB-84C/TES5Edit](https://github.com/BB-84C/TES5Edit) (the agent-friendly fork) | `scripts/fetch-xedit-release.ps1` -> `<MO2Root>/tools/xEdit/` |
+| `xEditHookBridge.dll` (GUI-blocker hook for unattended automation) | **This plugin** (`bgs-modding-superpowers`) | `scripts/install-xedit-hook-bridge.ps1` -> `<MO2Root>/tools/xEdit/` (co-located with xEdit.exe) |
+| `Mo2AgentControl.dll` + `mo2_agent_control.py` (MO2 plugin) | **This plugin** | `scripts/install-mo2-control-plane.ps1` -> `<MO2Root>/plugins/` |
+| `xedit-client.ps1` (outer client) | **This plugin** | Runs from the plugin checkout; no copy step |
+| `xedit-mcp` (Node MCP server) | **This plugin** | Runs from the plugin checkout; no copy step |
+
 ## Daemon protocol essentials
 
 - Transport: Windows named pipe `\\.\pipe\xedit-<PID>`. One connection = one request → one response.
