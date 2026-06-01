@@ -5,8 +5,7 @@ This is the deep reference. Consult it when the hub skill's Top-N is not enough.
 ## External references (consult first)
 
 - **UESP Creation Kit Wiki** — https://ck.uesp.net/wiki — primary source for record schema, field meanings, signature reference (KYWD, WEAP, ARMA, NPC_, MISC, etc.), and engine semantics. When you ask "what does this field actually mean," go here before guessing.
-- Forked xEdit contract docs (local mirror): `D:\TES5Edit-contrib\docs\notes\automation-contract\` — wire protocol, examples, COMPATIBILITY notes.
-- Design spec: `docs/superpowers/specs/2026-05-26-xedit-skills-and-harness-mcp-design.md`.
+- Forked xEdit automation contract: https://github.com/BB-84C/TES5Edit/tree/main/docs/notes/automation-contract — wire protocol, examples, COMPATIBILITY notes.
 
 ## Daemon protocol essentials
 
@@ -87,7 +86,7 @@ Apply mode requires explicit `dryRun: false`; omitted `dryRun` defaults to `true
 
 ## Known drift (do not be surprised by these)
 
-- `D:\TES5Edit-contrib\README.md` still references `-AutomationPipe:<pipe-name>`. **That switch does not exist.** The real switches are `-automation-serve`, `-automation-cli-request/response`, `-automation-call-pid`, plus the new `-automation-mcp-mode` (when the fork patch lands).
+- The forked xEdit README at https://github.com/BB-84C/TES5Edit may still reference `-AutomationPipe:<pipe-name>`. **That switch does not exist.** The real switches are `-automation-serve`, `-automation-cli-request/response`, `-automation-call-pid`, plus the new `-automation-mcp-mode` (when the fork patch lands).
 - Contract version: source `"0.10"`, docs `"0.9"`. Treat as equivalent except for the `consent_required` code and `iKnowWhatImDoing` capability flag, which only exist in 0.10.
 - Some daemon responses include emoji or formatted strings; the MCP envelope strips/normalises these. Trust `data` / `summary`; ignore prose flourishes.
 
