@@ -12,3 +12,12 @@ Thumbs.db
 Desktop.ini
 
 /.external-resource
+
+# .opencode/ holds dev memory + acceptance artifacts + legacy skill stash;
+# ship only the OpenCode plugin code and the user-facing INSTALL.md.
+/.opencode/*
+!/.opencode/plugins/
+!/.opencode/INSTALL.md
+
+# Dev-internal router (per AGENTS.md policy)
+AGENTS.md
