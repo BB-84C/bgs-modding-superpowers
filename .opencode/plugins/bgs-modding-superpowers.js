@@ -42,31 +42,32 @@ export const BgsModdingSuperpowersPlugin = async () => {
   const bootstrap = readBootstrap();
 
   return {
-    name: 'bgs-modding-superpowers',
-
-    // (a) Plugin-return MCP map (belt-and-suspenders for OpenCode versions
-    //     that read the plugin-return `mcp:` field; see alvinunreal/oh-my-opencode-slim).
-    mcp: {
-      xedit: {
-        type: 'local',
-        command: ['node', XEDIT_MCP_ENTRY],
-      },
-    },
+    // NOTE: `mcp:` on the plugin return is NOT a documented Hook key in
+    // @opencode-ai/plugin's Hooks interface and is silently ignored by
+    // current OpenCode. The `config:` hook below is the only canonical
+    // surface for registering plugin-bundled MCP servers. (Verified against
+    // anomalyco/opencode upstream Hooks definition + real precedents like
+    // vercel-labs/coding-agent-template, glommer/memelord.)
 
     config: async (config) => {
-      // (b) Make our skills discoverable by appending to config.skills.paths.
+      // (a) Make our skills discoverable by appending to config.skills.paths.
       config.skills ??= {};
       config.skills.paths ??= [];
       if (!config.skills.paths.includes(SKILLS_DIR)) {
         config.skills.paths.push(SKILLS_DIR);
       }
 
-      // (c) Register the bundled xEdit MCP server via the documented opencode config.mcp surface.
-      //     Use ??= so user overrides in opencode.json win.
+      // (b) Register the bundled xEdit MCP server via the documented opencode
+      //     config.mcp surface. Use ??= so user overrides in opencode.json win.
+      //     `enabled: true` is explicit per every real-world LOCAL-stdio MCP
+      //     precedent observed in public opencode plugins.
       config.mcp ??= {};
       config.mcp.xedit ??= {
         type: 'local',
         command: ['node', XEDIT_MCP_ENTRY],
+        enabled: true,
+        environment: {},
+        // timeout default is 5000ms; bump if xedit-mcp init grows slow.
       };
     },
 

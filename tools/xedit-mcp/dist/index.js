@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createAuditLogger } from "./audit.js";
 import { defaultRegistry } from "./rules/registry.js";
 import { xeditSessionTool } from "./tools/session.js";
@@ -73,7 +74,23 @@ export async function main() {
     }));
     await server.connect(new StdioServerTransport());
 }
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Detect "invoked as the main entry" cross-platform.
+// On Windows the naive `file://${argv[1]}` form has backslashes and only 2
+// slashes, while import.meta.url is forward-slash + 3 slashes — string compare
+// never matches and main() silently no-ops, causing MCP hosts to see a
+// connection-closed (-32000) on startup. Use pathToFileURL to normalize.
+const invokedAsMain = (() => {
+    const argv = process.argv[1];
+    if (!argv)
+        return false;
+    try {
+        return import.meta.url === pathToFileURL(argv).href;
+    }
+    catch {
+        return false;
+    }
+})();
+if (invokedAsMain) {
     main().catch((e) => {
         console.error(e);
         process.exit(1);
