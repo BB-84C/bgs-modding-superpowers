@@ -81,7 +81,7 @@ When in doubt, load it.
   activating, deactivating, reordering, adding, or removing plugins from the
   load order. Do NOT edit `plugins.txt` blindly; xEdit can not change load
   order itself (docs 2.3), so the file edit is the only path for those
-  operations, and the asterisk-format rules + hardcoded vanilla master list
+  operations, and the asterisk-format rules + official-master detection rules
   are non-obvious.
 - **`setting-up-bgs-modding-environment`** — first-run setup including the
   MO2 `gamePath` inspection step you must do before launching xEdit with the
@@ -108,6 +108,24 @@ the wrong game data. Read MO2's `ModOrganizer.ini` `gamePath` value, append
 `\\Data`, and pass that.
 
 For load-order experimentation (test a subset of plugins to isolate a
-conflict, or rehearse a sort), generate a plugins.txt under
-`.opencode/artifacts/<task>/plugins.txt` per `writing-bgs-load-order` and
-pass it as `pluginsFile`.
+conflict, or rehearse a sort), generate a plugins.txt under an
+**agent-owned artifacts path** per `writing-bgs-load-order` and pass it as
+`pluginsFile`.
+
+## Dirty-state and relaunch control (NEW)
+
+The daemon already exposes `session.get_dirty_state`, and the MCP now
+surfaces three helper tools so the agent does not need to remember the raw
+daemon verb:
+
+- `xedit_dirty({})` — returns `{ dirty, dirtyFiles, unsavedChangeCount }` when
+  ready. This is the safe thing to call before any stop/restart.
+- `xedit_stop({ force?: true })` — if the session is dirty and `force` is not
+  set, refuses with `code: "dirty_state"` and the list of unsaved files.
+- `xedit_restart({ launcherPath?, gameMode?, dataPath?, pluginsFile?, moProfile?, force?: true })`
+  — same dirty-state safety as stop, then relaunches asynchronously with new
+  overrides.
+
+Use `xedit_restart` whenever you need to reboot xEdit with a different custom
+`pluginsFile` or `dataPath`. Do NOT tell the user to reconnect `/mcp` manually
+just to clear a zombie or change launch args.

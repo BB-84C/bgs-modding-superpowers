@@ -207,8 +207,8 @@ wait — that will time out. Instead:
    read `<MO2_Root>\ModOrganizer.ini` and extract the `gamePath` value:
 
    ```
-   gameName=Fallout 4
-   gamePath=@ByteArray(D:\\awesome-bgs-mod-master\\.artifacts\\mo2\\Stock Game\\Fallout 4)
+   gameName=<Target Game>
+   gamePath=@ByteArray(<MO2 managed game root>)
    ```
 
    Strip the `@ByteArray(...)` wrapper; the Data dir is `<gamePath>\Data`.
@@ -219,7 +219,7 @@ wait — that will time out. Instead:
 1. **Kick off the daemon launch.**
    ```
    xedit_start({
-     dataPath: "<MO2_Root>\\Stock Game\\Fallout 4\\Data",   // from step 0 above
+     dataPath: "<gamePath>\\Data",   // from step 0 above
    })
    ```
    Without an explicit `dataPath`, xEdit will discover the game via registry
@@ -230,8 +230,8 @@ wait — that will time out. Instead:
    experimentation), also pass `pluginsFile`:
    ```
    xedit_start({
-     dataPath: "<MO2_Root>\\Stock Game\\Fallout 4\\Data",
-     pluginsFile: ".opencode/artifacts/<task>/plugins.txt",
+     dataPath: "<gamePath>\\Data",
+     pluginsFile: "<agent-owned-artifacts-path>/plugins.txt",
    })
    ```
    The `writing-bgs-load-order` skill explains how to author the file.
@@ -296,6 +296,9 @@ In no-MO2 mode, only the dev-log and changelog steps need to pass.
 - **Calling `xedit_session` or any domain tool and blocking on the response.**
   Every tool returns immediately. If you see `status: "starting"`, poll
   `xedit_status`; do not call the same tool again in a tight loop.
+- **Using `/mcp reconnect` as the normal way to relaunch xEdit.**
+  Prefer `xedit_dirty`, `xedit_stop`, and `xedit_restart` so the agent can
+  decide whether to save or abandon unsaved edits before clearing state.
 - **Starting MO2 with `Start-Process -WindowStyle Hidden`** (or any other
   invisible/background mode). Always use the `start-mo2.ps1` helper, which
   forces a visible window.

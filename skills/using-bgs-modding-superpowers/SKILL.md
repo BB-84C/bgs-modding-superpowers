@@ -45,8 +45,11 @@ with `code: "not_ready"` if you call them before the daemon is ready.
 | Tool | Use |
 |---|---|
 | `xedit_status` | Pure read. Returns `{ status: "not_started" \| "starting" \| "ready" \| "failed", ... }`. Never modifies state. Use this to POLL while waiting for a launch. |
-| `xedit_start` | Kicks off an asynchronous daemon launch if not already starting/ready. Returns immediately. Accepts optional overrides: `{ launcherPath?, gameMode?, dataPath?, pluginsFile?, moProfile? }`. Use `dataPath` (MO2 `gamePath + "\\Data"`) to override xEdit's registry-discovered Steam path; use `pluginsFile` to point at a custom load order (see `writing-bgs-load-order`). The launch itself takes 60-240s; that work happens in the background. |
+| `xedit_start` | Kicks off an asynchronous daemon launch if not already starting/ready. Returns immediately. Accepts optional overrides: `{ launcherPath?, gameMode?, dataPath?, pluginsFile?, moProfile? }`. Use `dataPath` (MO2 `gamePath + "\\Data"`) to override xEdit's registry-discovered platform path; use `pluginsFile` to point at a custom load order (see `writing-bgs-load-order`). The launch itself takes 60-240s; that work happens in the background. |
 | `xedit_health` | When ready: sends `system.ping` through the named pipe to catch zombies. Returns `responsive: true \| false`. Otherwise: returns the same shape as `xedit_status`. |
+| `xedit_dirty` | Returns xEdit's dirty state immediately. When ready: wraps `session.get_dirty_state` and returns `{ dirty, dirtyFiles, unsavedChangeCount }`. Otherwise: returns the same shape as `xedit_status`. |
+| `xedit_stop` | Stops the daemon and clears MCP runtime state. If there are unsaved edits, it refuses unless `force: true` is passed. |
+| `xedit_restart` | Stops the daemon (same dirty-state safety as `xedit_stop`) and immediately kicks off a fresh async launch. Use this to relaunch with a new `pluginsFile` or `dataPath` instead of reconnecting `/mcp` manually. |
 
 ### Domain tools (6) — require ready, fast-fail otherwise
 
@@ -66,6 +69,9 @@ with `code: "not_ready"` if you call them before the daemon is ready.
 2. xedit_status({})                 -> poll until status="ready"   (sleep 5-15s between calls)
 3. xedit_health({})                 -> confirm responsive=true
 4. xedit_session({}) / xedit_*      -> normal domain work
+5. xedit_dirty({})                  -> check unsaved changes before any stop/restart
+6. xedit_stop({ force?: true })     -> stop + clear runtime state
+7. xedit_restart({ ..., force? })   -> relaunch with new overrides
 ```
 
 NEVER call a domain tool in a tight loop expecting it to "wait." If
@@ -100,9 +106,9 @@ The full daemon-command reference (49 commands + error codes + save semantics
    read-only investigator subagent FIRST.** The subagent burns its own context
    and returns a distilled summary. Do not loop hundreds of records through
    your own context.
-6. **First-run state**: if MO2 / xEdit / the control-plane DLL are not yet
-   set up on this machine, invoke `setting-up-bgs-modding-environment` BEFORE
-   any modpack work. That skill orchestrates detection and install.
+6. **First-run state**: if MO2 / xEdit / the control-plane Python plugin are
+   not yet set up on this machine, invoke `setting-up-bgs-modding-environment`
+   BEFORE any modpack work. That skill orchestrates detection and install.
 
 ## How to use this bootstrap
 
@@ -132,5 +138,5 @@ The full daemon-command reference (49 commands + error codes + save semantics
 ---
 
 > Plugin: `bgs-modding-superpowers`. Repo: https://github.com/BB-84C/bgs-modding-superpowers.
-> If any environmental component (MO2, xEdit, control-plane DLL) is missing,
+> If any environmental component (MO2, xEdit, control-plane Python plugin) is missing,
 > route through `setting-up-bgs-modding-environment` before continuing.

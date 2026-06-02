@@ -1,6 +1,6 @@
 ---
 name: writing-bgs-load-order
-description: "Use when reading, editing, or generating a Bethesda Game Studio load-order file (plugins.txt / loadorder.txt) for Fallout 4, Skyrim SE/AE/VR, Fallout 76, Starfield, or when launching xEdit with a custom plugin list. Authoritative reference for the asterisk-prefix format, hardcoded vanilla masters, ESL handling, and the routing rules between plugins.txt editing and xEdit daemon commands."
+description: "Use when reading, editing, or generating a Bethesda Game Studio load-order file (plugins.txt / loadorder.txt) for Fallout 4, Skyrim SE/AE/VR, Fallout 76, Starfield, or when launching xEdit with a custom plugin list. Authoritative reference for the asterisk-prefix format, official masters detection, ESL handling, and the routing rules between plugins.txt editing and xEdit daemon commands."
 ---
 
 # Writing a BGS load order (plugins.txt)
@@ -28,7 +28,7 @@ section at the bottom.
 | Vanilla install (no MO2) | `%LOCALAPPDATA%\<GameFolder>\plugins.txt` (e.g. `Fallout4`, `Skyrim Special Edition`, `Starfield`) |
 | MO2-managed | `<MO2_Root>\profiles\<ProfileName>\plugins.txt` |
 | MO2-managed sibling | `<MO2_Root>\profiles\<ProfileName>\loadorder.txt` (full order including inactive; MO2 keeps both) |
-| Agent-authored (experiments) | `.opencode/artifacts/<task>/plugins.txt` — generate your own, pass to `xedit_start({ pluginsFile })` |
+| Agent-authored (experiments) | `an agent-owned artifacts path` — generate your own, pass to `xedit_start({ pluginsFile })` |
 
 **Ownership in MO2 use**: MO2 writes `plugins.txt` whenever the user toggles
 plugin checkboxes in the GUI. LOOT can also write it. If you mutate it under
@@ -60,23 +60,30 @@ Verbatim parser rules (from `libloadorder/src/load_order/asterisk_based.rs`):
 - Order: first line = lowest load-order index = loaded first. Last line = wins
   conflicts.
 
-## Hardcoded vanilla masters — DO NOT add them
+## Official / vanilla masters — infer them from the current game, do not hardcode
 
-For Fallout 4, Skyrim SE, Skyrim VR, FO4 VR, Starfield: the engine loads its
-official plugins at fixed positions before reading `plugins.txt`. Listing them
-in `plugins.txt` is at best redundant and at worst confusing.
+The engine loads each game's official plugins at fixed positions before reading
+the user-managed `plugins.txt`. The exact set depends on the target game,
+installed DLC, and any Creation Club / verified-content bundles.
 
-| Game | Hardcoded plugins (omit from your plugins.txt) |
-|---|---|
-| Fallout 4 | `Fallout4.esm`, `DLCRobot.esm`, `DLCworkshop01.esm`, `DLCCoast.esm`, `DLCworkshop02.esm`, `DLCworkshop03.esm`, `DLCNukaWorld.esm`, all `cc*.esl` Creation Club plugins |
-| Skyrim SE | `Skyrim.esm`, `Update.esm`, `Dawnguard.esm`, `HearthFires.esm`, `Dragonborn.esm`, all `cc*.esl` |
-| Starfield | `Starfield.esm`, all `cc*.esl` |
+**Do not hardcode a per-game vanilla-master list in your workflow.** Instead,
+derive the official masters from the user's actual MO2-managed runtime:
 
-libloadorder's save() skips them; MO2 re-injects them as active at the top at
-read time. So whether they're in the file or not, they always load first.
+1. Read `<MO2_Root>\ModOrganizer.ini` to learn `gameName` and `gamePath`.
+2. Once xEdit is ready, call `xedit_call({ command: "files.list", args: {} })`
+   and look at the earliest, auto-loaded official plugins. Treat those as the
+   immutable official master set.
+3. If xEdit is not ready yet, inspect the MO2-managed game root (`<gamePath>\Data`)
+   and known official DLC/content files there. Do not add, remove, or reorder
+   them in your generated `plugins.txt`.
 
-**Practical rule for agent-authored plugins.txt**: omit the hardcoded list.
-Start your file with non-vanilla plugins.
+libloadorder's writer skips these early-loading official plugins on save; MO2
+re-injects them as active at read time. So whether they appear in the file or
+not, they load first.
+
+**Practical rule for agent-authored plugins.txt**: omit the official masters
+you inferred from the actual target runtime. Start your file with user-managed
+plugins instead.
 
 ## Six operations the agent does most often
 
@@ -164,32 +171,31 @@ ends at the file header of individual plugins.
 ## Generating a custom plugins.txt for xEdit experiments
 
 When you want xEdit to load only a subset of mods (e.g., to isolate a
-conflict between two specific plugins), generate a custom `plugins.txt` and
-pass it to `xedit_start`:
+conflict between two specific plugins), generate a custom `plugins.txt` under
+an **agent-owned artifacts path** and pass it to `xedit_start`:
 
 ```typescript
 // 1. Write the file
-const customPlugins = `# Agent-generated for conflict isolation between FooMod + BarMod
-*Fallout4.esm
-*Unofficial Fallout 4 Patch.esp
-*FooMod.esp
-*BarMod.esp
+const customPlugins = `# Agent-generated for conflict isolation between PluginA + PluginB
+*<PrimaryGameMaster>.esm
+*<OptionalCommunityFix>.esp
+*PluginA.esp
+*PluginB.esp
 `;
-await writeFile(".opencode/artifacts/foo-bar-isolation/plugins.txt", customPlugins);
+await writeFile("<agent-owned-artifacts-path>/foo-vs-bar/plugins.txt", customPlugins);
 
 // 2. Start xEdit pointing at the custom file + the right Data dir
 await xedit_start({
-  pluginsFile: ".opencode/artifacts/foo-bar-isolation/plugins.txt",
-  dataPath: "<MO2_Root>/Stock Game/Fallout 4/Data",   // or wherever the mods live
-  gameMode: "Fallout4",
+  pluginsFile: "<agent-owned-artifacts-path>/foo-vs-bar/plugins.txt",
+  dataPath: "<MO2_Root>/<managed game root>/Data",
+  gameMode: "<GameMode>",
 });
 ```
 
 Notes for the experimental file:
-- You CAN include the hardcoded vanilla masters here even though normally
-  you'd omit them — xEdit needs them present in the data dir but its own
-  module-selection only loads what's in `plugins.txt`. Leaving them out is
-  also fine; xEdit auto-loads them.
+- You MAY include the target game's primary / official masters here if you want
+  to make the experiment self-describing, but you do not need to. xEdit auto-
+  loads the official masters from the Data dir regardless.
 - Order matters even for a 3-plugin file. Top = loads first.
 - The file must be Windows-1252 encodable (UTF-8 works as long as you stay
   in ASCII).
@@ -219,8 +225,9 @@ gamePath=@ByteArray(D:\\awesome-bgs-mod-master\\.artifacts\\mo2\\Stock Game\\Fal
 The `gamePath` value (strip the `@ByteArray(...)` wrapper) is where the
 agent's `xedit_start({ dataPath: ... })` should point. Specifically, the Data
 directory is `<gamePath>\Data`. Without an explicit `dataPath`, xEdit falls
-back to the Windows registry — which points at the Steam install, NOT MO2's
-Stock Game. That's the source of "wrong Data" bugs.
+back to the Windows registry — which points at the platform install path,
+not necessarily the MO2-managed game root. That's the source of "wrong Data"
+bugs.
 
 ## Validation
 

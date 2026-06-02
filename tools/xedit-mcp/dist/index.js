@@ -112,6 +112,9 @@ const TOOL_DEFINITIONS = [
     { name: "xedit_status", description: "Returns the current xEdit daemon lifecycle state without blocking. status is one of 'not_started' | 'starting' | 'ready' | 'failed'. Use this to poll while waiting for a launch." },
     { name: "xedit_start", description: "Kicks off an asynchronous xEdit daemon launch (if not already starting/ready). Returns immediately with the current status. Optional args override the env-var defaults: { launcherPath?: string (xEdit.exe), gameMode?: string ('Fallout4' etc.), dataPath?: string (-D: Data dir; pass MO2's <gamePath>\\Data to avoid xEdit's registry-discovered Steam path), pluginsFile?: string (-P: custom plugins.txt; defaults to MO2 profile), moProfile?: string ('Default' etc.) }. Reads MO2 ModOrganizer.ini gamePath via the setting-up-bgs-modding-environment skill for the canonical dataPath." },
     { name: "xedit_health", description: "When the daemon is ready, sends system.ping through the named pipe to confirm it is still responsive (catches zombie daemons). Otherwise returns the same shape as xedit_status." },
+    { name: "xedit_dirty", description: "Returns xEdit's dirty state immediately. When ready: wraps session.get_dirty_state and returns { dirty, dirtyFiles, unsavedChangeCount }. Otherwise: returns the same shape as xedit_status." },
+    { name: "xedit_stop", description: "Stops the xEdit daemon and clears MCP state. Before shutdown it checks session.get_dirty_state. If there are unsaved changes and force!==true, returns code='dirty_state' with dirtyFiles instead of stopping. If the daemon is a zombie, use force:true to abandon unsaved work and clear the state." },
+    { name: "xedit_restart", description: "Stops the current daemon (same dirty-state safety as xedit_stop) and immediately kicks off a fresh asynchronous launch. Accepts the same overrides as xedit_start plus force?: boolean. Use this to reboot with a new pluginsFile or dataPath instead of reconnecting /mcp manually." },
     { name: "xedit_session", description: "Non-blocking. If the daemon is ready: returns gameMode, loadOrderSize, daemonPid. If not_started: auto-initiates launch. Otherwise: returns current status + hint to poll xedit_status." },
     { name: "xedit_list_capabilities", description: "Requires the daemon to be ready. Returns the curated 49-command digest + live drift report. Fast-fails with code='not_ready' otherwise." },
     { name: "xedit_find_record", description: "Requires the daemon to be ready. Locates records by {file, formId} or {editorId}. Fast-fails with code='not_ready' otherwise." },
@@ -150,6 +153,80 @@ export async function main() {
     let state = { status: "not_started" };
     let toolset = null;
     let daemonRef = null;
+    let launchGeneration = 0;
+    function clearRuntimeState(next = { status: "not_started" }) {
+        launchGeneration += 1;
+        state = next;
+        toolset = null;
+        daemonRef = null;
+    }
+    async function getDirtyState() {
+        if (state.status !== "ready" || !daemonRef) {
+            return {
+                ok: false,
+                body: {
+                    ok: true,
+                    tool: "xedit_dirty",
+                    data: { ...statusFields(state, daemonRef), responsive: false },
+                    hint: state.status === "not_started"
+                        ? "Daemon not started. Call xedit_start."
+                        : state.status === "starting"
+                            ? "Daemon still starting. Poll xedit_status."
+                            : "Daemon failed to start; inspect data.error.",
+                },
+            };
+        }
+        try {
+            const env = await daemonRef.adapter.call({ command: "session.get_dirty_state", args: {} });
+            if (!env.ok) {
+                const code = env.error?.code ?? "daemon_error";
+                const message = env.error?.message ?? "session.get_dirty_state failed";
+                return {
+                    ok: false,
+                    body: {
+                        ok: false,
+                        tool: "xedit_dirty",
+                        code,
+                        summary: message,
+                        hint: message,
+                    },
+                };
+            }
+            const result = (env.result ?? {});
+            const dirtyFiles = Array.isArray(result.dirtyFiles)
+                ? result.dirtyFiles.filter((x) => typeof x === "string")
+                : [];
+            const unsavedChangeCount = typeof result.unsavedChangeCount === "number" && Number.isFinite(result.unsavedChangeCount)
+                ? result.unsavedChangeCount
+                : dirtyFiles.length;
+            return {
+                ok: true,
+                body: {
+                    ok: true,
+                    tool: "xedit_dirty",
+                    data: {
+                        ...statusFields(state, daemonRef),
+                        dirty: result.dirty === true,
+                        dirtyFiles,
+                        unsavedChangeCount,
+                    },
+                },
+            };
+        }
+        catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+                ok: false,
+                body: {
+                    ok: false,
+                    tool: "xedit_dirty",
+                    code: "daemon_error",
+                    summary: msg,
+                    hint: msg,
+                },
+            };
+        }
+    }
     function kickoffLaunch(overrides = {}) {
         if (state.status === "starting")
             return { kicked: false, reason: "already_starting" };
@@ -157,15 +234,25 @@ export async function main() {
             return { kicked: false, reason: "already_ready" };
         const opts = resolveLaunchOpts(overrides);
         if ("error" in opts) {
-            state = { status: "failed", error: opts.error, at: Date.now() };
+            clearRuntimeState({ status: "failed", error: opts.error, at: Date.now() });
             return { kicked: false, reason: opts.error };
         }
+        const launchGen = ++launchGeneration;
         state = { status: "starting", startedAt: Date.now() };
         // Fire-and-forget: this promise resolves in the background while tool calls
         // return immediately. State is mutated in the closures below.
         void (async () => {
             try {
                 const daemon = await launchDaemon(opts);
+                if (launchGen !== launchGeneration) {
+                    try {
+                        await daemon.stop();
+                    }
+                    catch {
+                        /* best effort */
+                    }
+                    return;
+                }
                 daemonRef = daemon;
                 toolset = buildServerToolset({
                     adapter: daemon.adapter,
@@ -176,6 +263,9 @@ export async function main() {
             }
             catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
+                if (launchGen !== launchGeneration) {
+                    return;
+                }
                 state = { status: "failed", error: msg, at: Date.now() };
                 daemonRef = null;
                 toolset = null;
@@ -256,6 +346,99 @@ export async function main() {
                     hint: "Daemon claimed ready but did not respond to system.ping. It may be a zombie; consider restarting MO2.",
                 });
             }
+        }
+        if (name === "xedit_dirty") {
+            const dirty = await getDirtyState();
+            return jsonResult(dirty.body, !dirty.body.ok);
+        }
+        if (name === "xedit_stop") {
+            const force = args.force === true;
+            if (state.status === "not_started") {
+                return jsonResult({
+                    ok: true,
+                    tool: name,
+                    data: statusFields(state, daemonRef),
+                    message: "Daemon already stopped.",
+                });
+            }
+            if (state.status === "ready") {
+                const dirty = await getDirtyState();
+                if (dirty.ok) {
+                    const data = dirty.body.data;
+                    if (data.dirty && !force) {
+                        return jsonResult({
+                            ok: false,
+                            tool: name,
+                            code: "dirty_state",
+                            summary: "xEdit has unsaved changes. Refusing to stop without force=true.",
+                            data,
+                            hint: "Either save the dirty files first, or call xedit_stop({ force: true }) to abandon the in-memory edits.",
+                        }, true);
+                    }
+                }
+            }
+            const current = daemonRef;
+            clearRuntimeState();
+            if (current) {
+                try {
+                    await current.stop();
+                }
+                catch {
+                    /* best effort */
+                }
+            }
+            return jsonResult({
+                ok: true,
+                tool: name,
+                data: { status: "not_started" },
+                message: "Daemon stopped and MCP runtime state cleared.",
+            });
+        }
+        if (name === "xedit_restart") {
+            const force = args.force === true;
+            const overrides = {
+                launcherPath: typeof args.launcherPath === "string" ? args.launcherPath : undefined,
+                gameMode: typeof args.gameMode === "string" ? args.gameMode : undefined,
+                dataPath: typeof args.dataPath === "string" ? args.dataPath : undefined,
+                pluginsFile: typeof args.pluginsFile === "string" ? args.pluginsFile : undefined,
+                moProfile: typeof args.moProfile === "string" ? args.moProfile : undefined,
+            };
+            if (state.status === "ready") {
+                const dirty = await getDirtyState();
+                if (dirty.ok) {
+                    const data = dirty.body.data;
+                    if (data.dirty && !force) {
+                        return jsonResult({
+                            ok: false,
+                            tool: name,
+                            code: "dirty_state",
+                            summary: "xEdit has unsaved changes. Refusing to restart without force=true.",
+                            data,
+                            hint: "Either save the dirty files first, or call xedit_restart({ force: true, ... }) to abandon the in-memory edits and relaunch with the new overrides.",
+                        }, true);
+                    }
+                }
+            }
+            const current = daemonRef;
+            clearRuntimeState();
+            if (current) {
+                try {
+                    await current.stop();
+                }
+                catch {
+                    /* best effort */
+                }
+            }
+            const kick = kickoffLaunch(overrides);
+            return jsonResult({
+                ok: true,
+                tool: name,
+                data: statusFields(state, daemonRef),
+                kicked: kick.kicked,
+                message: kick.kicked
+                    ? "Daemon restart initiated in the background. Poll xedit_status until status='ready'."
+                    : (kick.reason ?? "Restart could not be initiated."),
+            });
         }
         // ---- DOMAIN tools ----
         if (name === "xedit_session") {

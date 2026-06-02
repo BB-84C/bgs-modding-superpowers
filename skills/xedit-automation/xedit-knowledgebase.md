@@ -13,7 +13,7 @@ This is the deep reference. Consult it when the hub skill's Top-N is not enough.
 |---|---|---|
 | xEdit.exe + runtime files | [BB-84C/TES5Edit](https://github.com/BB-84C/TES5Edit) (the agent-friendly fork) | `scripts/fetch-xedit-release.ps1` -> `<MO2Root>/tools/xEdit/` |
 | `xEditHookBridge.dll` (GUI-blocker hook for unattended automation) | **This plugin** (`bgs-modding-superpowers`) | `scripts/install-xedit-hook-bridge.ps1` -> `<MO2Root>/tools/xEdit/` (co-located with xEdit.exe) |
-| `Mo2AgentControl.dll` + `mo2_agent_control.py` (MO2 plugin) | **This plugin** | `scripts/install-mo2-control-plane.ps1` -> `<MO2Root>/plugins/` |
+| `mo2_agent_control.py` + `Mo2AgentControl/` runtime support dir (MO2 plugin) | **This plugin** | `scripts/install-mo2-control-plane.ps1` -> `<MO2Root>/plugins/` |
 | `xedit-client.ps1` (outer client) | **This plugin** | Runs from the plugin checkout; no copy step |
 | `xedit-mcp` (Node MCP server) | **This plugin** | Runs from the plugin checkout; no copy step |
 
@@ -81,6 +81,15 @@ Apply mode requires explicit `dryRun: false`; omitted `dryRun` defaults to `true
 - A `session.save` response with `savedFilesPendingShutdown` is **not** durable. The save is deferred until daemon shutdown.
 - Durability proof = (a) save → (b) daemon restart (new PID) → (c) readback of the affected records/headers/masters confirms the intended state.
 - Always restart before declaring a mutating workflow complete.
+
+## Dirty-state checks (current MCP surface)
+
+- The MCP can already check dirty state in two ways:
+  1. Direct passthrough: `xedit_call({ command: "session.get_dirty_state", args: {} })`
+  2. Dedicated helper: `xedit_dirty({})`
+- Preferred path: `xedit_dirty({})` before any `xedit_stop` / `xedit_restart`.
+  Those lifecycle tools will surface the same dirty-state information and
+  refuse to stop/restart unless `force: true` is passed.
 
 ## Error code reference (stable snake_case)
 
