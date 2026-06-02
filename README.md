@@ -52,7 +52,7 @@ Codex's marketplace cache copies files (it does not follow directory junctions),
 pwsh scripts/build-portable-plugin.ps1
 ```
 
-This produces `dist/portable-plugin/bgs-modding-superpowers/` (all real files, all paths relative) plus a sibling `marketplace.json`. End-users then run `npm install --omit=dev` inside each materialized MCP package (`tools/xedit-mcp/`, `tools/bgs-kb-mcp/`) to pull runtime dependencies.
+This produces `dist/portable-plugin/bgs-modding-superpowers/` (all real files, all paths relative, MCP runtime dependencies included) plus a sibling `marketplace.json`.
 
 ## First run
 
