@@ -4,21 +4,21 @@ import { defaultRegistry } from "../../src/rules/registry.js";
 import { createAuditLogger } from "../../src/audit.js";
 import { makeMockAdapter } from "../fixtures/daemon-mock.js";
 import type { ToolContext } from "../../src/types.js";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const ctx: ToolContext = {
-  sessionId: "s",
-  daemonPid: 1234,
+  sessionId: "sess-IC",
+  daemonPid: 4321,
   loadOrder: ["Fallout4.esm", "Patch.esp", "Other.esp"],
   capabilities: { contractVersion: "0.10", gameMode: "Fallout4", commands: [], fetchedAt: "" },
 };
 
 describe("xedit_inspect_conflicts tool", () => {
-  const audit = createAuditLogger({ baseDir: mkdtempSync(join(tmpdir(), "xedit-mcp-conflict-")) });
-
   it("verdict=no_conflict when conflict_status reports no_conflict", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-conflict-"));
+    const audit = createAuditLogger({ baseDir });
     const adapter = makeMockAdapter({
       "records.conflict_status": () => ({ status: "no_conflict" }),
       "records.winning_override": () => ({ file: "Patch.esp", formId: "0x012345" }),
@@ -37,6 +37,8 @@ describe("xedit_inspect_conflicts tool", () => {
   });
 
   it("verdict=breaking when conflict_status reports a hard conflict label", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-conflict-"));
+    const audit = createAuditLogger({ baseDir });
     const adapter = makeMockAdapter({
       "records.conflict_status": () => ({ status: "conflict_critical" }),
       "records.winning_override": () => ({ file: "Other.esp", formId: "0x012345" }),
@@ -52,5 +54,30 @@ describe("xedit_inspect_conflicts tool", () => {
     expect(env.ok).toBe(true);
     if (!env.ok) throw new Error("expected ok");
     expect((env.data as { verdict: string }).verdict).toBe("breaking");
+  });
+
+  it("audit line includes daemonPid + sessionId (carry-forward #2 alignment)", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-conflict-audit-"));
+    const audit = createAuditLogger({ baseDir });
+    const adapter = makeMockAdapter({
+      "records.conflict_status": () => ({ status: "no_conflict" }),
+      "records.winning_override": () => ({ file: "Patch.esp", formId: "0x012345" }),
+      "records.referenced_by": () => ({ referencers: [] }),
+    });
+    const handler = makeInspectConflictsHandler({
+      adapter,
+      registry: defaultRegistry(),
+      audit,
+      getContext: () => ctx,
+    });
+    const env = await handler({ file: "Patch.esp", formId: "0x012345" });
+    expect(env.ok).toBe(true);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const lines = readFileSync(join(baseDir, `${today}.jsonl`), "utf8").trim().split("\n");
+    const last = JSON.parse(lines[lines.length - 1]);
+    expect(last.tool).toBe("xedit_inspect_conflicts");
+    expect(last.sessionId).toBe("sess-IC");
+    expect(last.daemonPid).toBe(4321);
   });
 });

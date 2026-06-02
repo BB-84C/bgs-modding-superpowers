@@ -1,33 +1,41 @@
 import { ok as okEnv, refuse } from "../envelope.js";
 import { MCP_ERROR_CODES } from "../types.js";
 import { CAPABILITIES_DIGEST, allDigestCommands } from "../capabilities-digest.js";
+import { emitAudit } from "../audit-line.js";
 export function xeditListCapabilitiesTool(opts) {
-    return async (_args) => {
+    return async (args) => {
         const ctx = opts.getContext();
+        let env;
         if (!ctx?.capabilities) {
-            return refuse({
+            env = refuse({
                 tool: "xedit_list_capabilities",
                 summary: "Session not established",
                 code: MCP_ERROR_CODES.STATE_VIOLATION,
                 hint: "Call xedit_session first.",
             });
         }
-        const live = new Set(ctx.capabilities.commands);
-        const digest = new Set(allDigestCommands());
-        const onlyInLive = [...live].filter((c) => !digest.has(c)).sort();
-        const onlyInDigest = [...digest].filter((c) => !live.has(c)).sort();
-        return okEnv({
-            tool: "xedit_list_capabilities",
-            summary: `Digest ${digest.size} commands, live ${live.size}; drift ${onlyInLive.length + onlyInDigest.length}`,
-            status: "completed",
-            data: {
-                contractVersion: ctx.capabilities.contractVersion,
-                contractVersionExpected: CAPABILITIES_DIGEST.contractVersionExpected,
-                gameMode: ctx.capabilities.gameMode,
-                groups: CAPABILITIES_DIGEST.groups,
-                drift: { onlyInDigest, onlyInLive },
-            },
-        });
+        else {
+            const live = new Set(ctx.capabilities.commands);
+            const digest = new Set(allDigestCommands());
+            const onlyInLive = [...live].filter((c) => !digest.has(c)).sort();
+            const onlyInDigest = [...digest].filter((c) => !live.has(c)).sort();
+            env = okEnv({
+                tool: "xedit_list_capabilities",
+                summary: `Digest ${digest.size} commands, live ${live.size}; drift ${onlyInLive.length + onlyInDigest.length}`,
+                status: "completed",
+                data: {
+                    contractVersion: ctx.capabilities.contractVersion,
+                    contractVersionExpected: CAPABILITIES_DIGEST.contractVersionExpected,
+                    gameMode: ctx.capabilities.gameMode,
+                    groups: CAPABILITIES_DIGEST.groups,
+                    drift: { onlyInDigest, onlyInLive },
+                },
+            });
+        }
+        if (opts.audit) {
+            await emitAudit({ audit: opts.audit, tool: "xedit_list_capabilities", args, env, ctx });
+        }
+        return env;
     };
 }
 //# sourceMappingURL=list-capabilities.js.map

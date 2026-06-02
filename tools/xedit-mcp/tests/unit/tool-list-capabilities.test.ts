@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { xeditListCapabilitiesTool } from "../../src/tools/list-capabilities.js";
+import { createAuditLogger } from "../../src/audit.js";
 import { makeMockAdapter } from "../fixtures/daemon-mock.js";
 import type { ToolContext } from "../../src/types.js";
+import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const ctx: ToolContext = {
-  sessionId: "s",
+  sessionId: "sess-LC",
   daemonPid: 1234,
   capabilities: {
     contractVersion: "0.10",
@@ -39,5 +43,25 @@ describe("xedit_list_capabilities tool", () => {
     if (env.ok) throw new Error("expected refusal");
     expect(env.code).toBe("state_violation");
     expect(env.hint).toContain("xedit_session");
+  });
+
+  it("emits an audit line when audit logger is wired (carry-forward #2)", async () => {
+    const adapter = makeMockAdapter({});
+    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-listcaps-audit-"));
+    const audit = createAuditLogger({ baseDir });
+    const tool = xeditListCapabilitiesTool({ adapter, getContext: () => ctx, audit });
+    const env = await tool({});
+    expect(env.ok).toBe(true);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const logPath = join(baseDir, `${today}.jsonl`);
+    expect(existsSync(logPath)).toBe(true);
+    const lines = readFileSync(logPath, "utf8").trim().split("\n");
+    const last = JSON.parse(lines[lines.length - 1]);
+    expect(last.tool).toBe("xedit_list_capabilities");
+    expect(last.ok).toBe(true);
+    expect(last.decision).toBe("ok");
+    expect(last.sessionId).toBe("sess-LC");
+    expect(last.daemonPid).toBe(1234);
   });
 });

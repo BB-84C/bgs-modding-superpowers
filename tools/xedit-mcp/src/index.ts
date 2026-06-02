@@ -43,10 +43,11 @@ export function buildServerToolset(opts: ServerToolsetOptions): ServerToolset {
     sessionId: opts.sessionId,
     daemonPid: opts.daemonPid ?? process.pid,
     mcpModeActive: opts.mcpModeActive,
+    audit,
   });
   const getCtx = session.getContext;
 
-  const listCaps = xeditListCapabilitiesTool({ adapter: opts.adapter, getContext: getCtx });
+  const listCaps = xeditListCapabilitiesTool({ adapter: opts.adapter, getContext: getCtx, audit });
   const find = makeFindRecordHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
   const read = makeReadRecordHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
   const inspect = makeInspectConflictsHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
