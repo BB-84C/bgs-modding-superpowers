@@ -124,6 +124,54 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
 
+
+## 2026-06-02 - KB-4 closeout (Stage A + Stage B fan-out: 227 KB records across 5 packs)
+
+**Delivered (on branch feat/kb-4-fanout)**
+
+Stage A (core pack expansion via 4 parallel subagents):
+  - A1 xedit + plugin-format       19 records
+  - A2 load-order + archive-prec.  15 records
+  - A3 papyrus shared core         17 records (CK UESP via Playwright)
+  - A4 engine + Spriggit tooling   15 records
+  - 66 new core records on top of KB-1's 46 (112 records on disk)
+
+Stage B (per-game packs via 4 parallel subagents):
+  - B1 `bgs-kb-skyrim`           33 records
+  - B2 `bgs-kb-fallout4`         34 records (incl. FO4 VR)
+  - B3 `bgs-kb-fallout3-fnv`     28 records (GECK + NVSE/FOSE + TTW)
+  - B4 `bgs-kb-starfield`        20 records (conservative; sparse public docs)
+
+Total: 227 KB records across 5 packs. Each pack has `bgs-kb-meta.yml` and the four per-game pack manifests are built + committed + sha256-verified.
+
+**Acceptance evidence (orchestrator side)**
+
+- Anti-copy diff against `WingedGuardian/skyrimvr-claude-toolkit/KNOWLEDGEBASE.md` (35338 bytes -> 33963 forty-grams): **0 verbatim >=40-char matches** across all 227 records, scanned per pack.
+- URL spot-check: 4/5 Stage A samples HTTP 200 (CK UESP 403 on HEAD is expected -- the A3 fixer verified via Playwright). 4/4 Stage B samples HTTP 200.
+- Per-pack `cli validate` + `cli build` succeeded for all four game packs; manifests committed with sha256 entries matching the produced `kb.sqlite`.
+- All Playwright probes from B1-B4 cleared: CK UESP, AFK UFO4P, Sim Settlements (partial), GECK Wiki, TTW, Starfield Wiki, Bethesda Creations Starfield.
+
+**Now known**
+
+- `node:sqlite` holds file handles on Windows even after the holding process exits in some configurations. After many parallel CLI build / validate invocations from subagent workers, the core pack's `kb.sqlite` became unlinkable for the orchestrator session (EBUSY on rebuild after 8+ retries with 60s aggregate wait). The records on disk are correct, but the core `manifest.json` still reports the pre-Stage-A count of 46 records.
+- Per-pack manifests (skyrim / fallout4 / fallout3-fnv / starfield) are clean because each was built by its own fixer in its own Node process, with no inherited locks.
+- Sim Settlements Cloudflare gate is intermittent even with Playwright; FO4 settlement records use `confidence: medium` where the source could not be fully verified.
+- Starfield-specific facts are deliberately conservative because Starfield Wiki coverage is sparse and CE2 details are sometimes only available in the xEdit fork source. B4 shipped 20 records rather than the originally-targeted ~25 because the fixer refused to pad with unverified claims.
+- The plan's >=2000 record target is aspirational; this loop ships a real 227-record foundation that exercises every schema seam (variants, excludes, related, queryKeys, sources). Deeper fan-out is a future iteration.
+
+**Carry-forwards**
+
+- **Core kb.sqlite rebuild**: regenerate in a fresh shell session (kills the lingering Node handle) before Release artifact zip creation. The `records/` subtree is the source of truth; running `cli build core` will produce a `kb.sqlite` + `manifest.json` that correctly reports 112 records.
+- **KB-4h Release publishing** (GitHub Release artifacts for all 5 packs + `manifest-index.json`): deferred to a fresh session after the core rebuild. KB-5 and KB-6 do not depend on the Release being live.
+- `debugging` domain remains broad as observed in KB-1; KB-4 records did not narrow it. Future curation pass.
+- Sim Settlements + parts of Nexus Cloudflare gating may need a future Playwright pass with longer waits / different User-Agent.
+
+**Implications for later phases**
+
+- KB-5 can rely on the per-pack manifests for its lesson-log migration acceptance walkthrough.
+- KB-6 can implement `bgs_kb_check_updates` / `bgs_kb_install_pack` against the per-pack pack format already proven by Stage B. The Release-artifact distribution still needs to be staged once the core rebuild completes.
+- Final KB-* closeout entry should re-state the stale-core carry-forward so the next session begins by clearing it before any Release publish.
+
 ## 2026-06-02 — KB-3 closeout (maintaining skill + setting-up split)
 
 **Delivered (on branch `feat/kb-3-maintaining-skill`)**
