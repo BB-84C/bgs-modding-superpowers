@@ -2,21 +2,19 @@
 
 Sibling MCP package for the BGS Modding agentic knowledge base.
 
-This package will serve pack-based SQLite + FTS5 + BM25 retrieval across the
+This package serves pack-based SQLite + FTS5 + BM25 retrieval across the
 cross-game core pack and per-game packs for Skyrim, Fallout, and Starfield
 modding workflows. It is independent of `xedit-mcp`: KB lookups do not start
 xEdit, do not require MO2, and do not hold live plugin-file state.
 
 ## Status
 
-KB-1c bootstrap only.
+KB-2 stdio MCP server shipped.
 
-- Server tools (`bgs_kb_status`, `bgs_kb_query`, `bgs_kb_get`, etc.) land in
-  KB-2.
-- CLI subcommands land later: `build` in KB-1e, `validate` / `info` in KB-1f,
-  and `render` in KB-5.
-- For now, `src/index.ts` deliberately exits with a clear KB-2 pointer, and
-  `src/cli.ts` only implements `--help`.
+- Server tools: `bgs_kb_status`, `bgs_kb_query`, `bgs_kb_get`.
+- CLI subcommands shipped: `build`, `validate`, `info`; `render` lands later in KB-5.
+- The plugin registers this server as `bgs_kb` beside `xedit` in `.mcp.json`
+  and the OpenCode plugin config hook.
 
 ## SQLite library decision
 

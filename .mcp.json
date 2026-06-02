@@ -3,6 +3,10 @@
     "xedit": {
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/tools/xedit-mcp/dist/index.js"]
+    },
+    "bgs_kb": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/tools/bgs-kb-mcp/dist/index.js"]
     }
   }
 }

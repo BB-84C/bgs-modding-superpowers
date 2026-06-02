@@ -24,7 +24,7 @@ The agent-facing skills are documented separately at `skills/xedit-automation/` 
 This MCP is wired up automatically when `bgs-modding-superpowers` is installed:
 
 - **OpenCode**: the plugin's `.opencode/plugins/bgs-modding-superpowers.js` writes `config.mcp.xedit = { type: "local", command: ["node", <dist/index.js>] }`.
-- **Claude Code / Codex**: `.mcp.json` at the plugin root declares the server with `${CLAUDE_PLUGIN_ROOT}/tools/xedit-mcp/dist/index.js`.
+- **Claude Code / Codex**: `.mcp.json` at the plugin root declares this server with `${CLAUDE_PLUGIN_ROOT}/tools/xedit-mcp/dist/index.js` alongside the sibling `bgs_kb` server.
 
 End users never run `xedit-mcp` directly. The MCP receives stdio requests from the host agent's MCP client and forwards them to the xEdit daemon via the `xedit-client.ps1` outer client at `tools/mo2-vfs-launcher/`.
 

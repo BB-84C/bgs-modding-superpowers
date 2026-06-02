@@ -2,8 +2,9 @@
 //
 // Wires three things:
 //   1. config.skills.paths: append <plugin>/skills so OpenCode discovers our SKILL.md files
-//   2. config.mcp.xedit:    register the bundled xedit-mcp stdio server
-//                           (node tools/xedit-mcp/dist/index.js)
+//   2. config.mcp.xedit + config.mcp.bgs_kb:
+//                           register the bundled MCP stdio servers
+//                           (node tools/<server>/dist/index.js)
 //   3. first-user-message bootstrap: inject the using-bgs-modding-superpowers SKILL body
 //                                    into the first user message so the host agent loads
 //                                    the bootstrap on every session start
@@ -23,6 +24,7 @@ const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
 
 const SKILLS_DIR = path.join(PLUGIN_ROOT, 'skills');
 const XEDIT_MCP_ENTRY = path.join(PLUGIN_ROOT, 'tools', 'xedit-mcp', 'dist', 'index.js');
+const BGS_KB_MCP_ENTRY = path.join(PLUGIN_ROOT, 'tools', 'bgs-kb-mcp', 'dist', 'index.js');
 const BOOTSTRAP_SKILL = path.join(SKILLS_DIR, 'using-bgs-modding-superpowers', 'SKILL.md');
 
 // Sentinel used to detect already-injected bootstrap so we don't double-inject across reloads.
@@ -57,7 +59,7 @@ export const BgsModdingSuperpowersPlugin = async () => {
         config.skills.paths.push(SKILLS_DIR);
       }
 
-      // (b) Register the bundled xEdit MCP server via the documented opencode
+      // (b) Register the bundled MCP servers via the documented opencode
       //     config.mcp surface. Use ??= so user overrides in opencode.json win.
       //     `enabled: true` is explicit per every real-world LOCAL-stdio MCP
       //     precedent observed in public opencode plugins.
@@ -70,6 +72,13 @@ export const BgsModdingSuperpowersPlugin = async () => {
       config.mcp.xedit ??= {
         type: 'local',
         command: ['node', XEDIT_MCP_ENTRY],
+        enabled: true,
+        environment: {},
+        timeout: 240000,
+      };
+      config.mcp.bgs_kb ??= {
+        type: 'local',
+        command: ['node', BGS_KB_MCP_ENTRY],
         enabled: true,
         environment: {},
         timeout: 240000,
