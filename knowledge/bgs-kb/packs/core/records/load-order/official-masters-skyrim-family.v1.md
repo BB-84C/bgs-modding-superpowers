@@ -15,8 +15,8 @@ sources:
     ref: skills/writing-bgs-load-order/SKILL.md
     sectionPath: Official / vanilla masters
   - kind: wiki
-    url: "https://en.uesp.net/wiki/Skyrim:Files"
-    ref: UESP Skyrim files
+    url: "https://en.uesp.net/wiki/Skyrim:Skyrim"
+    ref: UESP Skyrim
 related: [load-order.official-masters-derived-from-runtime.v1]
 lastReviewed: "2026-06-02"
 schemaVersion: 1
