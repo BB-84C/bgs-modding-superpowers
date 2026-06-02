@@ -49,6 +49,7 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 | MCP integrations beyond xEdit | Specified only | Specs live at `docs/internal/mcp-specs/` (`nexus-metadata`, `loot-metadata`, `translation-memory`). |
 | safety hooks | Foundation in place | Runtime hook code lives in `hooks/`; hook specs moved to `docs/internal/hook-specs/`. |
 | save-safety automation | Explicitly deferred | The design calls for it later, but no real save-safety automation should ship until a real curator loop exists. |
+| agentic cross-game BGS knowledge base | Planned (architecture chosen 2026-06-02) | Sibling `tools/bgs-kb-mcp/` + hybrid records under `knowledge/bgs-kb/` + bundled core + per-game Release-artifact packs. See 2026-06-02 entry for full architecture. Scale: ~2500-3000 items across Skyrim / FO3 / FNV / FO4 / Starfield, de-duplicated via per-game variant overlays. |
 
 ## Phase Ladder
 
@@ -63,6 +64,17 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 9. Phase 8 controlled higher-risk automation: add carefully gated automation only after the read-only and operator-guided loops are proven.
 10. Phase 9 packaging and publishable plugin surface: finalize packaging metadata, command surfaces, and publishable OpenCode plugin structure.
 
+### Cross-cutting track: Agentic Knowledge Base (KB-1 through KB-6)
+
+Runs in parallel with the phase ladder above, not as a single inserted phase, because it touches multiple workflows (conflict audit, install planning, diagnostics, setup). Phases live in the 2026-06-02 architecture entry below.
+
+- KB-1 — schema + seed records extracted from existing `xedit-knowledgebase.md` and `writing-bgs-load-order/SKILL.md`.
+- KB-2 — `tools/bgs-kb-mcp/` with `bgs_kb_status` / `bgs_kb_query` / `bgs_kb_get`; loads bundled core pack only.
+- KB-3 — `setting-up-bgs-modding-environment` skill gains pack-acquisition + cache-hygiene steps.
+- KB-4 — per-game packs (FO4, SkyrimSE, FO3, FNV, Starfield) published as GitHub Release artifacts.
+- KB-5 — dual-write lessons; legacy `xedit-knowledgebase.md` becomes generated-from-records or retired.
+- KB-6 — optional `bgs_kb_check_updates` + opt-in refresh; eval harness for retrieval quality.
+
 ## Dependency / Blocker Map
 
 - Codex still expects a `plugins/<name>/` marketplace subdirectory layout. The current local-only workaround uses a gitignored `plugins/` tree plus absolute paths. A real publishable Codex packaging story is still outstanding.
@@ -75,6 +87,8 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 - Higher-risk safety and packaging automation should stay behind the read-only workflow until operational behavior is verified in practice.
 - The current xEdit MCP still assumes MO2 is already running. A future release may choose to auto-start MO2, but only if the visible-GUI invariant is preserved and stale-process cleanup remains explicit.
 - Any write-capable packaging or patching step remains gated by safety rules, explicit targets, and confidence earned from the earlier workflow phases.
+- The agentic KB track (KB-1..KB-6) must keep `bgs-kb-mcp` independent of xEdit daemon readiness — KB queries must work before MO2 / xEdit are configured (the setup skill needs guidance while environment state is incomplete). KB tools never auto-start xEdit. KB records are advisory; xEdit MCP semantic readback remains authoritative for actual plugin / load-order state.
+- KB pack distribution must keep the portable-plugin tree small (Target 1 invariant). Only the `core` pack ships inline; per-game packs are GitHub Release artifacts pulled on user consent via the setup skill.
 
 ## Not Yet Real
 
@@ -104,10 +118,78 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 
 The reshape to a Superpowers-shaped multi-harness plugin is complete in the local repo (`main`). Immediate next targets:
 
-1. **Portable publishability** — `scripts/build-portable-plugin.ps1` now stages a self-contained `dist/portable-plugin/bgs-modding-superpowers/` tree (no junctions, no machine-specific paths). Remaining work: stage that tree onto a release branch (or release artifact) so end-users on Codex can consume it without running the build script.
-2. **Read-only xEdit completion** — Batch 2 carry-forwards #2 / #4 / #5 / #6 are closed (see STATUS file). Remaining: representative W2 matrix needs a `breaking` fixture (CF #1), manual GUI parity evidence under `.opencode/artifacts/xedit-mcp/acceptance/<batch>/manual-parity/` (CF #3), daemon-adapter latency measurement before any snapshot/preview-heavy mutating flow (CF #7).
+1. **Agentic cross-game knowledge base (KB track)** — architecture chosen 2026-06-02; see entry below. Next concrete step is KB-1: schema + seed records under `knowledge/bgs-kb/` extracted from the existing `xedit-knowledgebase.md` and `writing-bgs-load-order` skill. Long-term shape: sibling `tools/bgs-kb-mcp/` server + hybrid records with per-game variant overlays + bundled core / per-game Release-artifact distribution. This is the next major workstream.
+2. **Portable publishability** — `scripts/build-portable-plugin.ps1` now stages a self-contained `dist/portable-plugin/bgs-modding-superpowers/` tree (no junctions, no machine-specific paths). Remaining work: stage that tree onto a release branch (or release artifact) so end-users on Codex can consume it without running the build script. The KB track must respect this invariant — only the core pack ships inline.
+3. **Read-only xEdit completion** — Batch 2 carry-forwards #2 / #4 / #5 / #6 are closed (see STATUS file). Remaining: representative W2 matrix needs a `breaking` fixture (CF #1), manual GUI parity evidence under `.opencode/artifacts/xedit-mcp/acceptance/<batch>/manual-parity/` (CF #3), daemon-adapter latency measurement before any snapshot/preview-heavy mutating flow (CF #7).
 
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
+
+## 2026-06-02 — Agentic cross-game KB architecture (decision, not yet built)
+
+**Context**
+
+Today's xEdit knowledge surface is a single deep-reference markdown file (`skills/xedit-automation/xedit-knowledgebase.md`) and short skill bodies. The reference repo `WingedGuardian/skyrimvr-claude-toolkit` carries "600+ lines of Skyrim modding knowledge" as a single ~35 KB `KNOWLEDGEBASE.md` auto-loaded per session. That pattern does not scale to our target: ~2500-3000 items across Skyrim, Fallout 3, Fallout New Vegas, Fallout 4, Starfield, with significant shared BGS-engine substrate that should de-duplicate.
+
+**Architecture decision (chosen after 4-way multi-perspective consultation: librarian-alpha on reference repo, librarian-beta on agentic KB tech survey, oracle + oracle-gamma on architecture)**
+
+Storage model: **hybrid records** — structured frontmatter (id, title, domains, tasks, signatures, appliesTo.games, appliesTo.engineFamilies, appliesTo.excludes, severity, confidence, sources, lastReviewed) + prose body for nuance. Pure prose loses retrieval; pure structured loses caveat depth.
+
+Cross-game de-duplication: **base record + per-game variant overlays**, NOT pure `games: [...]` tag duplication. A single "loose files override archives" record applies to FO4 + SkyrimSE with `variants.Fallout4` adding precombine/previs caveats and `variants.SkyrimSE` adding behavior-generation caveats. Variant merge happens server-side in `bgs_kb_get`.
+
+Retrieval seam: **new sibling `tools/bgs-kb-mcp/`**, NOT folded into `xedit-mcp`. The substrate is different — xedit-mcp is a live-daemon execution harness with readiness semantics; the KB is static curated content with its own lifecycle. Per `~/.config/opencode/memory/40-low-intrusion-architecture.md`, the boundary is honest. The roadmap already frames `nexus-metadata` / `loot-metadata` / `translation-memory` as sibling MCP tracks; the KB joins that pattern. KB queries must work before MO2 / xEdit are configured.
+
+Tool surface: `bgs_kb_status`, `bgs_kb_query`, `bgs_kb_get`, and optional `bgs_kb_check_updates` / `bgs_kb_install_pack` for network refresh. Query returns ranked snippet hits + appliesTo + sources; agent calls `get` only after a promising hit. Atomic primitives, not bundled "answer everything" tools.
+
+v1 storage tech: **JSONL records + lightweight JS-side FTS** (minisearch or flexsearch). Pure-JS, zero native deps — preserves the plugin's current zero-native-dep invariant (multi-harness portability, Codex marketplace friction). SQLite + FTS5 stays the documented upgrade path if BM25-quality relevance becomes load-bearing.
+
+Source of truth: `knowledge/bgs-kb/` **in this repo**:
+- `knowledge/bgs-kb/schema/record.schema.json` — JSON Schema for record validation
+- `knowledge/bgs-kb/core/records/{xedit,load-order,archive-precedence,papyrus}/...` — shared substrate
+- `knowledge/bgs-kb/games/{fallout4,skyrimse,fallout3,falloutnv,starfield}/records/...` — per-game overlays
+- `knowledge/bgs-kb/guides/...` — long-form prose where records are too granular (e.g. generated `xedit-deep-reference.md`)
+
+Distribution:
+- **Plugin ships `core` pack bundled** (small, ~1-3 MB) — works offline immediately.
+- **Per-game packs published as GitHub Release artifacts** (`bgs-kb-fallout4-<version>.zip` etc.) pulled by `setting-up-bgs-modding-environment` skill on user consent.
+- **Installed cache** at `%LOCALAPPDATA%/bgs-modding-superpowers/kb/<pack>/<version>/`.
+- **Pack format**: zipped JSONL + `manifest.json` with sha256 + schemaVersion + minPluginVersion gates.
+- **KB cadence** is independent of plugin cadence; KB content fixes do not force a plugin re-release.
+
+Reference-repo lessons applied:
+- Steal: hub-skill + on-demand-Read separation, path-glob auto-activation, slash-command workflow skills, top-N hot-cache, source-cited bottom-up entries.
+- Avoid: single flat markdown at scale (35 KB × 5 games = 175 KB+ stops working before game #2), `skyrim-` skill prefix (would explode N×M with per-game tool wrappers), no per-entry game-mode tag (inline `(VR)` prose markers don't survive multi-game expansion), CLAUDE.md mixing config + knowledge routing.
+
+**Migration phases (KB-1 .. KB-6)**
+
+- **KB-1** — schema + seed records: extract today's high-value facts from `skills/xedit-automation/xedit-knowledgebase.md` and `skills/writing-bgs-load-order/SKILL.md` into structured records under `knowledge/bgs-kb/core/`. Old markdown stays put. JSON Schema + ~50 seed records.
+- **KB-2** — `tools/bgs-kb-mcp/` ships `bgs_kb_status` / `bgs_kb_query` / `bgs_kb_get`. Loads bundled core pack only. New MCP registered in `.mcp.json` + `.opencode/plugins/bgs-modding-superpowers.js`. Portable-plugin build script copies `knowledge/bgs-kb/core/` + `tools/bgs-kb-mcp/dist/`.
+- **KB-3** — `setting-up-bgs-modding-environment` skill gains explicit KB acquisition workflow: ask target games -> detect cache -> consent for >threshold downloads -> fetch from GitHub Releases -> verify checksum -> smoke test (`bgs_kb_query` returns hits) -> cache hygiene (prune old versions).
+- **KB-4** — author per-game packs: FO4 (precombine/previs, BA2, settlement worldspace), SkyrimSE (scripts, animation generation, behavior outputs), FO3 / FNV (legacy plugins.txt + loadorder.txt model), Starfield (toolchain caution). Publish as GitHub Release assets.
+- **KB-5** — `xedit-automation` lesson-log appending changes from "edit `xedit-knowledgebase.md`" to "add KB record"; mechanically-checkable footguns become xEdit MCP rule candidates; legacy markdown becomes generated-from-records or retired.
+- **KB-6** — optional `bgs_kb_check_updates` + opt-in refresh; eval harness for retrieval quality (negative-case fixtures: "FO4 precombine" query with `game=skyrimse` filter should suppress FO4-only records).
+
+**Now known (from the consultation)**
+
+- The reference repo's loading model is NOT what its README claims. `KNOWLEDGEBASE.md` is opt-in `Read`, not auto-stuffed; the auto-load happens via `CLAUDE.md` (top-15 hot cache, ~3K tokens) + path-triggered `skyrim-context` SKILL (~700 tokens on `*.psc/*.pex/Data/**`). Our hub `xedit-automation` SKILL already follows this pattern.
+- Reference repo's `skyrim-bsa` skill already path-globs `**/*.ba2` — proves a multi-game seam exists in shape, but the rest of the repo is Skyrim-anchored.
+- No public Bethesda / xEdit / Papyrus / Creation Engine KB MCP exists at our target scale. This is greenfield for the modding domain.
+- Closest public references: `nicholasglazer/gnosis-mcp` (SQLite + FTS5 + RRF hybrid; reports 8.7 ms mean MCP round-trip, p50 <30 ms hybrid on 700 docs), `alphabet-h/kb-mcp` (sqlite-vec + FTS5 + RRF + reranker), `macanolli/KnowledgeBaseMCP` (small-model-friendly: `quick_search` / `read_note` / `get_note_summary`).
+- At 2500-3000 items, bulk-loading the corpus into context is ruinous: 3000 items × ~1 KB ≈ 3 MB ≈ hundreds of K tokens before ranking. Query-and-snippet contract is the only thing that scales.
+
+**Implications for later phases**
+
+- Phase 2 (file/archive reasoning and install planning), Phase 5 (test-session guidance), and the game-specific pressure points section all become consumers of KB queries — the KB is cross-cutting, which is why it runs as the KB-1..KB-6 track rather than as a single phase insertion.
+- Save-safety automation (deferred) can use KB symptom records ("save not durable", "Papyrus stuck") as discovery surface once a real curator loop exists.
+- LOOT integration (planned) can become a KB consumer (LOOT metadata → KB records on a known plugin set) rather than a separate MCP.
+
+**Carry-forwards / risks**
+
+- **Retrieval false negatives without embeddings**: mitigation = strong metadata + aliases + symptoms + task tags + `related` links. Vector store reserved as future option.
+- **Stale folklore**: every record needs `confidence`, `sources`, `lastReviewed`. Unsourced "community says" facts get lower confidence rank.
+- **Schema overreach**: keep body prose first-class. Maintainers will stop authoring if every nuance must fit a field.
+- **xedit-mcp pollution**: bgs-kb-mcp must stay independent. If KB tools shipped inside xedit-mcp, they would inherit daemon-readiness failures exactly when the setup skill needs them.
+- **File-count vs file-size**: prefer JSONL shards (small file count, larger per-file) over thousands of individual markdown files (Codex cache copy friction).
+- **Plugin/KB compat drift**: enforce `minPluginVersion` + `schemaVersion` gates in `manifest.json`.
 
 ## 2026-06-01 — Batch 2 carry-forwards + portable publishability + Target 3 closure
 
