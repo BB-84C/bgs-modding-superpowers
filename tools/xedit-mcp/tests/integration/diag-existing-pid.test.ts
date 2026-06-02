@@ -1,14 +1,28 @@
 import { describe, it, expect } from "vitest";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createPowershellAdapter } from "../../src/daemon-adapter.js";
 import { buildServerToolset } from "../../src/index.js";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const REPO_ROOT = resolve(__dirname, "../../../../");
+
 const PID = Number.parseInt(process.env.XEDIT_PID ?? "0", 10);
-const ENABLED = process.env.XEDIT_MCP_INTEGRATION === "1" && PID > 0;
+// Diag tests are double-gated (see diag-raw-adapter.test.ts for the convention).
+const ENABLED =
+  process.env.XEDIT_MCP_INTEGRATION === "1" &&
+  process.env.BGS_MCP_DIAG === "1" &&
+  PID > 0;
+
+const CLIENT_SCRIPT =
+  process.env.BGS_TEST_CLIENT_SCRIPT ??
+  resolve(REPO_ROOT, "tools/mo2-vfs-launcher/xedit-client.ps1");
 
 describe.runIf(ENABLED)("diag — talk to pre-launched xEdit pid via MCP", () => {
   it("xedit_session against an already-loaded daemon reports >0 files", async () => {
     const adapter = createPowershellAdapter({
-      clientScript: "D:/awesome-bgs-mod-master/tools/mo2-vfs-launcher/xedit-client.ps1",
+      clientScript: CLIENT_SCRIPT,
       pid: PID,
       pwshExe: "pwsh",
     });

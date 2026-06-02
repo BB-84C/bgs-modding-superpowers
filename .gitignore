@@ -12,3 +12,29 @@ Thumbs.db
 Desktop.ini
 
 /.external-resource
+
+# .opencode/ holds dev memory + acceptance artifacts + legacy skill stash;
+# ship only the OpenCode plugin code and the user-facing INSTALL.md.
+/.opencode/*
+!/.opencode/plugins/
+!/.opencode/INSTALL.md
+
+# Dev-internal router (per AGENTS.md policy)
+AGENTS.md
+
+# xedit-hook-bridge: ship the DLL from dist/ only. The .pas source lives in
+# the sister xEdit fork (D:\TES5Edit-contrib), and Delphi build leftovers
+# (.dcu / .dproj.local / .identcache / .res) are dev-only artifacts.
+/tools/xedit-hook-bridge/src/
+/tools/xedit-hook-bridge/*.dcu
+/tools/xedit-hook-bridge/*.dproj.local
+/tools/xedit-hook-bridge/*.identcache
+/tools/xedit-hook-bridge/*.res
+
+# Codex requires plugins/<name>/ subdirectory layout (its cache-copy step
+# silently drops directory junctions). The local plugins/<name>/ tree is a
+# per-machine install workaround that holds real .codex-plugin/ + .mcp.json
+# files plus junctions to skills/tools/hooks/.opencode for browsing. The
+# absolute paths inside those copies are machine-specific. A v0.2 follow-up
+# will ship a portable Codex-shaped subdirectory; for now it stays local.
+/plugins/

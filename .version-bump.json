@@ -1,0 +1,21 @@
+{
+  "files": [
+    { "path": "package.json", "field": "version" },
+    { "path": ".claude-plugin/plugin.json", "field": "version" },
+    { "path": ".claude-plugin/marketplace.json", "field": "plugins.0.version" },
+    { "path": ".codex-plugin/plugin.json", "field": "version" }
+  ],
+  "audit": {
+    "exclude": [
+      "RELEASE-NOTES.md",
+      "CHANGELOG.md",
+      "docs/internal/**",
+      ".artifacts/**",
+      ".opencode/**",
+      ".external-resource/**",
+      "node_modules/**",
+      "tools/xedit-mcp/dist/**",
+      "tools/xedit-mcp/node_modules/**"
+    ]
+  }
+}

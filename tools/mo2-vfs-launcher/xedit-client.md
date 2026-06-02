@@ -2,7 +2,7 @@
 
 `xedit-client.ps1` is the MO2-facing outer client for native xEdit automation.
 
-It does not own records, conflicts, jobs, scripts, or patch semantics. Those belong to native xEdit in `D:\TES5Edit-contrib`.
+It does not own records, conflicts, jobs, scripts, or patch semantics. Those belong to native xEdit ([BB-84C/TES5Edit](https://github.com/BB-84C/TES5Edit)).
 
 It owns only:
 

@@ -1,0 +1,15 @@
+{
+  "name": "bgs-modding-superpowers-dev",
+  "description": "Development marketplace for bgs-modding-superpowers",
+  "owner": {
+    "name": "awesome-bgs-mod-master contributors"
+  },
+  "plugins": [
+    {
+      "name": "bgs-modding-superpowers",
+      "description": "Agentic superpowers for Bethesda Game Studio modpack curation",
+      "version": "0.1.0",
+      "source": "./"
+    }
+  ]
+}

@@ -11,9 +11,36 @@ import { runRules } from "../pipeline/rules.js";
 import { forwardCall } from "../pipeline/forward.js";
 import { allDigestCommands } from "../capabilities-digest.js";
 
+// Some MCP clients serialize the `args` sub-object to a JSON string before
+// sending. Accept either an object (canonical) or a string (which we parse).
+const ArgsObject = z.record(z.unknown());
+const ArgsStringParsed = z
+  .string()
+  .transform((s, ctx) => {
+    const trimmed = s.trim();
+    if (trimmed === "") return {} as Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "args string must parse to a JSON object (not array/null/primitive)",
+        });
+        return z.NEVER;
+      }
+      return parsed as Record<string, unknown>;
+    } catch (err) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `args string must be valid JSON: ${(err as Error).message}`,
+      });
+      return z.NEVER;
+    }
+  });
+
 const CallArgs = z.object({
   command: z.string().min(1),
-  args: z.record(z.unknown()).optional(),
+  args: z.union([ArgsObject, ArgsStringParsed]).optional(),
 });
 
 export interface CallOptions {
@@ -35,13 +62,14 @@ export function makeCallHandler(opts: CallOptions) {
         hint: "Call xedit_session first.",
       });
     }
-    const v = validateArgs(CallArgs, rawArgs, { tool: "xedit_call" });
-    if (v) {
-      await opts.audit.append({ tool: "xedit_call", argsHash: "v-fail", decision: "refused", ok: false, code: v.code });
-      return v;
+    // Validate AND normalize: if args came in as a string, Zod's transform parses it.
+    const parsed = CallArgs.safeParse(rawArgs);
+    if (!parsed.success) {
+      const v = validateArgs(CallArgs, rawArgs, { tool: "xedit_call" });
+      await opts.audit.append({ tool: "xedit_call", argsHash: "v-fail", decision: "refused", ok: false, code: v!.code });
+      return v!;
     }
-
-    const { command, args = {} } = rawArgs as { command: string; args?: Record<string, unknown> };
+    const { command, args = {} } = parsed.data;
 
     // Allow live-daemon commands that exist in capabilities but not in the curated digest,
     // and warn. Reject only if both digest AND live capabilities lack the command.

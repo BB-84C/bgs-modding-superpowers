@@ -323,7 +323,7 @@ function Invoke-XeditClientProcessLaunch {
 
     $processId = $null
     try {
-        $options = ConvertTo-XeditClientOptionMap -Arguments $Arguments -AllowedNames @('--launcher-path', '--game-mode', '--plugins-file', '--mo-profile', '--load-mode', '--plugin')
+        $options = ConvertTo-XeditClientOptionMap -Arguments $Arguments -AllowedNames @('--launcher-path', '--game-mode', '--plugins-file', '--mo-profile', '--load-mode', '--plugin', '--data-path')
         if ($null -eq (Get-XeditClientRequiredOptionValues -Options $options -Names @('--launcher-path', '--game-mode'))) { return 1 }
         $unsupportedLegacyOptions = @(Get-XeditClientUnsupportedLegacyLaunchOptions -Options $options)
         if ($unsupportedLegacyOptions.Count -gt 0) { Write-Host "Legacy options are no longer supported: $($unsupportedLegacyOptions -join ', ')"; return 1 }
@@ -341,6 +341,23 @@ function Invoke-XeditClientProcessLaunch {
         $normalizedLauncherCommand.ArgumentList = @($normalizedLauncherCommand.ArgumentList + @('-automation-serve', ('-P:' + $session.SessionPluginsFilePath)))
         $nativeTargetArgumentList = if ($normalizedLauncherCommand.PSObject.Properties.Name -contains 'NativeArgumentList') { @(ConvertTo-XeditClientFlatStringArray -Values @($normalizedLauncherCommand.NativeArgumentList)) } else { @(ConvertTo-XeditClientFlatStringArray -Values @($normalizedLauncherCommand.ArgumentList)) }
         $nativeTargetArgumentList = @(ConvertTo-XeditClientFlatStringArray -Values @($nativeTargetArgumentList + @('-automation-serve', ('-P:' + $session.SessionPluginsFilePath))))
+
+        # --data-path (optional) translates to xEdit's -D:<path>\ flag.
+        # xEdit's docs Section 2.8.1 require a trailing backslash for -D:. Without
+        # this flag, xEdit auto-discovers the game install via the Windows registry
+        # — which on Steam-installed FO4 points at the Steam library Data, NOT
+        # MO2's Stock Game Data. Pass an explicit dataPath to force the agent's
+        # intended Data directory.
+        if ($options.ContainsKey('--data-path')) {
+            $dataPathArg = [string]$options['--data-path']
+            if (-not [string]::IsNullOrWhiteSpace($dataPathArg)) {
+                if (-not $dataPathArg.EndsWith('\') -and -not $dataPathArg.EndsWith('/')) {
+                    $dataPathArg += '\'
+                }
+                $normalizedLauncherCommand.ArgumentList = @($normalizedLauncherCommand.ArgumentList + @('-D:' + $dataPathArg))
+                $nativeTargetArgumentList = @(ConvertTo-XeditClientFlatStringArray -Values @($nativeTargetArgumentList + @('-D:' + $dataPathArg)))
+            }
+        }
 
         $mo2LaunchRequest = $null
         $mo2LaunchResult = $null
@@ -363,7 +380,15 @@ function Invoke-XeditClientProcessLaunch {
             $processId = Get-XeditClientLaunchedProcessId -WrapperProcess $process -LauncherPath $normalizedLauncherCommand.DetectionPath -StartedAt $startedAt -KnownProcessIds $knownProcessIds
         }
 
-        $null = Wait-XeditClientAutomationReady -XeditExecutablePath $normalizedLauncherCommand.DetectionPath -XeditPid $processId -SessionPath $session.SessionPath -TimeoutSeconds 30
+        # Allow env-var override; default 240s — xEdit's automation-serve needs
+        # to finish loading active masters before system.describe answers, and
+        # 30s tripped on real profiles. See Wait-XeditClientAutomationReady def.
+        $readyTimeoutSeconds = 240
+        if ($env:BGS_XEDIT_READY_TIMEOUT_SECONDS -and [int]::TryParse($env:BGS_XEDIT_READY_TIMEOUT_SECONDS, [ref]$null)) {
+            $parsed = [int]$env:BGS_XEDIT_READY_TIMEOUT_SECONDS
+            if ($parsed -gt 0) { $readyTimeoutSeconds = $parsed }
+        }
+        $null = Wait-XeditClientAutomationReady -XeditExecutablePath $normalizedLauncherCommand.DetectionPath -XeditPid $processId -SessionPath $session.SessionPath -TimeoutSeconds $readyTimeoutSeconds
 
         Write-Host 'process launch'
         Write-Host 'status: ok'

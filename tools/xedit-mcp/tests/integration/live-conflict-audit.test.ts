@@ -8,11 +8,18 @@ import { launchDaemon, type LaunchedDaemon } from "../../src/launch.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const REPO_ROOT = resolve(__dirname, "../../../../");
-const CLIENT_SCRIPT = resolve(REPO_ROOT, "tools/mo2-vfs-launcher/xedit-client.ps1");
-const LAUNCHER_PATH = resolve(
-  REPO_ROOT,
-  ".artifacts/mo2/Stock Game/Fallout 4/Tools/OpenCodeXEdit/xEdit.exe",
-);
+const CLIENT_SCRIPT =
+  process.env.BGS_TEST_CLIENT_SCRIPT ??
+  resolve(REPO_ROOT, "tools/mo2-vfs-launcher/xedit-client.ps1");
+// LAUNCHER_PATH is the xEdit binary the live integration test will spawn.
+// Defaults to this repo's dedicated MO2 sandbox at .artifacts/mo2/... so dev
+// runs work out of the box; override via BGS_TEST_XEDIT_PATH for any other env.
+const LAUNCHER_PATH =
+  process.env.BGS_TEST_XEDIT_PATH ??
+  resolve(
+    REPO_ROOT,
+    ".artifacts/mo2/Stock Game/Fallout 4/Tools/OpenCodeXEdit/xEdit.exe",
+  );
 const ARTIFACT_DIR = resolve(REPO_ROOT, ".opencode/artifacts/xedit-mcp/acceptance/batch1");
 const FIXTURES = resolve(__dirname, "fixtures.json");
 

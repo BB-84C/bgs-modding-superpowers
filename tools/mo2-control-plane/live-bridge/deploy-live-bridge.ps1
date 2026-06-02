@@ -5,11 +5,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$pluginsTarget = ".artifacts/mo2/plugins/"
-$pluginTarget = ".artifacts/mo2/plugins/mo2_agent_control.py"
-$pluginSupportTarget = ".artifacts/mo2/plugins/Mo2AgentControl/"
+# Paths are resolved relative to -Mo2Root, which the user supplies. The end
+# user's MO2 root is the canonical anchor; this script does not assume the
+# dev sandbox layout.
+$pluginsTarget = "plugins/"
+$pluginTarget = "plugins/mo2_agent_control.py"
+$pluginSupportTarget = "plugins/Mo2AgentControl/"
 $bootstrapSubdirectory = "bootstrap"
-$modOrganizerIniTarget = ".artifacts/mo2/ModOrganizer.ini"
+$modOrganizerIniTarget = "ModOrganizer.ini"
 
 $scriptDirectory = Split-Path -Path $PSCommandPath -Parent
 $bridgeSourcePath = Join-Path $scriptDirectory "mo2_agent_control.py"

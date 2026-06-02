@@ -41,12 +41,12 @@ tools\mo2-vfs-launcher\mo2-vfs-launcher.cmd --target-path tools\mo2-vfs-launcher
 MO2 handoff pattern:
 
 ```powershell
-& "B:\WastelandBlues 2.0\ModOrganizer.exe" -p "CK与调试" run -e OpenCodeVfsLauncher -a "--target-path D:\awesome-bgs-mod-master\.worktrees\mo2-vfs-launcher\tools\mo2-vfs-launcher\some-target.ps1 --session-id session-001 --state-file D:\awesome-bgs-mod-master\.worktrees\mo2-vfs-launcher\.artifacts\mo2-vfs-launcher\session-001.json --wait-mode exit"
+& "<MO2_Root>\ModOrganizer.exe" -p "<ProfileName>" run -e OpenCodeVfsLauncher -a "--target-path <plugin-root>\tools\mo2-vfs-launcher\some-target.ps1 --session-id session-001 --state-file <state-dir>\session-001.json --wait-mode exit"
 ```
 
 The MO2 `run -e OpenCodeVfsLauncher` pattern is a launcher bootstrap entrypoint, not the long-term transport architecture center. Once the launcher is running inside the MO2/usvfs context, it hands target execution off to the control-plane launch abstraction, preserving caller-provided environment variables generically, and then publishes launcher-shaped state back through `--state-file`.
 
-For the current real `.artifacts/mo2` sandbox proof path, `OpenCodeVfsLauncher` runs with `--transport-mode direct-child` so it can launch the probe/xEdit target directly from inside the already-established MO2/usvfs context instead of recursively re-entering the broker.
+For dev verification against the plugin's own MO2 sandbox proof path, `OpenCodeVfsLauncher` runs with `--transport-mode direct-child` so it can launch the probe/xEdit target directly from inside the already-established MO2/usvfs context instead of recursively re-entering the broker.
 
 Probe usage:
 

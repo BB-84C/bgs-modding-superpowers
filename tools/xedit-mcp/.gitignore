@@ -1,4 +1,5 @@
 node_modules/
-dist/
+# dist/ is COMMITTED for plugin shipping (see prepare script + package.json files allowlist).
+# Local rebuilds via `npm run build` overwrite it; commit if you intend the build to ship.
 *.log
 .vitest-cache/

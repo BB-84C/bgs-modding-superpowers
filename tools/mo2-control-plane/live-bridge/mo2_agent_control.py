@@ -1,7 +1,7 @@
 """MO2 live bootstrap bridge.
 
-This module lives at `.artifacts/mo2/plugins/mo2_agent_control.py` once deployed.
-Runtime files stay under `.artifacts/mo2/plugins/Mo2AgentControl/bootstrap/runtime`.
+This module lives at `<MO2_Root>/plugins/mo2_agent_control.py` once deployed.
+Runtime files stay under `<MO2_Root>/plugins/Mo2AgentControl/bootstrap/runtime`.
 It now exposes `createPlugin()` so MO2 can load it as a real Python plugin.
 Bootstrap runtime publication happens during plugin initialization, not at import.
 File-bootstrap is retained only as discovery and liveness, not as the command transport.
@@ -23,8 +23,11 @@ import mobase
 
 PLUGIN_NAME = "Mo2AgentControl"
 PLUGIN_SOURCE_SUBTREE = "tools/mo2-control-plane/live-bridge/"
-PLUGIN_DEPLOYMENT_TARGET = ".artifacts/mo2/plugins/mo2_agent_control.py"
-PLUGIN_SUPPORT_TARGET = ".artifacts/mo2/plugins/Mo2AgentControl/"
+# Deployment targets are relative to the user's MO2 root, supplied by the
+# installer (scripts/install-mo2-control-plane.ps1). The dev sandbox is no
+# longer assumed.
+PLUGIN_DEPLOYMENT_TARGET = "plugins/mo2_agent_control.py"
+PLUGIN_SUPPORT_TARGET = "plugins/Mo2AgentControl/"
 BOOTSTRAP_MODE = "file-bootstrap"
 BOOTSTRAP_DIRECTORY_NAME = "bootstrap"
 RUNTIME_DIRECTORY_NAME = "runtime"
