@@ -124,6 +124,41 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
 
+## 2026-06-02 — KB-2 closeout (local MCP retrieval surface + portable/plugin integration)
+
+**Delivered (on branch `feat/kb-2-mcp-server`)**
+
+- `tools/bgs-kb-mcp/` now ships the local retrieval runtime: pack discovery across bundled / cache / user roots with manifest validation, schemaVersion gating, minPluginVersion gating, sha256 integrity checks, and collision reporting; a read-only SQLite session registry over loaded packs; a shared envelope module (`ok` / `refuse`, `KB_ERROR_CODES`); `bgs_kb_status`, `bgs_kb_query`, and `bgs_kb_get`; the stdio MCP server entry; and 100 unit tests + 2 integration tests.
+- Plugin / harness integration is wired end to end: `.mcp.json` exposes sibling `bgs_kb` alongside `xedit`; `.opencode/plugins/bgs-modding-superpowers.js` registers the sibling MCP; `scripts/build-portable-plugin.ps1` carries `tools/bgs-kb-mcp/` plus the bundled core pack into the portable tree; and `skills/using-bgs-modding-superpowers/SKILL.md` advertises the `bgs_kb_*` tools and routing doctrine.
+- Plugin version is bumped to `0.2.0` to align with the core pack's `minPluginVersion`.
+
+**Now known (from real KB-2 implementation)**
+
+- **`node:sqlite` is good enough for the MCP runtime too**, not just the build CLI. Read-only open works, FTS5 `MATCH` works, and the real core pack answers queries in the low-single-digit ms range at current scale.
+- **`BGS_KB_USER_PACKS` points at roots containing pack directories**, not at a pack directory itself. The acceptance fixture surfaced this; KB-3 docs / skill wording must be careful and explicit.
+- **Cross-pack ranking uses per-pack BM25 magnitude normalization (Choice A)**, not RRF. This is good enough at current pack sizes; RRF remains a KB-6 enhancement.
+- **Empty registry policy is strict `not_loaded`.** `query` / `get` refuse when no packs are loaded.
+- **Variant warnings render as Markdown callouts** in the merged body: `> [!WARNING] [CODE|severity] text`.
+- **`debugging` domain remains broad** from KB-1. KB-2 query behavior confirms it returns many hits and needs later tightening.
+- **Portable now includes runtime dependency closures for both MCPs.** The resulting tree is ~32.86 MB before any end-user game-pack downloads. This is larger than the pre-KB portable tree and acceptable for now, but worth watching.
+- **Current `plugins` all-games ranking is corpus-driven.** The real query returns `modern-asterisk`, `plugins-vs-modlist`, then `legacy` in the top 3. Later curation may rebalance this by adjusting queryKeys or domain tags rather than changing SQL first.
+
+**Implications for later phases**
+
+- **KB-3 (`maintaining-modding-environments`)** must explicitly teach the `BGS_KB_USER_PACKS` root semantics, not "point to a pack directory".
+- **KB-3 / KB-4** should add a contributor-friendly schema validation command to replace raw Ajv 2020 invocation (`ajv-cli` still does not support Draft 2020-12 cleanly).
+- **KB-4 fan-out subagents** can rely on `cli validate` and the MCP retrieval surface for spot-checking authored records before returning.
+- **KB-6** `bgs_kb_check_updates` / `install_pack` already have a natural insertion point in the existing server entry and pack-discovery lifecycle.
+- **Portable size should stay visible.** If core pack + deps + future per-game bundled assets keep growing, consider whether `bgs-kb-mcp` and `xedit-mcp` can share a lighter runtime dependency footprint before bundling more content — but do not prematurely merge servers.
+
+**Acceptance / evidence**
+
+- 100 unit tests + 2 integration tests pass.
+- `bgs_kb_status` on the real plugin tree shows 1 bundled pack (`bgs-kb-core`) with 46 records.
+- `bgs_kb_query({ query: 'loose files override', games: ['Fallout4'] })` returns the asset-precedence record with the Fallout 4 variant warning note.
+- `bgs_kb_get({ id: 'papyrus.oninit-vs-onload.v1', game: 'FalloutNV' })` returns `appliesToRequestedGame: false` with a `game_excluded` warning.
+- A user fixture pack under a user root discovered via `$BGS_KB_USER_PACKS` loads correctly and is queryable; totalRecordCount rises from 46 to 47.
+
 ## 2026-06-02 — KB-1 closeout (schema + seed records + pack-build CLI MVP)
 
 **Delivered (on branch `feat/kb-1-schema-and-seed-records`, 17 commits, not yet merged)**
