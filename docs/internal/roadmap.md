@@ -124,6 +124,34 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
 
+## 2026-06-02 — KB-3 closeout (maintaining skill + setting-up split)
+
+**Delivered (on branch `feat/kb-3-maintaining-skill`)**
+
+- Added `docs/internal/plans/2026-06-02-setting-up-maintaining-split.md`, documenting what stays in first-run setup vs what belongs in recurring maintenance.
+- Added `skills/maintaining-modding-environments/SKILL.md` as the recurring-care home for KB updates, cache hygiene, custom pack authoring / registration, version pinning, and health checks.
+- Slimmed `skills/setting-up-bgs-modding-environment/SKILL.md` toward first-run orchestration and added first-run KB target selection / pack acquisition: chosen games, bundled core pack, future per-game GitHub Release downloads, sha256 verification, cache install, and `bgs_kb_query` smoke.
+- Updated `skills/using-bgs-modding-superpowers/SKILL.md` so agents can route ongoing environment maintenance to the new skill instead of the first-run setup skill.
+
+**Now known (from the split pass)**
+
+- The existing setup skill did not contain whole ongoing-care sections to delete; it was already mostly first-run setup plus semantic smoke. KB-3 therefore added the maintenance surface net-new and migrated only reusable concepts (version pinning, health checks) into the new skill.
+- The important user-pack wording is now captured in the maintenance skill: `BGS_KB_USER_PACKS` entries are roots containing pack directories, not pack directories themselves.
+- First-run KB acquisition and recurring KB maintenance are distinct: setup can choose target games and install published per-game packs, while custom-pack authoring / cache pruning / update cadence belongs to maintaining.
+
+**Implications for later phases**
+
+- KB-4 per-game pack publication now has a documented consumer path: first-run setup can install chosen official packs, and maintaining can update or pin them later.
+- KB-5 lesson-log migration can point contributors toward the custom-pack authoring / build / validate / info workflow in `maintaining-modding-environments` instead of overloading first-run setup.
+- KB-6 should replace the maintaining skill's fallback GitHub Release instructions with direct `bgs_kb_check_updates` / `bgs_kb_install_pack` usage once those tools exist.
+
+**Acceptance evidence**
+
+- Plain inspection only, per KB-3 instruction: no code changed and no tests were run.
+- Bootstrap skill now has distinct triggers: setup for first conversation / MO2 or xEdit missing / set up / install; maintaining for ongoing / maintain / register custom pack / prune cache / update knowledge base / health check.
+- Custom-pack walkthrough routes through `maintaining-modding-environments`, builds with `node <plugin>\tools\bgs-kb-mcp\dist\cli.js build <pack-root>`, validates / infos the pack, and registers a user root containing pack directories.
+- Fresh FO4 setup walkthrough stays in `setting-up-bgs-modding-environment`: detect or install MO2, select `Fallout4`, rely on bundled core, optionally install future FO4 pack with consent + sha256, then smoke with `bgs_kb_query({ query: "plugins", games: ["Fallout4"], maxResults: 3 })` before continuing to MO2 / xEdit setup.
+
 ## 2026-06-02 — KB-2 closeout (local MCP retrieval surface + portable/plugin integration)
 
 **Delivered (on branch `feat/kb-2-mcp-server`)**
