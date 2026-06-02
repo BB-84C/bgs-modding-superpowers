@@ -44,6 +44,15 @@ bgs-modding-superpowers
 Select "Install Plugin".
 ```
 
+Codex's marketplace cache copies files (it does not follow directory junctions), so a portable install needs a self-contained tree under `plugins/<name>/` with no machine-specific paths. Maintainers stage that tree with:
+
+```powershell
+# in the repo root, with the xedit-mcp dist/ already built
+pwsh scripts/build-portable-plugin.ps1
+```
+
+This produces `dist/portable-plugin/bgs-modding-superpowers/` (about 2.7 MB before npm install, all real files, all paths relative) plus a sibling `marketplace.json`. End-users then run `npm install --omit=dev` inside the materialized `tools/xedit-mcp/` to pull `@modelcontextprotocol/sdk` and `zod`.
+
 ## First run
 
 Start any session in your modpack project directory and ask:

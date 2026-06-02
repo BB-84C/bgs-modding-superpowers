@@ -13,6 +13,11 @@ Desktop.ini
 
 /.external-resource
 
+# Build output of scripts/build-portable-plugin.ps1 (Target 1 publishability).
+# This is generated, not source — ignore it from the dev tree. Release branches
+# may carry a single materialized copy if a portable release is being staged.
+/dist/portable-plugin/
+
 # .opencode/ holds dev memory + acceptance artifacts + legacy skill stash;
 # ship only the OpenCode plugin code and the user-facing INSTALL.md.
 /.opencode/*
