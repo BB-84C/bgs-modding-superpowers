@@ -1,0 +1,33 @@
+{
+  "builtAt": "2026-06-02T22:55:01.161Z",
+  "displayName": "BGS Modding Knowledge — Fallout 4 (incl. FO4 VR)",
+  "domains": [
+    "archive-precedence",
+    "debugging",
+    "engine",
+    "file-conflicts",
+    "game-specific.vr",
+    "install-planning",
+    "load-order",
+    "papyrus",
+    "save-file",
+    "version-differences",
+    "xedit"
+  ],
+  "engineFamilies": [],
+  "games": [
+    "Fallout4",
+    "Fallout4VR"
+  ],
+  "license": "MIT",
+  "minPluginVersion": "0.2.0",
+  "owner": "bgs-modding-superpowers maintainers",
+  "packId": "bgs-kb-fallout4",
+  "recordCount": 34,
+  "schemaVersion": 1,
+  "sha256": {
+    "kb.sqlite": "ef138518967d96792c026c074d4725c9e1931bd710ba651258ba9d9feea35989"
+  },
+  "sourceCommit": "d707bcb8189fe3d02bec070dc1f8aedeffef1bb4",
+  "version": "2026.06.02"
+}
