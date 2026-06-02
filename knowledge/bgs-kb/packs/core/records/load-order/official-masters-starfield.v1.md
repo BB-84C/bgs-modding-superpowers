@@ -14,9 +14,6 @@ sources:
   - kind: project-skill
     ref: skills/writing-bgs-load-order/SKILL.md
     sectionPath: Official / vanilla masters
-  - kind: wiki
-    url: "https://starfieldwiki.net/wiki/Home"
-    ref: Starfield Wiki
 related: [load-order.official-masters-derived-from-runtime.v1]
 lastReviewed: "2026-06-02"
 schemaVersion: 1
