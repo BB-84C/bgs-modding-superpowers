@@ -1,0 +1,32 @@
+{
+  "builtAt": "2026-06-02T23:35:58.982Z",
+  "displayName": "BGS Modding Knowledge — Starfield",
+  "domains": [
+    "archive-precedence",
+    "debugging",
+    "engine",
+    "file-conflicts",
+    "install-planning",
+    "load-order",
+    "papyrus",
+    "plugin-format",
+    "save-file",
+    "version-differences",
+    "xedit"
+  ],
+  "engineFamilies": [],
+  "games": [
+    "Starfield"
+  ],
+  "license": "MIT",
+  "minPluginVersion": "0.2.0",
+  "owner": "bgs-modding-superpowers maintainers",
+  "packId": "bgs-kb-starfield",
+  "recordCount": 20,
+  "schemaVersion": 1,
+  "sha256": {
+    "kb.sqlite": "89bb0e4b33c7cf80d8f4eacba35bb0bc987f7a109bef296501fa5a7f0638e7a3"
+  },
+  "sourceCommit": "72b3e291d27c5c3f6cca323e80be9bed22e39c66",
+  "version": "2026.06.02"
+}
