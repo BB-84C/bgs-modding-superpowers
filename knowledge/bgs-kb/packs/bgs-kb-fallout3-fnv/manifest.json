@@ -1,0 +1,33 @@
+{
+  "builtAt": "2026-06-02T23:17:40.201Z",
+  "displayName": "BGS Modding Knowledge — Fallout 3 + Fallout New Vegas",
+  "domains": [
+    "debugging",
+    "engine",
+    "file-conflicts",
+    "install-planning",
+    "load-order",
+    "plugin-format",
+    "tooling.loot",
+    "version-differences",
+    "xedit"
+  ],
+  "engineFamilies": [
+    "gamebryo"
+  ],
+  "games": [
+    "Fallout3",
+    "FalloutNV"
+  ],
+  "license": "MIT",
+  "minPluginVersion": "0.2.0",
+  "owner": "bgs-modding-superpowers maintainers",
+  "packId": "bgs-kb-fallout3-fnv",
+  "recordCount": 28,
+  "schemaVersion": 1,
+  "sha256": {
+    "kb.sqlite": "e75d54d88c38a45504d69f8337ef5e8cfd3c2786705e5569e0f757e8f7666b39"
+  },
+  "sourceCommit": "50246b4dedb3a172df2f54a28688d766e71bee68",
+  "version": "2026.06.02"
+}
