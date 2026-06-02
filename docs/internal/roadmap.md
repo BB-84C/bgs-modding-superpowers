@@ -49,7 +49,7 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 | MCP integrations beyond xEdit | Specified only | Specs live at `docs/internal/mcp-specs/` (`nexus-metadata`, `loot-metadata`, `translation-memory`). |
 | safety hooks | Foundation in place | Runtime hook code lives in `hooks/`; hook specs moved to `docs/internal/hook-specs/`. |
 | save-safety automation | Explicitly deferred | The design calls for it later, but no real save-safety automation should ship until a real curator loop exists. |
-| agentic cross-game BGS knowledge base | Planned (architecture chosen 2026-06-02) | Sibling `tools/bgs-kb-mcp/` + hybrid records under `knowledge/bgs-kb/` + bundled core + per-game Release-artifact packs. See 2026-06-02 entry for full architecture. Scale: ~2500-3000 items across Skyrim / FO3 / FNV / FO4 / Starfield, de-duplicated via per-game variant overlays. |
+| agentic cross-game BGS knowledge base | Planned (architecture chosen 2026-06-02) | Sibling `tools/bgs-kb-mcp/` + hybrid records under `knowledge/bgs-kb/` + SQLite3+FTS5+BM25 prebuilt index. Pack format = `<packId>/{manifest.json, records/, kb.sqlite}` zipped per release. Bundled core + per-game Release artifacts + end-user packs via `$BGS_KB_USER_PACKS` discovery. See 2026-06-02 entry for full architecture + KB-4 fan-out plan. Scale: ~2500-3000 items across Skyrim / FO3 / FNV / FO4 / Starfield, de-duplicated via per-game variant overlays. |
 
 ## Phase Ladder
 
@@ -140,20 +140,56 @@ Retrieval seam: **new sibling `tools/bgs-kb-mcp/`**, NOT folded into `xedit-mcp`
 
 Tool surface: `bgs_kb_status`, `bgs_kb_query`, `bgs_kb_get`, and optional `bgs_kb_check_updates` / `bgs_kb_install_pack` for network refresh. Query returns ranked snippet hits + appliesTo + sources; agent calls `get` only after a promising hit. Atomic primitives, not bundled "answer everything" tools.
 
-v1 storage tech: **JSONL records + lightweight JS-side FTS** (minisearch or flexsearch). Pure-JS, zero native deps — preserves the plugin's current zero-native-dep invariant (multi-harness portability, Codex marketplace friction). SQLite + FTS5 stays the documented upgrade path if BM25-quality relevance becomes load-bearing.
+v1 storage tech: **SQLite3 + FTS5 + BM25** (user-confirmed override of the JSONL+JS-FTS recommendation). Rationale: BM25 ranking maturity, `MATCH` query expressiveness, snippet/highlight built-ins, predictable performance characteristics at 2500-3000 items. SQLite library choice is a v1 implementation detail to confirm at KB-2: prefer Node 22's built-in `node:sqlite` (zero install, preserves the portable-plugin Target-1 invariant) **if** FTS5 is enabled in the bundled build; fall back to `better-sqlite3` with prebuilt binaries via `node-pre-gyp` if not. WASM `sql.js` is the floor option.
 
 Source of truth: `knowledge/bgs-kb/` **in this repo**:
-- `knowledge/bgs-kb/schema/record.schema.json` — JSON Schema for record validation
-- `knowledge/bgs-kb/core/records/{xedit,load-order,archive-precedence,papyrus}/...` — shared substrate
-- `knowledge/bgs-kb/games/{fallout4,skyrimse,fallout3,falloutnv,starfield}/records/...` — per-game overlays
+- `knowledge/bgs-kb/schema/record.schema.json` — JSON Schema for record validation (must validate every record at build time)
+- `knowledge/bgs-kb/packs/core/records/{xedit,load-order,archive-precedence,papyrus,engine}/...` — shared substrate
+- `knowledge/bgs-kb/packs/{fallout4,skyrimse,fallout3,falloutnv,starfield}/records/...` — per-game overlays
 - `knowledge/bgs-kb/guides/...` — long-form prose where records are too granular (e.g. generated `xedit-deep-reference.md`)
 
-Distribution:
-- **Plugin ships `core` pack bundled** (small, ~1-3 MB) — works offline immediately.
-- **Per-game packs published as GitHub Release artifacts** (`bgs-kb-fallout4-<version>.zip` etc.) pulled by `setting-up-bgs-modding-environment` skill on user consent.
-- **Installed cache** at `%LOCALAPPDATA%/bgs-modding-superpowers/kb/<pack>/<version>/`.
-- **Pack format**: zipped JSONL + `manifest.json` with sha256 + schemaVersion + minPluginVersion gates.
-- **KB cadence** is independent of plugin cadence; KB content fixes do not force a plugin re-release.
+**Pack format** (one shape for repo-owned packs AND end-user packs):
+
+```
+<packId>/
+  manifest.json                # versioned, sha256-gated, schemaVersion + minPluginVersion
+  records/                     # source-authored .md with YAML frontmatter (human-editable)
+    xedit/conflict-winner-basics.md
+    load-order/plugins-txt-modern.md
+    ...
+  kb.sqlite                    # prebuilt index built from records/
+```
+
+Distribution artifact = `<packId>-<version>.zip` of that tree. `records/` rides along with the prebuilt index so the source is always auditable and rebuildable next to its artifact.
+
+**Distribution + cache:**
+- **Plugin ships `core` pack bundled** under `knowledge/bgs-kb/packs/core/` (small, ~1-3 MB) — works offline immediately.
+- **Per-game packs published as GitHub Release artifacts** (`bgs-kb-fallout4-<version>.zip` etc.) pulled by `setting-up-bgs-modding-environment` on user consent.
+- **Installed cache** at `%LOCALAPPDATA%/bgs-modding-superpowers/kb/packs/<packId>/<version>/`.
+- **KB cadence is independent of plugin cadence**; KB content fixes do not force a plugin re-release.
+
+**Modular / end-user-extensible architecture** (followup #2):
+
+The MCP discovers packs from three roots in precedence order:
+
+```
+1. Bundled    <plugin>/knowledge/bgs-kb/packs/           # plugin-shipped (core only)
+2. Cache      %LOCALAPPDATA%/bgs-modding-superpowers/kb/packs/   # downloaded game packs
+3. User       $BGS_KB_USER_PACKS (semicolon-separated paths)     # end-user packs
+```
+
+Queries **merge hits from all loaded packs**, each result tagged `pack: <packId>` for provenance. `bgs_kb_query` accepts an optional `packIds: [...]` filter. No silent precedence; collisions surface as ranked hits with explicit pack source.
+
+**End-user authoring flow:**
+
+1. User creates `~/my-modpack-kb/records/*.md` with YAML frontmatter (same schema as official packs).
+2. User runs `node tools/bgs-kb-mcp/dist/cli.js build ~/my-modpack-kb` → produces `kb.sqlite` + minimal `manifest.json`.
+3. User sets `BGS_KB_USER_PACKS=C:/Users/.../my-modpack-kb`. MCP discovers + loads on next start.
+4. `setting-up-bgs-modding-environment` grows a "register a custom pack" subroutine that handles 2+3 for users who'd rather not touch env vars.
+
+Official packs and user packs are equal citizens at query time — modularity by virtue of pack discovery with stable manifest shape.
+
+**Sources are structured, not prose** (gate B refinement): every record's `sources` field is a JSON array of `{ kind, ref, url?, sectionPath? }` entries; the JSON Schema enforces this. Unsourced facts get `confidence: low-community` and a `needs verification` note. This mirrors WingedGuardian's source-cited bottom-up pattern, lifted into the structured layer.
 
 Reference-repo lessons applied:
 - Steal: hub-skill + on-demand-Read separation, path-glob auto-activation, slash-command workflow skills, top-N hot-cache, source-cited bottom-up entries.
@@ -161,12 +197,53 @@ Reference-repo lessons applied:
 
 **Migration phases (KB-1 .. KB-6)**
 
-- **KB-1** — schema + seed records: extract today's high-value facts from `skills/xedit-automation/xedit-knowledgebase.md` and `skills/writing-bgs-load-order/SKILL.md` into structured records under `knowledge/bgs-kb/core/`. Old markdown stays put. JSON Schema + ~50 seed records.
-- **KB-2** — `tools/bgs-kb-mcp/` ships `bgs_kb_status` / `bgs_kb_query` / `bgs_kb_get`. Loads bundled core pack only. New MCP registered in `.mcp.json` + `.opencode/plugins/bgs-modding-superpowers.js`. Portable-plugin build script copies `knowledge/bgs-kb/core/` + `tools/bgs-kb-mcp/dist/`.
-- **KB-3** — `setting-up-bgs-modding-environment` skill gains explicit KB acquisition workflow: ask target games -> detect cache -> consent for >threshold downloads -> fetch from GitHub Releases -> verify checksum -> smoke test (`bgs_kb_query` returns hits) -> cache hygiene (prune old versions).
-- **KB-4** — author per-game packs: FO4 (precombine/previs, BA2, settlement worldspace), SkyrimSE (scripts, animation generation, behavior outputs), FO3 / FNV (legacy plugins.txt + loadorder.txt model), Starfield (toolchain caution). Publish as GitHub Release assets.
+- **KB-1** — schema + seed records + pack-build CLI: author `knowledge/bgs-kb/schema/record.schema.json`; extract ~50 seed records from `skills/xedit-automation/xedit-knowledgebase.md` and `skills/writing-bgs-load-order/SKILL.md` into structured records under `knowledge/bgs-kb/packs/core/records/`; build minimal `tools/bgs-kb-mcp/cli` that takes a pack root and emits `kb.sqlite` + `manifest.json` from its `records/`. Old markdown stays put.
+- **KB-2** — `tools/bgs-kb-mcp/` ships `bgs_kb_status` / `bgs_kb_query` / `bgs_kb_get` + the three-root pack discovery (bundled + cache + `$BGS_KB_USER_PACKS`). Loads bundled core pack at startup. SQLite lib decision (`node:sqlite` vs `better-sqlite3` vs `sql.js`) locked here based on FTS5 availability check. New MCP registered in `.mcp.json` + `.opencode/plugins/bgs-modding-superpowers.js`. Portable-plugin build script copies `knowledge/bgs-kb/packs/core/` + `tools/bgs-kb-mcp/dist/`.
+- **KB-3** — `setting-up-bgs-modding-environment` skill gains explicit KB acquisition workflow: ask target games → detect cache → consent for >threshold downloads → fetch from GitHub Releases → verify sha256 → install to cache → smoke test (`bgs_kb_query` returns hits) → cache hygiene (prune old versions). Adds "register a custom pack" subroutine for end-user packs.
+- **KB-4** — author per-game packs via the two-stage fan-out plan documented below (Stage A: 4 cross-game core agents; Stage B: 4 per-game agents). Publish as GitHub Release assets. **Anti-copy guardrail enforced in every subagent prompt**: no hard copy from `WingedGuardian/skyrimvr-claude-toolkit`; paraphrase + cite in the structured `sources` field.
 - **KB-5** — `xedit-automation` lesson-log appending changes from "edit `xedit-knowledgebase.md`" to "add KB record"; mechanically-checkable footguns become xEdit MCP rule candidates; legacy markdown becomes generated-from-records or retired.
 - **KB-6** — optional `bgs_kb_check_updates` + opt-in refresh; eval harness for retrieval quality (negative-case fixtures: "FO4 precombine" query with `game=skyrimse` filter should suppress FO4-only records).
+
+**KB-4 fan-out plan (WingedGuardian breakdown → cross-game structure)**
+
+WingedGuardian's 10 H2 categories map onto our cross-game domains as follows:
+
+| WingedGuardian H2 | Our domain | Game scope | Target pack |
+|---|---|---|---|
+| Papyrus Scripting | `papyrus` | FO4 + Skyrim family | **core** + per-game variants |
+| Version-Specific Differences | `version-differences` | Per-game runtime variants | per-game packs |
+| xEdit / xelib / ESP Editing | `xedit` + `plugin-format` | All games | **core** |
+| Game Engine Quirks | `engine` | Mixed | split: family-shared → core; game-specific → game pack |
+| ESP Creation via Spriggit | `tooling.spriggit` | Multi-game (Mutagen) | **core** |
+| VR Controller Input Detection | `game-specific.vr` | Skyrim VR only | **skyrimse** (VR subsection) |
+| Weapon Manipulation at Runtime | `papyrus.advanced` | Skyrim-specific | **skyrimse** |
+| Papyrus Debugging | `papyrus` + `debugging` | FO4 + Skyrim | **core** |
+| Save File Analysis | `save-file` + `debugging` | Per-game format | per-game packs |
+| Hook Candidates | meta / authoring discipline | n/a | repo convention, not a domain |
+
+**Stage A — cross-game core pack** (4 parallel subagents):
+- **A1 — xedit + plugin-format** (~30 records): conflict taxonomy, override chain, ITM/ITPO/ITC, FormID model, light-master rules, ONAM, master headers, plugin-type matrix.
+- **A2 — load-order + archive-precedence** (~15 records): modern asterisk plugins.txt, legacy FO3/FNV format, BSA/BA2 priority, loose-file precedence, MO2 profile model.
+- **A3 — papyrus shared core** (~25 records): script lifecycle, threading, event lifecycle, common bugs (OnInit-vs-OnLoad, RegisterForUpdate, Utility.Wait reliability), debugging conventions. Shared FO4+Skyrim concepts only.
+- **A4 — engine quirks + Spriggit tooling** (~15 records): fUpdateBudgetMS, abilities, vanilla bugs surviving editions, Spriggit/Mutagen multi-game support.
+
+**Stage B — per-game packs** (4 parallel subagents, each given Stage A results as read-only context):
+- **B1 — Skyrim (LE/SE/AE/VR)**: scripts subsystem, animation generation (Nemesis/FNIS), behavior outputs, SkyUI, VR controller API, AE breakage categories, version-pinning rules.
+- **B2 — Fallout 4**: precombine/previs integrity, BA2 quirks, settlement worldspace, Buffout diagnostics, next-gen update breakage, ENB+F4SE interactions.
+- **B3 — Fallout 3 + New Vegas** (paired): legacy plugins.txt format, NVSE/FOSE, GECK reality, common engine bugs, TTW interop notes.
+- **B4 — Starfield**: post-CK toolchain caution, asset/material model changes, plugin format evolution, what NOT to assume from FO4/Skyrim.
+
+**Anti-copy guardrails (verbatim into every Stage A/B subagent prompt):**
+
+```
+HARD RULE: Do not hard-copy any text from WingedGuardian/skyrimvr-claude-toolkit.
+Where the same fact applies, paraphrase in our own voice and cite the
+WingedGuardian repo path (or upstream CK Wiki / UESP / GitHub issue) in
+the record's structured `sources` field.
+
+Every record MUST include the `sources` field with at least one entry.
+Unsourced facts get `confidence: low-community` and a `needs verification` note.
+```
 
 **Now known (from the consultation)**
 
