@@ -148,8 +148,10 @@ export async function discoverPacks(opts = {}) {
     const cacheRoot = resolve(opts.cacheRoot ?? defaultCacheRoot());
     const userPackRoots = (opts.userPackRoots ?? parseUserPackRoots(process.env.BGS_KB_USER_PACKS)).map((root) => resolve(root));
     const supportedSchemaVersion = opts.supportedSchemaVersion ?? 1;
-    const detectedPluginVersion = opts.currentPluginVersion ?? (await readCurrentPluginVersion(pluginRoot));
-    const currentPluginVersion = opts.currentPluginVersion ?? (compareSemver(detectedPluginVersion, "0.2.0") < 0 ? "0.2.0" : detectedPluginVersion);
+    // currentPluginVersion: explicit opt wins; otherwise read from <plugin-root>/package.json.
+    // On read failure, readCurrentPluginVersion falls back to "0.1.0" (the initial version).
+    // The minPluginVersion gate in each pack is the real compat surface — no flooring here.
+    const currentPluginVersion = opts.currentPluginVersion ?? (await readCurrentPluginVersion(pluginRoot));
     const verifyIntegrity = opts.verifyIntegrity ?? true;
     const loadedAt = (opts.now ?? (() => new Date()))().toISOString();
     const roots = [
