@@ -1,29 +1,121 @@
-// =============================================================================
-// bgs-kb-mcp — sibling MCP server for the BGS Modding knowledge base.
-// =============================================================================
-//
-// Status: KB-1c bootstrap. The real server (pack discovery, bgs_kb_status /
-// bgs_kb_query / bgs_kb_get, etc.) lands in KB-2 per:
-//   docs/internal/superpowers/specs/2026-06-02-agentic-cross-game-kb-design.md
-//   docs/internal/superpowers/plans/2026-06-02-agentic-cross-game-kb.md
-//
-// This module exists only so that:
-//   - tsc has something to compile
-//   - the package's `main` resolves
-//   - downstream tooling (portable-plugin build, MCP registration) can be wired
-//     against the final entry path without churn
-//
-// =============================================================================
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { pathToFileURL } from "node:url";
 
-export async function main(): Promise<void> {
-  throw new Error(
-    "bgs-kb-mcp server is not yet implemented. Pending KB-2; see docs/internal/superpowers/plans/2026-06-02-agentic-cross-game-kb.md",
-  );
+import { discoverPacks } from "./discovery/index.js";
+import { refuse } from "./envelope/index.js";
+import { KB_ERROR_CODES, type Envelope } from "./envelope/types.js";
+import { openSessions } from "./session/index.js";
+import { makeGetTool } from "./tools/get.js";
+import { makeQueryTool } from "./tools/query.js";
+import { makeStatusTool } from "./tools/status.js";
+
+const SERVER_NAME = "bgs-kb-mcp";
+const SERVER_VERSION = "0.1.0";
+
+export const TOOL_DEFINITIONS = [
+  {
+    name: "bgs_kb_status",
+    description: "Returns loaded KB packs, cache roots, versions, and compatibility warnings. Works before MO2/xEdit are configured.",
+  },
+  {
+    name: "bgs_kb_query",
+    description: "Searches the local BGS Modding knowledge base (SQLite + FTS5 + BM25) across loaded packs. Supports game/domain/pack filters.",
+  },
+  {
+    name: "bgs_kb_get",
+    description: "Fetches one full KB record by id, optionally merged for a specific game variant.",
+  },
+].map((tool) => ({ ...tool, inputSchema: { type: "object" as const, additionalProperties: true } }));
+
+export type ToolHandler = (args: Record<string, unknown>) => Promise<Envelope>;
+
+export interface ServerToolsetOptions {
+  status: ToolHandler;
+  query: ToolHandler;
+  get: ToolHandler;
 }
 
-// Detect "invoked as the main entry" cross-platform (same pattern as
-// xedit-mcp's index.ts). Errors out with a clear message until KB-2.
-import { pathToFileURL } from "node:url";
+export interface ServerToolset {
+  list: () => typeof TOOL_DEFINITIONS;
+  invoke: (name: string, args: Record<string, unknown>) => Promise<Envelope>;
+}
+
+export function jsonResult(body: unknown, isError = false) {
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(body) }],
+    isError,
+  };
+}
+
+export function buildServerToolset(opts: ServerToolsetOptions): ServerToolset {
+  const handlers: Record<string, ToolHandler> = {
+    bgs_kb_status: opts.status,
+    bgs_kb_query: opts.query,
+    bgs_kb_get: opts.get,
+  };
+
+  return {
+    list: () => TOOL_DEFINITIONS,
+    invoke: async (name, args) => {
+      const handler = handlers[name];
+      if (!handler) {
+        return refuse({
+          tool: name,
+          summary: `Unknown tool: ${name}`,
+          code: KB_ERROR_CODES.INVALID_REQUEST,
+          hint: "List available tools via tools/list and call one of: bgs_kb_status, bgs_kb_query, bgs_kb_get.",
+          severity: "MEDIUM",
+        });
+      }
+
+      try {
+        return await handler(args);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return refuse({
+          tool: name,
+          summary: `Internal error while running ${name}: ${message}`,
+          code: KB_ERROR_CODES.INTERNAL_ERROR,
+          hint: message,
+          detail: { message },
+          severity: "HIGH",
+        });
+      }
+    },
+  };
+}
+
+export async function main(): Promise<void> {
+  const discovery = await discoverPacks();
+  const registry = openSessions(discovery.packs);
+  const toolset = buildServerToolset({
+    status: makeStatusTool({ discovery, registry }),
+    query: makeQueryTool({ registry }),
+    get: makeGetTool({ registry }),
+  });
+
+  const server = new Server({ name: SERVER_NAME, version: SERVER_VERSION }, { capabilities: { tools: {} } });
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolset.list() }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    const envelope = await toolset.invoke(req.params.name, (req.params.arguments ?? {}) as Record<string, unknown>);
+    return jsonResult(envelope, !envelope.ok);
+  });
+
+  const shutdown = (signal: string) => {
+    process.stderr.write(`${SERVER_NAME} received ${signal}, shutting down...\n`);
+    registry.closeAll();
+    process.exit(0);
+  };
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+  await server.connect(new StdioServerTransport());
+}
+
 const invokedAsMain = (() => {
   const argv = process.argv[1];
   if (!argv) return false;
@@ -35,8 +127,9 @@ const invokedAsMain = (() => {
 })();
 
 if (invokedAsMain) {
-  main().catch((e) => {
-    console.error(e instanceof Error ? e.message : String(e));
+  main().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${SERVER_NAME} startup failed: ${message}\n`);
     process.exit(1);
   });
 }
