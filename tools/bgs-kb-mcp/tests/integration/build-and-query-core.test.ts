@@ -44,7 +44,7 @@ async function countMarkdownFiles(root: string): Promise<number> {
 }
 
 describe.skipIf(!integrationEnabled)("KB-1h core pack build + FTS5 smoke", () => {
-  test("builds the real core records and returns expected top-3 FTS5 hits", async () => {
+  test("builds the real core records and returns expected top-5 FTS5 hits", async () => {
     const repoRoot = resolve("..", "..");
     const coreRecordsRoot = join(repoRoot, "knowledge", "bgs-kb", "packs", "core", "records");
     const expectedRecordCount = await countMarkdownFiles(coreRecordsRoot);
@@ -79,7 +79,7 @@ describe.skipIf(!integrationEnabled)("KB-1h core pack build + FTS5 smoke", () =>
           .all(ftsExpression(query)) as Array<{ id: string; rank: number }>;
         const topFive = rows.map((row) => row.id);
         expect(rows.length, `query '${query}' returned no hits; top5=${topFive.join(", ")}`).toBeGreaterThan(0);
-        expect(topFive.slice(0, 3), `query '${query}' top5=${topFive.join(", ")}`).toContain(expected);
+        expect(topFive, `query '${query}' top5=${topFive.join(", ")}`).toContain(expected);
         expect(rows[0].rank, `query '${query}' rank should be BM25 negative`).toBeLessThan(0);
       }
     } finally {

@@ -103,9 +103,11 @@ describe.skipIf(!integrationEnabled)("KB-2f stdio MCP server smoke", () => {
     const status = parseToolBody(resultById<{ content: Array<{ type: string; text: string }> }>(messages, 3));
     expect(status.ok).toBe(true);
     const statusData = status.data as { packs: Array<{ packId: string }>; totalRecordCount: number };
-    expect(statusData.packs).toHaveLength(1);
-    expect(statusData.packs[0].packId).toBe("bgs-kb-core");
-    expect(statusData.totalRecordCount).toBe(46);
+    expect(statusData.packs.map((pack) => pack.packId)).toContain("bgs-kb-core");
+    expect(statusData.packs.length).toBeGreaterThanOrEqual(5);
+    // The checked-in core manifest remains intentionally stale until the KB-4 fresh-shell rebuild carry-forward.
+    // Server smoke only needs to prove discovery sees the multi-pack surface.
+    expect(statusData.totalRecordCount).toBeGreaterThanOrEqual(160);
 
     const query = parseToolBody(resultById<{ content: Array<{ type: string; text: string }> }>(messages, 4));
     expect(query.ok).toBe(true);
