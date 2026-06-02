@@ -15,6 +15,8 @@ import { buildPack, BuildValidationError } from "./build/index.js";
 import { readRecords } from "./build/read-records.js";
 import { formatValidationError } from "./build/validate.js";
 import { validateRecords } from "./build/validate.js";
+import { formatInfo } from "./info/format.js";
+import { gatherInfo } from "./info/index.js";
 import { resolve } from "node:path";
 
 const args = process.argv.slice(2);
@@ -28,8 +30,8 @@ Usage:
   bgs-kb-mcp info <pack-root>        Print pack summary                             (KB-1f)
   bgs-kb-mcp render <pack-root>      Render legacy markdown handbook from records   (KB-5)
 
-Currently implemented: build, validate. Other subcommands return exit 2 with a
-pointer to the relevant phase.
+Currently implemented: build, validate, info. Other subcommands return exit 2
+with a pointer to the relevant phase.
 `);
   process.exit(args.length === 0 ? 1 : 0);
 }
@@ -98,6 +100,23 @@ if (sub === "validate") {
     }
     console.error(`FAIL: ${result.valid.length} valid, ${result.errors.length} failing in ${resolvedPackRoot}`);
     process.exit(1);
+  } catch (error) {
+    console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(2);
+  }
+}
+
+if (sub === "info") {
+  const packRoot = args[1];
+  if (!packRoot) {
+    console.error("bgs-kb-mcp info: missing <pack-root>");
+    process.exit(2);
+  }
+
+  try {
+    const info = await gatherInfo(packRoot);
+    process.stdout.write(formatInfo(info));
+    process.exit(0);
   } catch (error) {
     console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(2);
