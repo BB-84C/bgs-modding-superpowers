@@ -1,6 +1,6 @@
 {
   "name": "bgs-modding-superpowers",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agentic superpowers for Bethesda Game Studio modpack curation: MCP-driven xEdit conflict audit, MO2 control plane, and runtime install/dev-log skills.",
   "author": {
     "name": "awesome-bgs-mod-master contributors",
