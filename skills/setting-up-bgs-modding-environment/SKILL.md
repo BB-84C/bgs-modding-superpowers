@@ -35,7 +35,7 @@ This is the first-run bootstrap. Use it when:
 
 ## What the control plane actually is
 
-The "MO2 control plane" we deploy in step 3 is a **Python MO2 plugin** plus a
+The "MO2 control plane" we deploy in step 4 is a **Python MO2 plugin** plus a
 **PowerShell broker**:
 
 - `tools/mo2-control-plane/live-bridge/mo2_agent_control.py` — the actual MO2
@@ -88,11 +88,42 @@ proceed without the explicit verbal consent.
 
 **(c) No-MO2 mode.** If the user says "I do not need MO2 for this project"
 (e.g., they are writing modpack docs / planning without a runtime), record
-`MO2_Root = none` and skip directly to step 8 (dev-log / changelog init). Mark
-that any MO2-bound or xEdit-bound work will be unavailable until they revisit
-this skill.
+`MO2_Root = none`, continue through step 3 for KB target selection, then skip to
+step 9 (dev-log / changelog init). Mark that any MO2-bound or xEdit-bound work
+will be unavailable until they revisit this skill.
 
-### Step 3 - Install the MO2 control plane (Python + broker)
+### Step 3 - First-run KB target selection and pack acquisition
+
+Ask which target games the modpack should support. Use the exact game codes
+when talking to KB tools where possible: `SkyrimLE`, `SkyrimSE`, `SkyrimAE`,
+`SkyrimVR`, `Fallout4`, `Fallout4VR`, `Fallout3`, `FalloutNV`, `Starfield`.
+
+The bundled core pack is already installed in the plugin tree. No action is
+needed for `bgs-kb-core`; it should appear in `bgs_kb_status` even before MO2 or
+xEdit are configured.
+
+For per-game packs, when KB-4+ publishes them as GitHub Release artifacts:
+
+1. Surface the pack IDs that match the selected games.
+2. Ask for explicit user consent before downloading any Release artifact.
+3. Download only from the `bgs-modding-superpowers` GitHub Releases page.
+4. Verify the published sha256 before install.
+5. Install into `%LOCALAPPDATA%/bgs-modding-superpowers/kb/packs/` using the
+   pack's versioned cache layout.
+6. If the selected per-game packs are not published yet, say so and continue
+   with the bundled core pack; do not invent a download URL.
+
+Smoke test after selection / install:
+
+```text
+bgs_kb_query({ query: "plugins", games: ["<chosen-game>"], maxResults: 3 })
+```
+
+Success criterion: at least one hit. If a specific per-game pack was installed,
+also check `bgs_kb_status({})` and verify its `packId` appears. If only the core
+pack is available, a core-pack hit is enough for first-run.
+
+### Step 4 - Install the MO2 control plane (Python + broker)
 
 Once `MO2_Root` is known (path a or b), deploy the Python plugin:
 
@@ -111,7 +142,7 @@ After the script returns, list `<MO2_Root>/plugins/` and confirm
 is intentional (see "What the control plane actually is" above). If the script
 errors, stop and surface it; do not continue.
 
-### Step 4 - Start MO2 visibly
+### Step 5 - Start MO2 visibly
 
 ```powershell
 & "<plugin-root>/scripts/start-mo2.ps1" -MO2Root "<MO2_Root>" -Profile "<Profile>"
@@ -136,7 +167,7 @@ plugin's bootstrap runtime files should appear at
 If those don't appear, the Python plugin didn't load. Check MO2's plugin
 settings to confirm `mo2_agent_control` is enabled.
 
-### Step 5 - Ask the user whether they want xEdit
+### Step 6 - Ask the user whether they want xEdit
 
 xEdit is optional but high-value. Describe what it does so the user can make
 an informed choice:
@@ -150,9 +181,9 @@ an informed choice:
 
 Then ask: "Would you like me to install xEdit?" - explicit consent gate.
 
-If the user declines, skip to step 8.
+If the user declines, skip to step 9.
 
-### Step 6 - If yes: fetch xEdit from BB-84C/TES5Edit
+### Step 7 - If yes: fetch xEdit from BB-84C/TES5Edit
 
 The forked, agent-friendly xEdit lives at https://github.com/BB-84C/TES5Edit.
 Fetch its latest release into the MO2 tools tree:
@@ -162,10 +193,11 @@ Fetch its latest release into the MO2 tools tree:
 ```
 
 This downloads the latest release zip, extracts into
-`<MO2_Root>/tools/xEdit/`, and verifies `xEdit.exe` exists post-extract. To
-pin a specific tag, pass `-ReleaseTag v<X.Y.Z>`.
+`<MO2_Root>/tools/xEdit/`, and verifies `xEdit.exe` exists post-extract. For
+ongoing version pinning after first install, route to
+`maintaining-modding-environments`.
 
-### Step 7 - Deploy the xEdit hook bridge
+### Step 8 - Deploy the xEdit hook bridge
 
 `xEditHookBridge.dll` ships with THIS plugin (it is OWNED by
 `bgs-modding-superpowers`, NOT by the xEdit fork). Co-locate it with
@@ -178,7 +210,7 @@ pin a specific tag, pass `-ReleaseTag v<X.Y.Z>`.
 This copies `tools/xedit-hook-bridge/dist/xEditHookBridge.dll` into
 `<MO2_Root>/tools/xEdit/`. The xEdit daemon will find it there at runtime.
 
-### Step 8 - Initialize dev-log and release-changelog
+### Step 9 - Initialize dev-log and release-changelog
 
 Ask the user for their **modpack project root**. This is usually one of:
 
@@ -196,7 +228,7 @@ Once `<project_root>` is known, route to:
 From here on, those two skills maintain the files at runtime; do not template
 or pre-fill them in this skill.
 
-### Step 9 - Verify with a semantic smoke test (NON-BLOCKING)
+### Step 10 - Verify with a semantic smoke test (NON-BLOCKING)
 
 The xEdit MCP is fully non-blocking. Do NOT call a single blocking tool and
 wait — that will time out. Instead:
@@ -268,6 +300,8 @@ The setup is complete only when ALL of the following hold. Do not declare
 success otherwise:
 
 - `<MO2_Root>` is known and `<MO2_Root>/ModOrganizer.exe` exists.
+- Target games are recorded; `bgs_kb_status` sees the bundled core pack; and at
+  least one `bgs_kb_query` smoke for the chosen game returns a hit.
 - `<MO2_Root>/plugins/mo2_agent_control.py` exists (skipped only in no-MO2 mode).
 - MO2 is visibly running (process has `MainWindowHandle != 0`) and
   `<MO2_Root>/plugins/Mo2AgentControl/bootstrap/runtime/status.json` reports
@@ -282,11 +316,12 @@ success otherwise:
   `xedit_list_capabilities` returns a non-empty digest. (Skipped only if xEdit
   was declined or no-MO2 mode.)
 
-In no-MO2 mode, only the dev-log and changelog steps need to pass.
+In no-MO2 mode, only the KB target selection / smoke and the dev-log / changelog
+steps need to pass.
 
 ## Common mistakes
 
-- Skipping the consent gate on step 2(b) or step 5. Both REQUIRE explicit user
+- Skipping the consent gate on step 2(b) or step 6. Both REQUIRE explicit user
   agreement; silent install or silent install-decision is forbidden.
 - Silently choosing one MO2 install when multiple are detected. Always ask.
 - **Trying to build `Mo2AgentControl.dll` from `docs/internal/future-c-kernel/`.**
@@ -309,11 +344,13 @@ In no-MO2 mode, only the dev-log and changelog steps need to pass.
 
 ## See also
 
+For ongoing care after first-run, see `maintaining-modding-environments`.
+
 - `using-bgs-modding-superpowers` - the per-session bootstrap; lists the full
   skill inventory and hard rules.
 - `xedit-automation` - hub skill for all xEdit work; load after this skill
   succeeds.
 - `writing-modpack-devlog`, `writing-modpack-changelog` - runtime asset skills
-  invoked from step 8.
+  invoked from step 9.
 - The installer scripts under `scripts/`: `install-mo2-control-plane.ps1`,
   `start-mo2.ps1`, `fetch-xedit-release.ps1`, `install-xedit-hook-bridge.ps1`.
