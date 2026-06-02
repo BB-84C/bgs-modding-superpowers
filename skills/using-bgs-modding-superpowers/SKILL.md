@@ -81,8 +81,9 @@ stop — common causes are MO2 not running visibly, the Python plugin not loaded
 the xEdit binary missing, or xEdit's automation-serve tripping on the active
 load order.
 
-The full daemon-command reference (49 commands + error codes + save semantics
-+ glossary) lives in `skills/xedit-automation/xedit-knowledgebase.md`.
+The structured daemon-command and workflow reference now lives in KB records.
+Use `bgs_kb_query` / `bgs_kb_get` for deep reference retrieval; the old
+`skills/xedit-automation/xedit-knowledgebase.md` path is a redirect only.
 
 ### BGS knowledge-base tools (3) — curated knowledge, no xEdit daemon
 
@@ -158,8 +159,8 @@ actual plugin, load-order, and record readback.
   custom-pack registration, cache pruning, and health checks after first-run.
 - `xedit-automation` — hub skill for all xEdit work; routing doctrine,
   anti-patterns, sub-agent recipes.
-- `xedit-automation/xedit-knowledgebase.md` — deep reference: 49 daemon
-  commands, error codes, save semantics, glossary.
+- BGS KB records under `knowledge/bgs-kb/packs/core/records/` — deep reference
+  for daemon commands, error codes, save semantics, glossary, and durable gotchas.
 - `xedit-conflict-audit` — the W2 conflict-audit workflow.
 - `writing-modpack-devlog`, `writing-modpack-changelog` — runtime asset
   skills for project documentation.

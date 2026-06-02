@@ -276,8 +276,9 @@ asterisk format above.
 
 - `xedit-automation` — hub skill for all xEdit work; routing doctrine,
   anti-patterns, sub-agent recipes.
-- `xedit-automation/xedit-knowledgebase.md` — full daemon command reference
-  (the 49 commands + error codes + save semantics + glossary).
+- BGS KB records under `knowledge/bgs-kb/packs/core/records/` — daemon command,
+  error-code, save-semantics, and glossary facts formerly kept in the retired
+  `xedit-automation/xedit-knowledgebase.md` redirect.
 - `setting-up-bgs-modding-environment` — explains how to inspect MO2's
   `ModOrganizer.ini` for `gamePath` before launching xEdit.
 - xEdit official docs Section 2.8.1 — launcher flag reference for `-P:`,
