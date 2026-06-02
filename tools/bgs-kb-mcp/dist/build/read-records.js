@@ -1,6 +1,6 @@
 import matter from "gray-matter";
 import { readdir, readFile } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 async function walkMarkdownFiles(root) {
     const entries = await readdir(root, { withFileTypes: true });
     const paths = await Promise.all(entries.map(async (entry) => {
@@ -21,13 +21,22 @@ export async function readRecords(packRoot) {
     const files = await walkMarkdownFiles(recordsRoot);
     const records = [];
     for (const file of files) {
+        const sourcePath = toSourcePath(packRoot, file);
+        if (dirname(sourcePath) === "records" && basename(sourcePath).toLowerCase() === "readme.md")
+            continue;
         const raw = await readFile(file, "utf8");
-        const parsed = matter(raw);
+        let parsed;
+        try {
+            parsed = matter(raw);
+        }
+        catch (error) {
+            throw new Error(`${sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
         if (parsed.data._draft === true)
             continue;
         records.push({
             ...parsed.data,
-            sourcePath: toSourcePath(packRoot, file),
+            sourcePath,
             bodyMd: parsed.content,
         });
     }

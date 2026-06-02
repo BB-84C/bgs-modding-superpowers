@@ -66,6 +66,7 @@ export function validateRecords(records, packRoot, schemaPath) {
     const validate = ajv.compile(schema);
     const errors = [];
     const valid = [];
+    const schemaValid = [];
     for (const record of records) {
         const { bodyMd: _bodyMd, sourcePath: _sourcePath, ...frontmatter } = record;
         const ok = validate(frontmatter);
@@ -73,6 +74,7 @@ export function validateRecords(records, packRoot, schemaPath) {
             errors.push({ sourcePath: record.sourcePath, errors: [...(validate.errors ?? [])] });
             continue;
         }
+        schemaValid.push(record);
         const integrityErrors = additionalIntegrityErrors(record);
         if (integrityErrors.length > 0) {
             errors.push({ sourcePath: record.sourcePath, errors: integrityErrors });
@@ -81,7 +83,7 @@ export function validateRecords(records, packRoot, schemaPath) {
         valid.push(record);
     }
     const byId = new Map();
-    for (const record of valid) {
+    for (const record of schemaValid) {
         const paths = byId.get(record.id) ?? [];
         paths.push(record.sourcePath);
         byId.set(record.id, paths);

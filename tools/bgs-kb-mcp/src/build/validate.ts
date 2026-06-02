@@ -89,6 +89,7 @@ export function validateRecords(records: SourceRecord[], packRoot: string, schem
 
   const errors: RecordValidationError[] = [];
   const valid: SourceRecord[] = [];
+  const schemaValid: SourceRecord[] = [];
 
   for (const record of records) {
     const { bodyMd: _bodyMd, sourcePath: _sourcePath, ...frontmatter } = record;
@@ -97,6 +98,8 @@ export function validateRecords(records: SourceRecord[], packRoot: string, schem
       errors.push({ sourcePath: record.sourcePath, errors: [...(validate.errors ?? [])] });
       continue;
     }
+
+    schemaValid.push(record);
 
     const integrityErrors = additionalIntegrityErrors(record);
     if (integrityErrors.length > 0) {
@@ -108,7 +111,7 @@ export function validateRecords(records: SourceRecord[], packRoot: string, schem
   }
 
   const byId = new Map<string, string[]>();
-  for (const record of valid) {
+  for (const record of schemaValid) {
     const paths = byId.get(record.id) ?? [];
     paths.push(record.sourcePath);
     byId.set(record.id, paths);
