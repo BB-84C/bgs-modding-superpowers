@@ -29,23 +29,25 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 
 | Capability | Current status | Notes |
 | --- | --- | --- |
-| repository/standards | Foundation in place | `README.md` and `docs/standards/repo-hygiene.md` define scope and durable repo rules. |
-| OpenCode packaging | Deferred | `.opencode/README.md` and `.opencode/INSTALL.md` intentionally wait on confirmed plugin metadata and packaging format. |
-| repo-bootstrap agent | Foundation in place | `agents/repo-bootstrap/AGENT.md` covers scaffold maintenance and repository bootstrap responsibilities. |
-| mod evaluator | Scaffolded | `skills/mod-evaluator/SKILL.md` exists, but no production evaluator workflow is wired yet. |
-| install planner | Scaffolded | `skills/install-planner/SKILL.md` defines intent, pending real execution support. |
-| conflict auditor | Next target | `skills/conflict-auditor/SKILL.md` is the recommended first real workflow. |
+| repository/standards | Shipped | `README.md`, `CONTRIBUTING.md`, `LICENSE`, `RELEASE-NOTES.md`, and `docs/internal/standards/repo-hygiene.md` now define the public and internal surfaces cleanly. |
+| multi-harness packaging | Shipped (v0.1 dev shape) | Root `package.json`, `.claude-plugin/`, `.codex-plugin/`, `.mcp.json`, `.opencode/plugins/bgs-modding-superpowers.js`, `.version-bump.json`, and `hooks/` all land and install locally. |
+| repo-bootstrap guidance | Shipped | The old `agents/repo-bootstrap/` persona is retired; its responsibilities live in `docs/internal/repo-bootstrap.md`. |
+| mod evaluator | Scaffolded only | Moved to `docs/internal/future-skills/mod-evaluator/` as a design note. |
+| install planner | Scaffolded only | Moved to `docs/internal/future-skills/install-planner/`; no real workflow yet. |
+| conflict auditor | Shipped | The real workflow is now `skills/xedit-conflict-audit/` backed by the bundled xEdit MCP. |
 | archive/loose-file reasoning helpers | Planned | Needed to explain archive precedence, loose-file wins, and overwrite outcomes during install review. |
 | diagnostics / crash-triage support | Planned | Should organize logs, crash indicators, and reproducible symptom framing before deeper workflow advice. |
 | benchmark or smoke-test harness | Planned | Direction only for now; later phases should add fast validation passes for install batches and release baselines. |
-| localization assistant | Scaffolded | `skills/localization-assistant/SKILL.md` frames localization support for later workflow expansion. |
-| test session guide | Scaffolded | `skills/test-session-guide/SKILL.md` defines test-session outputs but not yet automated orchestration. |
-| modpack dev log workflow | Scaffolded | `skills/write-dev-log/SKILL.md` plus `templates/modpack/dev-log-template.md` and `templates/modpack/dev-log-index-template.md` are ready as durable workflow assets. |
-| release changelog workflow | Scaffolded | `skills/write-release-changelog/SKILL.md` plus `templates/modpack/release-changelog-template.md` are present. |
-| native xEdit outer client | Foundation in place | tools/mo2-vfs-launcher/xedit-client.ps1 launches native xEdit automation under MO2 and preserves session/plugin-file/launch artifacts. |
-| MCP integrations | Specified | `mcps/xedit-readonly.md`, `mcps/nexus-metadata.md`, `mcps/loot-metadata.md`, and `mcps/translation-memory.md` hold planned integration contracts. |
-| knowledge base/research distillation | Foundation in place | The repo layout reserves `knowledge/` for promoted guidance and `research/summaries/` for source-derived findings, including future game-specific risk notes, mod-quality heuristics, and localization glossary strategy. |
-| safety hooks | Foundation in place | `hooks/runtime-compatibility.md`, `hooks/repo-cleanliness.md`, `hooks/scope-guard.md`, and `hooks/dev-log-reminder.md` provide baseline safety checks. |
+| localization assistant | Scaffolded only | Moved to `docs/internal/future-skills/localization-assistant/`. |
+| test session guide | Scaffolded only | Moved to `docs/internal/future-skills/test-session-guide/`. |
+| modpack dev log workflow | Shipped | `skills/writing-modpack-devlog/` creates and maintains the file at runtime; templates deleted. |
+| release changelog workflow | Shipped | `skills/writing-modpack-changelog/` creates and maintains the file at runtime; templates deleted. |
+| BGS load-order guidance | Shipped | `skills/writing-bgs-load-order/` documents `plugins.txt` / `loadorder.txt`, official-master detection, ESL routing, and xEdit `-P:` / `-D:` integration. |
+| visible MO2 startup | Shipped | `scripts/start-mo2.ps1` launches MO2 with a visible GUI, detects zombie processes, and exposes the profile-driven startup path to agents. |
+| native xEdit outer client | Shipped | `tools/mo2-vfs-launcher/xedit-client.ps1` launches native xEdit automation under MO2 and preserves session/plugin-file/launch artifacts. |
+| xEdit MCP runtime | Shipped (v0.1 dev shape) | `tools/xedit-mcp/` now ships `dist/`, non-blocking lifecycle tools, explicit `dataPath` / `pluginsFile` launch overrides, and dirty-state-safe stop/restart. |
+| MCP integrations beyond xEdit | Specified only | Specs live at `docs/internal/mcp-specs/` (`nexus-metadata`, `loot-metadata`, `translation-memory`). |
+| safety hooks | Foundation in place | Runtime hook code lives in `hooks/`; hook specs moved to `docs/internal/hook-specs/`. |
 | save-safety automation | Explicitly deferred | The design calls for it later, but no real save-safety automation should ship until a real curator loop exists. |
 
 ## Phase Ladder
@@ -63,25 +65,24 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 
 ## Dependency / Blocker Map
 
-- OpenCode plugin format blocks final OpenCode packaging and install metadata beyond the bootstrap notes already in `.opencode/`.
-- The first real xEdit workflow depends on a safe read-only bridge between `skills/conflict-auditor/SKILL.md`, the native xEdit outer client boundary in `tools/mo2-vfs-launcher/xedit-client.md`, and `mcps/xedit-readonly.md`.
+- Codex still expects a `plugins/<name>/` marketplace subdirectory layout. The current local-only workaround uses a gitignored `plugins/` tree plus absolute paths. A real publishable Codex packaging story is still outstanding.
+- The first real xEdit workflow no longer depends on the old `skills/conflict-auditor/` scaffold. The active bridge is `skills/xedit-conflict-audit/` + `tools/xedit-mcp/` + `tools/mo2-vfs-launcher/xedit-client.md`.
 - Release changelog workflow depends on a real dev-log workflow first, or it will have no trustworthy internal source of truth.
 - Localization should follow stable install/conflict/test flows so translation work is applied to a reasonably settled baseline.
 - Metadata integrations should come after conflict truth, not before; source metadata is useful, but it cannot replace actual conflict inspection.
 - Broader MCP integrations depend on stable contracts for metadata lookup, translation-memory access, and consistent agent invocation patterns.
 - Save-safety should follow a real curator loop rather than precede it, so warnings reflect actual workflow behavior instead of guesses.
 - Higher-risk safety and packaging automation should stay behind the read-only workflow until operational behavior is verified in practice.
+- The current xEdit MCP still assumes MO2 is already running. A future release may choose to auto-start MO2, but only if the visible-GUI invariant is preserved and stale-process cleanup remains explicit.
 - Any write-capable packaging or patching step remains gated by safety rules, explicit targets, and confidence earned from the earlier workflow phases.
 
 ## Not Yet Real
 
-- There is no functioning plugin package yet.
-- There are no working command entrypoints for the OpenCode plugin yet.
-- There are no real MCP adapters yet.
-- There is no completed read-only xEdit conflict-inspection workflow yet.
-- There is no usable end-to-end curator workflow yet.
+- There is no published / portable Codex package yet (current Codex install path is local-workaround only).
+- There is no fully portable end-user xEdit runtime config story yet; current acceptance uses explicit `dataPath` / `pluginsFile` overrides and a dev MO2 sandbox.
+- There is no write-capable patch generation workflow yet.
+- There is no automated LOOT integration yet.
 - There is no save-safety automation yet.
-- There is no write-capable patch generation yet.
 
 ## Game-Specific Pressure Points
 
@@ -91,17 +92,60 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 
 ## Completed Foundations
 
-- Scope and repo guardrails are established in `README.md` and `docs/standards/repo-hygiene.md`.
-- Repository bootstrap responsibilities are captured in `agents/repo-bootstrap/AGENT.md`.
-- Core workflow skill scaffolds exist, including `skills/conflict-auditor/SKILL.md` and the related curator workflow skills.
-- Safety baseline hooks are present in `hooks/runtime-compatibility.md`, `hooks/repo-cleanliness.md`, `hooks/scope-guard.md`, and `hooks/dev-log-reminder.md`.
-- Durable documentation templates already ship in `templates/modpack/dev-log-template.md`, `templates/modpack/dev-log-index-template.md`, and `templates/modpack/release-changelog-template.md`.
-- Read-only tool and integration contracts already exist in `tools/mo2-vfs-launcher/xedit-client.md` and `mcps/xedit-readonly.md`.
+- Scope and repo guardrails are established in `README.md`, `CONTRIBUTING.md`, `LICENSE`, and `docs/internal/standards/repo-hygiene.md`.
+- Repository bootstrap responsibilities are captured in `docs/internal/repo-bootstrap.md`.
+- Core workflow skills now exist as runnable top-level skills under `skills/`, including `using-bgs-modding-superpowers`, `setting-up-bgs-modding-environment`, `xedit-automation`, `xedit-conflict-audit`, `writing-modpack-devlog`, `writing-modpack-changelog`, and `writing-bgs-load-order`.
+- Safety baseline hooks ship as real runtime files in `hooks/`, with the old specs preserved under `docs/internal/hook-specs/`.
+- Runtime-generated dev-log / changelog files are created by skills, not by templates (templates deleted).
+- Read-only tool and integration contracts already exist in `tools/mo2-vfs-launcher/xedit-client.md` and `docs/internal/mcp-specs/xedit-readonly.md`.
 - Bootstrap verification is already wired through `tests/bootstrap/verify-foundation.ps1` and `tests/bootstrap/verify-all.ps1`.
 
 ## Current Focus
 
-Batch 1 of the xEdit skills + harness MCP track is **SHIPPED** (see closeout below). Recommended next target: Batch 2 read-only completion — fold the oracle v2 follow-ups (W2 representative matrix, full audit uniformity, manual GUI parity) into the next read-only slice, then move into the validation-job surface.
+The reshape to a Superpowers-shaped multi-harness plugin is complete in the local repo (`main`). Immediate next targets:
+
+1. **Portable publishability** — remove the local-only Codex workaround and produce a real `plugins/<name>/` release surface.
+2. **Read-only xEdit completion** — finish the post-acceptance cleanups (e.g. richer GUI parity evidence, representative W2 matrix, audit uniformity).
+3. **Operator UX** — keep the visible-MO2 and non-blocking MCP invariants intact while smoothing first-run setup for end users.
+
+## 2026-06-01 — Reshape closeout (Superpowers-shaped multi-harness plugin)
+
+**Delivered**
+
+- Repo reshaped from `awesome-bgs-mod-master` dev harness + scattered scaffolds into a Superpowers-style plugin checkout with:
+  - root `package.json`
+  - `.claude-plugin/`, `.codex-plugin/`, `.mcp.json`, `.opencode/plugins/`, `.version-bump.json`, `hooks/`
+  - public `README.md`, `CONTRIBUTING.md`, `LICENSE`, `RELEASE-NOTES.md`
+  - internal docs consolidated under `docs/internal/`
+- Working skills moved out of gitignored `.opencode/skills/` into tracked top-level `skills/`.
+- New runtime skills landed: `using-bgs-modding-superpowers`, `setting-up-bgs-modding-environment`, `writing-modpack-devlog`, `writing-modpack-changelog`, `writing-bgs-load-order`.
+- `tools/xedit-mcp/` ships `dist/` and a real stdio production entry. The MCP now provides:
+  - non-blocking lifecycle tools (`xedit_status`, `xedit_start`, `xedit_health`)
+  - read-only domain tools (`xedit_session`, `xedit_list_capabilities`, `xedit_find_record`, `xedit_read_record`, `xedit_inspect_conflicts`, `xedit_call`)
+  - explicit launch overrides (`dataPath`, `pluginsFile`, `gameMode`, `moProfile`, `launcherPath`)
+  - dirty-state-safe control verbs (`xedit_dirty`, `xedit_stop`, `xedit_restart`)
+- `scripts/start-mo2.ps1` landed to enforce the visible-MO2 invariant and handle zombie MO2 cleanup.
+- `scripts/install-mo2-control-plane.ps1` was simplified so the Python plugin is the only deployable control-plane component at v0.1.
+- `xEditHookBridge.dll` moved to `tools/xedit-hook-bridge/dist/` and ships as a tracked runtime artifact.
+- Codex-specific marketplace support landed via `.agents/plugins/marketplace.json`, with a local-only `plugins/` workaround documented and gitignored.
+
+**Now known (from real implementation + acceptance)**
+
+- The old C++ `Mo2AgentControlPlugin` tree was a `STATIC` skeleton with no MO2 plugin interface; it could never have produced a usable `.dll`. The actual MO2 plugin is `tools/mo2-control-plane/live-bridge/mo2_agent_control.py`.
+- usvfs logs prove xEdit launched inside MO2's VFS; the missing-DLL diagnosis was wrong. The real early blocker was the 30s readiness timeout in `Wait-XeditClientAutomationReady`, which had to be bumped to 240s.
+- The xEdit daemon's production main-entry needed a Windows-safe ESM entry detection fix (`pathToFileURL`) and then a real lazy `buildServerToolset()` wiring path.
+- MCP clients that stringify nested `args` break a naïve `z.record(...)` schema; `xedit_call` must defensively accept both object and JSON-string forms.
+- A correct xEdit launch needs an explicit `dataPath` (`-D:`) derived from MO2's `gamePath`, otherwise xEdit may fall back to the Windows registry and open the platform install path instead of MO2's managed game root.
+- For experimentation, the right unit of control is an agent-authored `plugins.txt` plus `xedit_restart({ pluginsFile, dataPath, ... })`, not a manual `/mcp reconnect`.
+- Codex's marketplace schema differs materially from Claude Code's. It requires a `source: { source: "local", path: ... }` object and a `plugins/<name>/` layout. It also strips directory junctions from its cache copy, which forced the current local workaround.
+
+**Implications for later phases**
+
+- A publishable Codex release likely needs a pre-build / pre-publish step that materializes a real `plugins/<name>/` tree with copied files and relative paths, not runtime junctions.
+- The `writing-bgs-load-order` skill should be treated as the canonical authority for any future LOOT integration or profile-file mutation helpers; it already encodes the routing rules between file edits and daemon commands.
+- Any future write-capable workflow must keep the current non-blocking MCP invariant. Domain tools must never wait minutes for xEdit startup.
+- Save-safety automation should build on the new `xedit_dirty` / `xedit_stop` / `xedit_restart` semantics instead of inventing a second shutdown model.
+- End-user install UX is now good enough for the dev sandbox, but portable packaging remains a separate release-engineering task, not just more documentation.
 
 ## 2026-05-31 — Batch 1 closeout (xEdit Skills + Harness MCP)
 
@@ -146,13 +190,12 @@ The Batch 1 plan, spec, full STATUS file, and acceptance artifacts are preserved
 ## Supporting Docs
 
 - `README.md` for the project scope and top-level repo entry point.
-- `docs/standards/repo-hygiene.md` for durable content and artifact-handling rules.
-- `docs/plans/2026-04-10-bgs-modpack-superpowers-design.md` for the broader product architecture and workflow-first model.
-- `docs/plans/2026-04-10-bgs-modpack-superpowers-bootstrap.md` for the original repository bootstrap sequence.
-- `docs/plans/2026-04-10-roadmap-refresh-design.md` for the roadmap-as-control-panel design intent.
-- `docs/plans/2026-04-10-roadmap-refresh.md` for the implementation steps behind this roadmap refresh.
-- `templates/README.md` for shipped template resources.
+- `docs/internal/standards/repo-hygiene.md` for durable content and artifact-handling rules.
+- `docs/internal/plans/2026-04-10-bgs-modpack-superpowers-design.md` for the broader product architecture and workflow-first model.
+- `docs/internal/plans/2026-04-10-bgs-modpack-superpowers-bootstrap.md` for the original repository bootstrap sequence.
+- `docs/internal/plans/2026-04-10-roadmap-refresh-design.md` for the roadmap-as-control-panel design intent.
+- `docs/internal/plans/2026-04-10-roadmap-refresh.md` for the implementation steps behind this roadmap refresh.
 - `tools/README.md` for implementation code and automation placement.
 - `tools/mo2-vfs-launcher/xedit-client.md` for the native xEdit outer-client boundary.
-- `mcps/README.md` for MCP specs and contracts only.
+- `docs/internal/mcp-specs/README.md` for MCP specs and contracts only.
 - `tests/README.md` for bootstrap verification and future test coverage direction.
