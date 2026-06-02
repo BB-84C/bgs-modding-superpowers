@@ -83,6 +83,18 @@ load order.
 The full daemon-command reference (49 commands + error codes + save semantics
 + glossary) lives in `skills/xedit-automation/xedit-knowledgebase.md`.
 
+### BGS knowledge-base tools (3) — curated knowledge, no xEdit daemon
+
+The sibling BGS knowledge-base MCP is for curated modding knowledge, not live
+runtime state. It works before MO2 / xEdit are configured; use xEdit MCP for
+actual plugin, load-order, and record readback.
+
+| Tool | Use |
+|---|---|
+| `bgs_kb_status` | Reports loaded KB packs, versions, games, domains, cache root, and user pack roots. |
+| `bgs_kb_query` | Searches loaded packs for ranked knowledge snippets with game/domain filters and sources. |
+| `bgs_kb_get` | Fetches a full record by id, merging game-specific variants when `game` is provided. |
+
 ## Hard rules (non-negotiable)
 
 1. **The user's `<MO2_Root>` and any `<MO2_Root>/<game>/Data/` (or equivalent
@@ -106,7 +118,17 @@ The full daemon-command reference (49 commands + error codes + save semantics
    read-only investigator subagent FIRST.** The subagent burns its own context
    and returns a distilled summary. Do not loop hundreds of records through
    your own context.
-6. **First-run state**: if MO2 / xEdit / the control-plane Python plugin are
+6. **BGS domain knowledge routes through the KB first.** For questions about
+   how BGS modding works — Papyrus semantics, plugin-format gotchas, archive
+   precedence, load-order conventions, common engine quirks, or game-specific
+   toolchain gotchas — call `bgs_kb_status` / `bgs_kb_query` before
+   improvising or reaching for web search. If the question is about what the
+   current local load order, plugin, or record actually is, use `xedit_*` or the
+   relevant file/CLI surface instead. The KB is advisory; xEdit readback remains
+   authoritative for actual state. If `bgs_kb_status` reports no packs or the
+   needed game pack is missing, fall back to web research using the roadmap
+   Appendix source list or route setup/maintenance work to install the pack.
+7. **First-run state**: if MO2 / xEdit / the control-plane Python plugin are
    not yet set up on this machine, invoke `setting-up-bgs-modding-environment`
    BEFORE any modpack work. That skill orchestrates detection and install.
 
@@ -118,6 +140,10 @@ The full daemon-command reference (49 commands + error codes + save semantics
   via your skill tool. Do not paraphrase.
 - When the user asks about "what can you do", reference the skills inventory
   here; do not invent capabilities the plugin does not have.
+- When answering BGS modding-domain questions, prefer local KB retrieval before
+  web search. The bundled core pack ships inline; per-game packs may be
+  installed later via setup / maintenance skills; end-user packs may be
+  registered via `$BGS_KB_USER_PACKS` once the maintenance skill exists.
 - When you would normally write code that touches BGS plugin files (`.esp/.esm/
   .esl`), STOP and route through `xedit-automation` instead.
 - When the user asks to "log", "record", "track", or "note" modpack work,
