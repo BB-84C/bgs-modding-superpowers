@@ -1,6 +1,6 @@
 {
-  "builtAt": "2026-06-02T06:48:45.649Z",
-  "displayName": "core",
+  "builtAt": "2026-06-02T07:06:29.201Z",
+  "displayName": "BGS Modding Core Knowledge",
   "domains": [
     "archive-precedence",
     "debugging",
@@ -27,15 +27,15 @@
     "SkyrimVR",
     "Starfield"
   ],
-  "license": "unknown",
+  "license": "MIT",
   "minPluginVersion": "0.2.0",
-  "owner": "unknown",
-  "packId": "core",
+  "owner": "bgs-modding-superpowers maintainers",
+  "packId": "bgs-kb-core",
   "recordCount": 10,
   "schemaVersion": 1,
   "sha256": {
-    "kb.sqlite": "9642bffac03bfaca9dd3deb5cfc8254cff8c1768e2966396573bb68706c3a1de"
+    "kb.sqlite": "fcf05c2e9ee927caa99e089843a780c875a56c1caecfa431fec92c039ded8402"
   },
-  "sourceCommit": "6f749c98876d26bebe21eba6eb512b51b95c6f5f",
+  "sourceCommit": "e64b27f7b4ec96f672ad9aa9767e139cec50d85e",
   "version": "2026.06.02"
 }
