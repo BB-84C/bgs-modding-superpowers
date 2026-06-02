@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { ZodTypeAny } from "zod";
 import type { DaemonAdapter } from "../daemon-adapter.js";
 import type { Envelope, ToolContext } from "../types.js";
@@ -10,6 +9,7 @@ import { validateArgs } from "./validate.js";
 import { precheck, type PrecheckNeeds } from "./state-precheck.js";
 import { runRules } from "./rules.js";
 import { forwardCall } from "./forward.js";
+import { emitAudit, hashArgs } from "../audit-line.js";
 
 export interface ToolSpec {
   name: string;
@@ -32,29 +32,32 @@ export interface RunToolInput {
 }
 
 export async function runTool(spec: ToolSpec, input: RunToolInput): Promise<Envelope> {
-  const argsHash = safeHashArgs(input.args);
   try {
     const meta = { tool: spec.name };
 
     const v = validateArgs(spec.schema, input.args, meta);
     if (v) {
-      await input.audit.append({ tool: spec.name, argsHash, decision: "refused", ok: false, code: v.code });
+      await emitAudit({ audit: input.audit, tool: spec.name, args: input.args, env: v, ctx: input.ctx });
       return v;
     }
 
     const p = precheck({ tool: spec.name, args: input.args }, { ctx: input.ctx, needs: spec.needs });
     if (p) {
-      await input.audit.append({ tool: spec.name, argsHash, decision: "refused", ok: false, code: p.code });
+      await emitAudit({ audit: input.audit, tool: spec.name, args: input.args, env: p, ctx: input.ctx });
       return p;
     }
 
     const r = await runRules({ tool: spec.name, args: input.args, ctx: input.ctx, registry: input.registry });
-    if (r) {
-      await input.audit.append({
-        tool: spec.name, argsHash, decision: "refused", ok: false, code: r.code,
-        ruleHits: [r.code.replace(/^rule_/, "")],
+    if (r.refusal) {
+      await emitAudit({
+        audit: input.audit,
+        tool: spec.name,
+        args: input.args,
+        env: r.refusal,
+        ctx: input.ctx,
+        ruleHits: r.ruleHits,
       });
-      return r;
+      return r.refusal;
     }
 
     const env = await forwardCall({
@@ -66,10 +69,17 @@ export async function runTool(spec: ToolSpec, input: RunToolInput): Promise<Enve
       shape: spec.shape,
     });
 
-    await input.audit.append({
-      tool: spec.name, argsHash, decision: env.ok ? "ok" : "refused", ok: env.ok,
-      code: env.ok ? undefined : env.code,
-      daemonPid: input.ctx.daemonPid, sessionId: input.ctx.sessionId,
+    if (env.ok && r.warnings.length) {
+      env.warnings.push(...r.warnings);
+    }
+
+    await emitAudit({
+      audit: input.audit,
+      tool: spec.name,
+      args: input.args,
+      env,
+      ctx: input.ctx,
+      ruleHits: r.ruleHits.length ? r.ruleHits : undefined,
     });
     return env;
   } catch (err) {
@@ -83,17 +93,14 @@ export async function runTool(spec: ToolSpec, input: RunToolInput): Promise<Enve
       hint: err instanceof Error ? err.message : String(err),
     });
     await input.audit.append({
-      tool: spec.name, argsHash, decision: "refused", ok: false, code: refusal.code,
-      daemonPid: input.ctx.daemonPid, sessionId: input.ctx.sessionId,
+      tool: spec.name,
+      argsHash: hashArgs(input.args),
+      decision: "refused",
+      ok: false,
+      code: refusal.code,
+      daemonPid: input.ctx.daemonPid,
+      sessionId: input.ctx.sessionId,
     });
     return refusal;
-  }
-}
-
-function safeHashArgs(args: Record<string, unknown>): string {
-  try {
-    return createHash("sha256").update(JSON.stringify(args)).digest("hex").slice(0, 16);
-  } catch {
-    return "unhashable";
   }
 }

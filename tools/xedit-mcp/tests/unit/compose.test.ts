@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
 import { runTool, type ToolSpec } from "../../src/pipeline/compose.js";
-import { defaultRegistry } from "../../src/rules/registry.js";
+import { defaultRegistry, createRegistry } from "../../src/rules/registry.js";
 import { createAuditLogger } from "../../src/audit.js";
 import { makeMockAdapter } from "../fixtures/daemon-mock.js";
-import type { ToolContext } from "../../src/types.js";
+import type { Rule, ToolContext } from "../../src/types.js";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,7 +24,8 @@ const ctx: ToolContext = {
 const spec: ToolSpec = {
   name: "xedit_read_record",
   schema: z.object({ file: z.string(), formId: z.string() }),
-  needs: { daemon: true, targetFileFromArg: "file" },
+  // Load-order check is owned by the rule layer (LOAD001), not the precheck.
+  needs: { daemon: true },
   command: "records.get",
   summary: (args) => `record ${String(args.formId)}`,
 };
@@ -53,13 +54,15 @@ describe("pipeline.compose.runTool", () => {
     expect(env.code).toBe("invalid_request");
   });
 
-  it("short-circuits on state precheck (stage 2)", async () => {
+  it("short-circuits on state precheck (stage 2) — daemon not ready", async () => {
+    const noDaemonCtx: ToolContext = { ...ctx, daemonPid: undefined };
     const env = await runTool(spec, {
-      args: { file: "Ghost.esp", formId: "0x012345" },
-      ctx, adapter, registry, audit,
+      args: { file: "Patch.esp", formId: "0x012345" },
+      ctx: noDaemonCtx, adapter, registry, audit,
     });
     if (env.ok) throw new Error("expected refusal");
     expect(env.code).toBe("state_violation");
+    expect(env.hint).toContain("daemon");
   });
 
   it("short-circuits on rule (stage 3) — LOAD001 against xedit_find_record", async () => {
@@ -77,6 +80,27 @@ describe("pipeline.compose.runTool", () => {
     });
     if (env.ok) throw new Error("expected refusal");
     expect(env.code).toBe("rule_LOAD001");
+  });
+
+  it("MEDIUM rule findings surface as warnings on the ok envelope (carry-forward #4)", async () => {
+    const mediumRule: Rule = {
+      id: "MED001",
+      appliesTo: ["xedit_read_record"],
+      riskLevel: "MEDIUM",
+      description: "test medium",
+      suggestion: "note",
+      check: () => ({ ruleId: "MED001", matched: {}, message: "smoke" }),
+    };
+    const reg = createRegistry([mediumRule]);
+    const env = await runTool(spec, {
+      args: { file: "Patch.esp", formId: "0x012345" },
+      ctx, adapter, registry: reg, audit,
+    });
+    expect(env.ok).toBe(true);
+    if (!env.ok) throw new Error("expected ok");
+    expect(env.warnings).toHaveLength(1);
+    expect(env.warnings[0]?.code).toBe("rule_MED001");
+    expect(env.warnings[0]?.severity).toBe("MEDIUM");
   });
 
   it("catches unexpected throws → internal_error envelope + writes audit line", async () => {
