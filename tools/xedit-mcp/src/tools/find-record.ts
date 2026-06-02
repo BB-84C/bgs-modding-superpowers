@@ -55,11 +55,15 @@ export function makeFindRecordHandler(opts: FindRecordOptions) {
 
     if (typeof args.formId === "string" && typeof args.file === "string") {
       const daemonArgs = stripFormIdPrefix(args);
+      // Load-order check is owned by LOAD001 (rule layer) for uniform behavior
+      // across all record-side tools; pipeline runs rules against the ORIGINAL
+      // caller args (line 81 below passes `args`, not `daemonArgs`), so
+      // LOAD001 still sees `file` as the caller passed it.
       return runTool(
         {
           ...findRecordSpec,
           command: "records.find_by_form_id",
-          needs: { daemon: true, targetFileFromArg: "file" },
+          needs: { daemon: true },
           shape: (result) => ({ locators: [normalizeLocator(result, args)] }),
         },
         { args: daemonArgs, ctx, adapter: opts.adapter, registry: opts.registry, audit: opts.audit },
@@ -91,10 +95,16 @@ export function makeFindRecordHandler(opts: FindRecordOptions) {
 
 function normalizeLocator(raw: unknown, args: Record<string, unknown>): Record<string, unknown> {
   const r = (raw ?? {}) as Record<string, unknown>;
+  // For the by-formId path, the caller passed `file` + `formId` directly — those
+  // are the canonical locator identity and should round-trip unchanged (including
+  // the caller's 0x prefix style). The daemon's echoed values may have the prefix
+  // stripped because we strip it at the edge. Prefer caller-supplied values for
+  // identity fields; fall back to daemon for signature/editorId which the caller
+  // does not supply on the formId path.
   return {
-    file: r.file ?? args.file,
-    formId: r.formId ?? args.formId,
+    file: args.file ?? r.file,
+    formId: args.formId ?? r.formId,
     signature: r.signature,
-    editorId: r.editorId ?? args.editorId,
+    editorId: args.editorId ?? r.editorId,
   };
 }

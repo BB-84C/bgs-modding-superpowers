@@ -31,21 +31,7 @@ describe("pipeline.precheck", () => {
     expect(r.hint).toContain("IKnowWhatImDoing");
   });
 
-  it("refuses if needsTargetLoaded and file not in load order", () => {
-    const r = precheck(
-      { tool: "t", args: { file: "Missing.esp" } },
-      { ctx: baseCtx, needs: { targetFileFromArg: "file" } },
-    );
-    if (!r || r.ok) throw new Error("expected refusal");
-    expect(r.code).toBe("state_violation");
-    expect(r.hint).toContain("load order");
-  });
-
-  it("passes targetFileFromArg when file is loaded", () => {
-    const r = precheck(
-      { tool: "t", args: { file: "Patch.esp" } },
-      { ctx: baseCtx, needs: { targetFileFromArg: "file" } },
-    );
-    expect(r).toBeNull();
-  });
+  // Carry-forward #5 (Batch 2): `targetFileFromArg` was retired — load-order
+  // checks now live in the rule layer (LOAD001). See state-precheck.ts
+  // rationale comment for the reasoning.
 });
