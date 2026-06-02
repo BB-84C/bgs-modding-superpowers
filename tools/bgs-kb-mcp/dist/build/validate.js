@@ -2,6 +2,7 @@ import * as Ajv2020Module from "ajv/dist/2020.js";
 import * as addFormatsModule from "ajv-formats";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 const Ajv2020 = Ajv2020Module.default;
 const addFormats = addFormatsModule.default;
 function customError(instancePath, message) {
@@ -26,9 +27,9 @@ export function findRepoRoot(startPath) {
     return null;
 }
 export function defaultSchemaPathForPack(packRoot) {
-    const repoRoot = findRepoRoot(packRoot);
+    const repoRoot = findRepoRoot(packRoot) ?? findRepoRoot(dirname(fileURLToPath(import.meta.url)));
     if (!repoRoot) {
-        throw new Error(`Could not locate repo root from pack root '${packRoot}' while resolving record.schema.json`);
+        throw new Error(`Could not locate repo root from pack root '${packRoot}' or bgs-kb-mcp module path while resolving record.schema.json`);
     }
     return join(repoRoot, "knowledge", "bgs-kb", "schema", "record.schema.json");
 }
@@ -92,11 +93,11 @@ export function validateRecords(records, packRoot, schemaPath) {
             errors.push({ sourcePath, errors: [customError("/id", `duplicate id '${id}' also appears in ${paths.join(", ")}`)] });
         }
     }
-    return errors.length > 0 ? { valid: [], errors } : { valid, errors };
+    return { valid, errors };
 }
 export function formatValidationError(sourcePath, error) {
     const path = error.instancePath || "/";
     const message = error.message ?? "validation failed";
-    return `${sourcePath}: ${path}: ${message}`;
+    return `${sourcePath}:${path}: ${message}`;
 }
 //# sourceMappingURL=validate.js.map

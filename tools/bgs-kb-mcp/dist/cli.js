@@ -11,7 +11,10 @@
 //
 // =============================================================================
 import { buildPack, BuildValidationError } from "./build/index.js";
+import { readRecords } from "./build/read-records.js";
 import { formatValidationError } from "./build/validate.js";
+import { validateRecords } from "./build/validate.js";
+import { resolve } from "node:path";
 const args = process.argv.slice(2);
 if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
     console.log(`bgs-kb-mcp CLI (v0.1.0 — KB-1c skeleton)
@@ -22,8 +25,8 @@ Usage:
   bgs-kb-mcp info <pack-root>        Print pack summary                             (KB-1f)
   bgs-kb-mcp render <pack-root>      Render legacy markdown handbook from records   (KB-5)
 
-Currently implemented: build. Other subcommands return exit 2 with a pointer to
-the relevant phase.
+Currently implemented: build, validate. Other subcommands return exit 2 with a
+pointer to the relevant phase.
 `);
     process.exit(args.length === 0 ? 1 : 0);
 }
@@ -54,6 +57,43 @@ if (sub === "build") {
             process.exit(1);
         }
         console.error(error instanceof Error ? error.message : String(error));
+        process.exit(2);
+    }
+}
+if (sub === "validate") {
+    const packRoot = args[1];
+    if (!packRoot) {
+        console.error("bgs-kb-mcp validate: missing <pack-root>");
+        process.exit(2);
+    }
+    const resolvedPackRoot = resolve(packRoot);
+    try {
+        const records = await readRecords(resolvedPackRoot);
+        const result = validateRecords(records, resolvedPackRoot);
+        if (result.errors.length === 0) {
+            const byDomain = new Map();
+            for (const record of result.valid) {
+                for (const domain of record.domains)
+                    byDomain.set(domain, (byDomain.get(domain) ?? 0) + 1);
+            }
+            const summary = [...byDomain.entries()]
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([domain, count]) => `${domain}: ${count}`)
+                .join(", ");
+            console.log(`OK: ${result.valid.length} records valid in ${resolvedPackRoot}`);
+            console.log(`summary: ${summary}`);
+            process.exit(0);
+        }
+        for (const recordError of result.errors) {
+            for (const validationError of recordError.errors) {
+                console.error(formatValidationError(recordError.sourcePath, validationError));
+            }
+        }
+        console.error(`FAIL: ${result.valid.length} valid, ${result.errors.length} failing in ${resolvedPackRoot}`);
+        process.exit(1);
+    }
+    catch (error) {
+        console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(2);
     }
 }

@@ -2,7 +2,8 @@ import * as Ajv2020Module from "ajv/dist/2020.js";
 import type { ErrorObject } from "ajv/dist/2020.js";
 import * as addFormatsModule from "ajv-formats";
 import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { SourceRecord } from "./types.js";
 
@@ -45,9 +46,9 @@ export function findRepoRoot(startPath: string): string | null {
 }
 
 export function defaultSchemaPathForPack(packRoot: string): string {
-  const repoRoot = findRepoRoot(packRoot);
+  const repoRoot = findRepoRoot(packRoot) ?? findRepoRoot(dirname(fileURLToPath(import.meta.url)));
   if (!repoRoot) {
-    throw new Error(`Could not locate repo root from pack root '${packRoot}' while resolving record.schema.json`);
+    throw new Error(`Could not locate repo root from pack root '${packRoot}' or bgs-kb-mcp module path while resolving record.schema.json`);
   }
   return join(repoRoot, "knowledge", "bgs-kb", "schema", "record.schema.json");
 }
@@ -119,11 +120,11 @@ export function validateRecords(records: SourceRecord[], packRoot: string, schem
     }
   }
 
-  return errors.length > 0 ? { valid: [], errors } : { valid, errors };
+  return { valid, errors };
 }
 
 export function formatValidationError(sourcePath: string, error: ErrorObject): string {
   const path = error.instancePath || "/";
   const message = error.message ?? "validation failed";
-  return `${sourcePath}: ${path}: ${message}`;
+  return `${sourcePath}:${path}: ${message}`;
 }
