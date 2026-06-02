@@ -43,3 +43,6 @@ AGENTS.md
 # absolute paths inside those copies are machine-specific. A v0.2 follow-up
 # will ship a portable Codex-shaped subdirectory; for now it stays local.
 /plugins/
+
+# BGS KB pack build artifact; source records + manifest.json are committed.
+/knowledge/bgs-kb/packs/*/kb.sqlite

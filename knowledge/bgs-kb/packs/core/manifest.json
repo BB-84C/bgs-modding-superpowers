@@ -1,0 +1,41 @@
+{
+  "builtAt": "2026-06-02T06:48:45.649Z",
+  "displayName": "core",
+  "domains": [
+    "archive-precedence",
+    "debugging",
+    "file-conflicts",
+    "install-planning",
+    "load-order",
+    "papyrus",
+    "version-differences",
+    "xedit"
+  ],
+  "engineFamilies": [
+    "creation-engine",
+    "creation-engine-2",
+    "gamebryo"
+  ],
+  "games": [
+    "Fallout3",
+    "Fallout4",
+    "Fallout4VR",
+    "FalloutNV",
+    "SkyrimAE",
+    "SkyrimLE",
+    "SkyrimSE",
+    "SkyrimVR",
+    "Starfield"
+  ],
+  "license": "unknown",
+  "minPluginVersion": "0.2.0",
+  "owner": "unknown",
+  "packId": "core",
+  "recordCount": 10,
+  "schemaVersion": 1,
+  "sha256": {
+    "kb.sqlite": "9642bffac03bfaca9dd3deb5cfc8254cff8c1768e2966396573bb68706c3a1de"
+  },
+  "sourceCommit": "6f749c98876d26bebe21eba6eb512b51b95c6f5f",
+  "version": "2026.06.02"
+}
