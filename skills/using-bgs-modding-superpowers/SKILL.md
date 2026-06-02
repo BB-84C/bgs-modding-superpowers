@@ -22,6 +22,7 @@ for dev-log and release-changelog maintenance.
 | Skill | Auto-triggers when |
 |---|---|
 | `setting-up-bgs-modding-environment` | First conversation in a project; MO2 or xEdit not yet detected; user says "set up", "install", "bootstrap", "configure" |
+| `maintaining-modding-environments` | After first-run: "ongoing", "maintain", "register custom pack", "prune cache", "update knowledge base", "modding environment health check" |
 | `xedit-automation` | Any task involving `.esp/.esm/.esl` plugin files, FormIDs, masters, conflicts, ESL flagging, ITM/UDR cleaning, Pascal scripts |
 | `xedit-conflict-audit` | "Why is this override not winning?", "Which plugins overlap on this record?", "Is this load order safe?" |
 | `writing-bgs-load-order` | Reading/editing/generating `plugins.txt` or `loadorder.txt`; enabling/disabling/reordering/adding/removing plugins; launching xEdit with a custom plugins file; "load order", "enable this plugin", "disable that plugin", "what does the asterisk mean" |
@@ -143,7 +144,7 @@ actual plugin, load-order, and record readback.
 - When answering BGS modding-domain questions, prefer local KB retrieval before
   web search. The bundled core pack ships inline; per-game packs may be
   installed later via setup / maintenance skills; end-user packs may be
-  registered via `$BGS_KB_USER_PACKS` once the maintenance skill exists.
+  registered via `$BGS_KB_USER_PACKS` through `maintaining-modding-environments`.
 - When you would normally write code that touches BGS plugin files (`.esp/.esm/
   .esl`), STOP and route through `xedit-automation` instead.
 - When the user asks to "log", "record", "track", or "note" modpack work,
@@ -153,6 +154,8 @@ actual plugin, load-order, and record readback.
 ## See also
 
 - `setting-up-bgs-modding-environment` — first-run setup orchestrator.
+- `maintaining-modding-environments` — ongoing environment care, KB updates,
+  custom-pack registration, cache pruning, and health checks after first-run.
 - `xedit-automation` — hub skill for all xEdit work; routing doctrine,
   anti-patterns, sub-agent recipes.
 - `xedit-automation/xedit-knowledgebase.md` — deep reference: 49 daemon
