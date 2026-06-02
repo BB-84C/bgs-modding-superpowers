@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import { ok as okEnv, refuse } from "../envelope.js";
 import { MCP_ERROR_CODES } from "../types.js";
 import { validateArgs } from "../pipeline/validate.js";
 import { precheck } from "../pipeline/state-precheck.js";
 import { runRules } from "../pipeline/rules.js";
+import { emitAudit } from "../audit-line.js";
 const Args = z.object({
     file: z.string().min(1),
     // Accept both "0x0000003C" and bare "0000003C" — strip 0x before forwarding to daemon.
@@ -30,19 +30,26 @@ export function makeReadRecordHandler(opts) {
         }
         const v = validateArgs(Args, args, { tool: "xedit_read_record" });
         if (v) {
-            await auditLine(opts, "xedit_read_record", args, v, ctx);
+            await emitAudit({ audit: opts.audit, tool: "xedit_read_record", args, env: v, ctx });
             return v;
         }
         // NOTE: precheck uses `daemon` only; load-order is owned by LOAD001 rule.
         const p = precheck({ tool: "xedit_read_record", args }, { ctx, needs: { daemon: true } });
         if (p) {
-            await auditLine(opts, "xedit_read_record", args, p, ctx);
+            await emitAudit({ audit: opts.audit, tool: "xedit_read_record", args, env: p, ctx });
             return p;
         }
         const r = await runRules({ tool: "xedit_read_record", args, ctx, registry: opts.registry });
-        if (r) {
-            await auditLine(opts, "xedit_read_record", args, r, ctx);
-            return r;
+        if (r.refusal) {
+            await emitAudit({
+                audit: opts.audit,
+                tool: "xedit_read_record",
+                args,
+                env: r.refusal,
+                ctx,
+                ruleHits: r.ruleHits,
+            });
+            return r.refusal;
         }
         const daemonArgs = stripFormIdPrefix(args);
         const [rec, win, base, conflict] = await Promise.all([
@@ -59,7 +66,7 @@ export function makeReadRecordHandler(opts) {
                 hint: rec.error.message,
                 detail: { daemonCode: rec.error.code },
             });
-            await auditLine(opts, "xedit_read_record", args, env, ctx);
+            await emitAudit({ audit: opts.audit, tool: "xedit_read_record", args, env, ctx });
             return env;
         }
         const env = okEnv({
@@ -72,28 +79,17 @@ export function makeReadRecordHandler(opts) {
                 baseRecord: base.ok ? base.result : null,
                 conflict: conflict.ok ? conflict.result : null,
             },
+            warnings: r.warnings,
         });
-        await auditLine(opts, "xedit_read_record", args, env, ctx);
+        await emitAudit({
+            audit: opts.audit,
+            tool: "xedit_read_record",
+            args,
+            env,
+            ctx,
+            ruleHits: r.ruleHits.length ? r.ruleHits : undefined,
+        });
         return env;
     };
-}
-async function auditLine(opts, tool, args, env, ctx) {
-    await opts.audit.append({
-        tool,
-        argsHash: safeHashArgs(args),
-        decision: env.ok ? "ok" : "refused",
-        ok: env.ok,
-        code: env.ok ? undefined : env.code,
-        daemonPid: ctx.daemonPid,
-        sessionId: ctx.sessionId,
-    });
-}
-function safeHashArgs(args) {
-    try {
-        return createHash("sha256").update(JSON.stringify(args)).digest("hex").slice(0, 16);
-    }
-    catch {
-        return "unhashable";
-    }
 }
 //# sourceMappingURL=read-record.js.map

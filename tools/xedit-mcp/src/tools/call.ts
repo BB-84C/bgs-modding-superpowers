@@ -10,6 +10,7 @@ import { precheck } from "../pipeline/state-precheck.js";
 import { runRules } from "../pipeline/rules.js";
 import { forwardCall } from "../pipeline/forward.js";
 import { allDigestCommands } from "../capabilities-digest.js";
+import { emitAudit } from "../audit-line.js";
 
 // Some MCP clients serialize the `args` sub-object to a JSON string before
 // sending. Accept either an object (canonical) or a string (which we parse).
@@ -66,7 +67,7 @@ export function makeCallHandler(opts: CallOptions) {
     const parsed = CallArgs.safeParse(rawArgs);
     if (!parsed.success) {
       const v = validateArgs(CallArgs, rawArgs, { tool: "xedit_call" });
-      await opts.audit.append({ tool: "xedit_call", argsHash: "v-fail", decision: "refused", ok: false, code: v!.code });
+      await emitAudit({ audit: opts.audit, tool: "xedit_call", args: rawArgs, env: v!, ctx });
       return v!;
     }
     const { command, args = {} } = parsed.data;
@@ -84,29 +85,29 @@ export function makeCallHandler(opts: CallOptions) {
         hint: "Check xedit_list_capabilities for the supported command set.",
         detail: { command },
       });
-      await opts.audit.append({ tool: "xedit_call", argsHash: "unknown", decision: "refused", ok: false, code: env.code });
+      await emitAudit({ audit: opts.audit, tool: "xedit_call", args: rawArgs, env, ctx });
       return env;
     }
 
     // precheck uses daemon only; load-order owned by LOAD001 rule.
     const p = precheck({ tool: "xedit_call", args }, { ctx, needs: { daemon: true } });
     if (p) {
-      await opts.audit.append({ tool: "xedit_call", argsHash: "p-fail", decision: "refused", ok: false, code: p.code });
+      await emitAudit({ audit: opts.audit, tool: "xedit_call", args: rawArgs, env: p, ctx });
       return p;
     }
 
     // Rules opt-in by listing "xedit_call" in appliesTo. LOAD001 lists it already.
     const r = await runRules({ tool: "xedit_call", args, ctx, registry: opts.registry });
-    if (r) {
-      await opts.audit.append({
+    if (r.refusal) {
+      await emitAudit({
+        audit: opts.audit,
         tool: "xedit_call",
-        argsHash: "r-fail",
-        decision: "refused",
-        ok: false,
-        code: r.code,
-        ruleHits: [r.code.replace(/^rule_/, "")],
+        args: rawArgs,
+        env: r.refusal,
+        ctx,
+        ruleHits: r.ruleHits,
       });
-      return r;
+      return r.refusal;
     }
 
     const env = await forwardCall({
@@ -123,12 +124,16 @@ export function makeCallHandler(opts: CallOptions) {
         severity: "MEDIUM",
       });
     }
-    await opts.audit.append({
+    if (env.ok && r.warnings.length) {
+      env.warnings.push(...r.warnings);
+    }
+    await emitAudit({
+      audit: opts.audit,
       tool: "xedit_call",
-      argsHash: "ok",
-      decision: env.ok ? "ok" : "refused",
-      ok: env.ok,
-      code: env.ok ? undefined : env.code,
+      args: rawArgs,
+      env,
+      ctx,
+      ruleHits: r.ruleHits.length ? r.ruleHits : undefined,
     });
     return env;
   };
