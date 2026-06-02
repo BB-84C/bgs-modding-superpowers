@@ -140,7 +140,7 @@ Retrieval seam: **new sibling `tools/bgs-kb-mcp/`**, NOT folded into `xedit-mcp`
 
 Tool surface: `bgs_kb_status`, `bgs_kb_query`, `bgs_kb_get`, and optional `bgs_kb_check_updates` / `bgs_kb_install_pack` for network refresh. Query returns ranked snippet hits + appliesTo + sources; agent calls `get` only after a promising hit. Atomic primitives, not bundled "answer everything" tools.
 
-v1 storage tech: **SQLite3 + FTS5 + BM25** (user-confirmed override of the JSONL+JS-FTS recommendation). Rationale: BM25 ranking maturity, `MATCH` query expressiveness, snippet/highlight built-ins, predictable performance characteristics at 2500-3000 items. SQLite library choice is a v1 implementation detail to confirm at KB-2: prefer Node 22's built-in `node:sqlite` (zero install, preserves the portable-plugin Target-1 invariant) **if** FTS5 is enabled in the bundled build; fall back to `better-sqlite3` with prebuilt binaries via `node-pre-gyp` if not. WASM `sql.js` is the floor option.
+v1 storage tech: **SQLite3 + FTS5 + BM25** (user-confirmed override of the JSONL+JS-FTS recommendation). Rationale: BM25 ranking maturity, `MATCH` query expressiveness, snippet/highlight built-ins, predictable performance characteristics at 2500-3000 items. SQLite library choice is a v1 implementation detail to confirm at KB-2: prefer Node 24's built-in `node:sqlite` (the maintainer's machine runs Node v24.16.0; `node:sqlite` is stable in Node 22+ and Node 24's bundled SQLite ships FTS5 per upstream release notes — verify with a 5-min smoke test at KB-2). If FTS5 is not bundled, fall back to `better-sqlite3` with prebuilt binaries via `node-pre-gyp`. WASM `sql.js` is the floor option. Plugin `engines.node` will pin `>=22` so users on Node 22 LTS also work.
 
 Source of truth: `knowledge/bgs-kb/` **in this repo**:
 - `knowledge/bgs-kb/schema/record.schema.json` — JSON Schema for record validation (must validate every record at build time)
@@ -199,7 +199,9 @@ Reference-repo lessons applied:
 
 - **KB-1** — schema + seed records + pack-build CLI: author `knowledge/bgs-kb/schema/record.schema.json`; extract ~50 seed records from `skills/xedit-automation/xedit-knowledgebase.md` and `skills/writing-bgs-load-order/SKILL.md` into structured records under `knowledge/bgs-kb/packs/core/records/`; build minimal `tools/bgs-kb-mcp/cli` that takes a pack root and emits `kb.sqlite` + `manifest.json` from its `records/`. Old markdown stays put.
 - **KB-2** — `tools/bgs-kb-mcp/` ships `bgs_kb_status` / `bgs_kb_query` / `bgs_kb_get` + the three-root pack discovery (bundled + cache + `$BGS_KB_USER_PACKS`). Loads bundled core pack at startup. SQLite lib decision (`node:sqlite` vs `better-sqlite3` vs `sql.js`) locked here based on FTS5 availability check. New MCP registered in `.mcp.json` + `.opencode/plugins/bgs-modding-superpowers.js`. Portable-plugin build script copies `knowledge/bgs-kb/packs/core/` + `tools/bgs-kb-mcp/dist/`.
-- **KB-3** — `setting-up-bgs-modding-environment` skill gains explicit KB acquisition workflow: ask target games → detect cache → consent for >threshold downloads → fetch from GitHub Releases → verify sha256 → install to cache → smoke test (`bgs_kb_query` returns hits) → cache hygiene (prune old versions). Adds "register a custom pack" subroutine for end-user packs.
+- **KB-3** — split the modding-environment skill surface so end-user pack authoring does not become an orphan that everyone forgets:
+  - `setting-up-bgs-modding-environment` (read-once at project start) keeps the first-run install responsibilities: ask target games → fetch chosen packs from GitHub Releases → verify sha256 → install to cache → smoke test (`bgs_kb_query` returns hits) → register MCP.
+  - **New skill `maintaining-modding-environments`** (recurring usage during a modpack project's life) absorbs ongoing care that does not belong in a first-run orchestrator: KB update checks, cache hygiene (prune old versions), custom pack authoring + registration (`$BGS_KB_USER_PACKS`), pack-build CLI walkthroughs, version-pinning advice, and any other recurring environment-maintenance work currently bolted onto setting-up. Reviewing `skills/setting-up-bgs-modding-environment/SKILL.md` at KB-3 time will surface a list of steps that should move into the maintenance skill rather than stay in first-run; do the split intentionally.
 - **KB-4** — author per-game packs via the two-stage fan-out plan documented below (Stage A: 4 cross-game core agents; Stage B: 4 per-game agents). Publish as GitHub Release assets. **Anti-copy guardrail enforced in every subagent prompt**: no hard copy from `WingedGuardian/skyrimvr-claude-toolkit`; paraphrase + cite in the structured `sources` field.
 - **KB-5** — `xedit-automation` lesson-log appending changes from "edit `xedit-knowledgebase.md`" to "add KB record"; mechanically-checkable footguns become xEdit MCP rule candidates; legacy markdown becomes generated-from-records or retired.
 - **KB-6** — optional `bgs_kb_check_updates` + opt-in refresh; eval harness for retrieval quality (negative-case fixtures: "FO4 precombine" query with `game=skyrimse` filter should suppress FO4-only records).
@@ -210,26 +212,27 @@ WingedGuardian's 10 H2 categories map onto our cross-game domains as follows:
 
 | WingedGuardian H2 | Our domain | Game scope | Target pack |
 |---|---|---|---|
-| Papyrus Scripting | `papyrus` | FO4 + Skyrim family | **core** + per-game variants |
+| Papyrus Scripting | `papyrus` | FO4 + Skyrim family + Starfield (all 3 Papyrus-using games; FO3/FNV use GECK scripting, not Papyrus, and are excluded via the schema's `excludes` field) | **core** + per-game variants |
 | Version-Specific Differences | `version-differences` | Per-game runtime variants | per-game packs |
 | xEdit / xelib / ESP Editing | `xedit` + `plugin-format` | All games | **core** |
 | Game Engine Quirks | `engine` | Mixed | split: family-shared → core; game-specific → game pack |
 | ESP Creation via Spriggit | `tooling.spriggit` | Multi-game (Mutagen) | **core** |
-| VR Controller Input Detection | `game-specific.vr` | Skyrim VR only | **skyrimse** (VR subsection) |
+| VR Controller Input Detection | `game-specific.vr` | Skyrim VR + FO4 VR (parallel SKSEVR / F4SEVR APIs; WingedGuardian source is SkyrimVR-only but the domain itself is broader) | **skyrimse** + **fallout4** (each gets its own VR subsection) |
 | Weapon Manipulation at Runtime | `papyrus.advanced` | Skyrim-specific | **skyrimse** |
-| Papyrus Debugging | `papyrus` + `debugging` | FO4 + Skyrim | **core** |
+| Papyrus Debugging | `papyrus` + `debugging` | FO4 + Skyrim family + Starfield | **core** |
 | Save File Analysis | `save-file` + `debugging` | Per-game format | per-game packs |
 | Hook Candidates | meta / authoring discipline | n/a | repo convention, not a domain |
 
-**Stage A — cross-game core pack** (4 parallel subagents):
-- **A1 — xedit + plugin-format** (~30 records): conflict taxonomy, override chain, ITM/ITPO/ITC, FormID model, light-master rules, ONAM, master headers, plugin-type matrix.
-- **A2 — load-order + archive-precedence** (~15 records): modern asterisk plugins.txt, legacy FO3/FNV format, BSA/BA2 priority, loose-file precedence, MO2 profile model.
-- **A3 — papyrus shared core** (~25 records): script lifecycle, threading, event lifecycle, common bugs (OnInit-vs-OnLoad, RegisterForUpdate, Utility.Wait reliability), debugging conventions. Shared FO4+Skyrim concepts only.
-- **A4 — engine quirks + Spriggit tooling** (~15 records): fUpdateBudgetMS, abilities, vanilla bugs surviving editions, Spriggit/Mutagen multi-game support.
+**Stage A — cross-game core pack** (4 parallel subagents). Default scope on every Stage A record is **all 5 games**; per-game divergences are expressed via `appliesTo.games` / `excludes` / `variants` on the record, not by spawning per-game duplicates. Per-game pack additions live in Stage B.
 
-**Stage B — per-game packs** (4 parallel subagents, each given Stage A results as read-only context):
-- **B1 — Skyrim (LE/SE/AE/VR)**: scripts subsystem, animation generation (Nemesis/FNIS), behavior outputs, SkyUI, VR controller API, AE breakage categories, version-pinning rules.
-- **B2 — Fallout 4**: precombine/previs integrity, BA2 quirks, settlement worldspace, Buffout diagnostics, next-gen update breakage, ENB+F4SE interactions.
+- **A1 — xedit + plugin-format** (~30 records): conflict taxonomy, override chain, ITM/ITPO/ITC, FormID model, light-master rules, ONAM, master headers, plugin-type matrix. All 5 games in scope; legacy plugins.txt nuance for FO3/FNV is a variant on the relevant records, not a separate package.
+- **A2 — load-order + archive-precedence** (~15 records): modern asterisk plugins.txt, legacy FO3/FNV format, BSA/BA2 priority, loose-file precedence, MO2 profile model. All 5 games in scope; the modern-vs-legacy split is per-record `appliesTo`.
+- **A3 — papyrus shared core** (~25 records): script lifecycle, threading, event lifecycle, common bugs (OnInit-vs-OnLoad, RegisterForUpdate, Utility.Wait reliability), debugging conventions. Shared across FO4 / Skyrim family / Starfield (the three Papyrus-using games). FO3 + FNV are excluded on each Papyrus record via `excludes` so the agent retrieval surface explicitly refuses to apply Papyrus advice to non-Papyrus games.
+- **A4 — engine quirks + Spriggit tooling** (~15 records): fUpdateBudgetMS, abilities, vanilla bugs surviving editions, Spriggit/Mutagen multi-game support. All 5 games in scope by default; Gamebryo-vs-Creation engine differences expressed via `engineFamilies` on each record.
+
+**Stage B — per-game packs** (4 parallel subagents, each given Stage A results as read-only context so they only add game-specific records or per-game variants on existing core records):
+- **B1 — Skyrim (LE/SE/AE/VR)**: scripts subsystem, animation generation (Nemesis/FNIS), behavior outputs, SkyUI, SkyrimVR controller API, AE breakage categories, version-pinning rules.
+- **B2 — Fallout 4 (incl. FO4 VR)**: precombine/previs integrity, BA2 quirks, settlement worldspace, Buffout diagnostics, next-gen update breakage, ENB+F4SE interactions, FO4 VR controller/IK quirks (parallel to but distinct from SkyrimVR; the WingedGuardian SkyrimVR source does not cover FO4 VR — Stage B2 gathers it independently).
 - **B3 — Fallout 3 + New Vegas** (paired): legacy plugins.txt format, NVSE/FOSE, GECK reality, common engine bugs, TTW interop notes.
 - **B4 — Starfield**: post-CK toolchain caution, asset/material model changes, plugin format evolution, what NOT to assume from FO4/Skyrim.
 
@@ -244,6 +247,8 @@ the record's structured `sources` field.
 Every record MUST include the `sources` field with at least one entry.
 Unsourced facts get `confidence: low-community` and a `needs verification` note.
 ```
+
+**Source survey for fan-out** — Stage A and Stage B subagents are not free to wander the web at random. Each subagent is given a curated list of BGS modding sources (forums, mod hosts, wikis, GitHub orgs, Discords, Reddit, xSE homes, ENB / shader hubs, bug trackers, long-form blog write-ups) covering all 5 games. The list is enumerated in the **Appendix: BGS modding source list** at the end of this file (populated by the 2026-06-02 librarian survey). Per-source notes flag access conditions (login? Cloudflare? rate-limit?) and fetch strategy (simple HTTP vs Playwright vs API). Subagents that hit a Cloudflare challenge MUST switch to the Playwright harness rather than give up and fall back to prior-based summarization.
 
 **Now known (from the consultation)**
 
@@ -385,3 +390,180 @@ The Batch 1 plan, spec, full STATUS file, and acceptance artifacts are preserved
 - `tools/mo2-vfs-launcher/xedit-client.md` for the native xEdit outer-client boundary.
 - `docs/internal/mcp-specs/README.md` for MCP specs and contracts only.
 - `tests/README.md` for bootstrap verification and future test coverage direction.
+
+## Appendix: BGS modding source list (KB-4 fan-out research targets)
+
+Curated 2026-06-02 by `@librarian-beta` with live web verification. URLs checked, Cloudflare / anti-bot status flagged per entry, Discord invites validated via the Discord invite API. Where simple HTTP returned 403 or hit a Cloudflare challenge, the source was re-verified via Playwright (real Chromium fingerprint passes the "Just a moment..." gate after ~3-8 seconds). Subagents at KB-4 fan-out time MUST follow the per-entry `Fetch strategy` and switch to Playwright on any Cloudflare challenge — do NOT fall back to prior-based summarization.
+
+### Load-bearing summary
+
+1. **xEdit docs + xEdit Discord + TES5Edit GitHub** — core sources for plugin records, conflict semantics, cleaning, automation, and tool behavior across all five games.
+2. **Nexus Mods + Bethesda Creations + ModDB + LoversLab + AFK Mods** — main mod-discovery and author-note surfaces. Use Nexus public API where possible and Playwright where pages block simple HTTP.
+3. **CK Wiki (UESP mirror) + GECK Wiki + UESP + Independent Fallout Wiki + Starfield Wiki** — best structured references for editor concepts, Papyrus, GECK, lore, records, game content. Note: official `creationkit.com` is currently down/redirected; the UESP mirror at `ck.uesp.net` is the current accessible canonical for the Skyrim CK.
+4. **MO2 + LOOT + Wabbajack + Mutagen + Spriggit + Synthesis** — canonical for modpack tooling, load-order automation, virtualized installs, generated patchers, plugin text serialization.
+5. **Sim Settlements + TTW + AFK Unofficial Patch forums + STEP / DynDOLOD + r/skyrimmods + r/falloutmods + tool Discords** — high-signal community sources for compatibility, precombines / LOD, settlement systems, TTW rules, real load-order failure cases.
+
+### Section 1 — Mod hosts / mod databases
+
+| Name | URL | Primary topics | Games | Access | Fetch strategy |
+|---|---|---|---|---|---|
+| Nexus Mods: Skyrim LE | https://www.nexusmods.com/skyrim | Mod pages, files, posts, bugs, requirements | SK | Public; files/login gated | simple HTTP / Playwright if blocked |
+| Nexus Mods: Skyrim SE/AE | https://www.nexusmods.com/skyrimspecialedition | SSE/AE mods, collections, tools | SK | Public; files/login gated | simple HTTP / Playwright if blocked |
+| Nexus Mods: Fallout 4 | https://www.nexusmods.com/fallout4 | FO4 mods, collections, posts, bugs | FO4 | Public; files/login gated | simple HTTP / Playwright if blocked |
+| Nexus Mods: Fallout New Vegas | https://www.nexusmods.com/newvegas | FNV mods, xNVSE ecosystem, bug tabs | FNV | **Simple HTTP returned 403; Playwright verified** | **Playwright** |
+| Nexus Mods: Fallout 3 | https://www.nexusmods.com/fallout3 | FO3 mods, legacy compatibility | FO3 | **Simple HTTP returned 403; Playwright verified** | **Playwright** |
+| Nexus Mods: Starfield | https://www.nexusmods.com/starfield | Starfield mods, Creations-era compatibility | SF | Public; files/login gated | simple HTTP / Playwright if blocked |
+| LoversLab | https://www.loverslab.com/ | Adult mods, animation frameworks, technical support | SK / FO4 / FO3 / FNV / SF | Public forum index; adult content; login for downloads | simple HTTP; Playwright/login for downloads |
+| ModDB: Skyrim SE | https://www.moddb.com/games/the-elder-scrolls-v-skyrim-special-edition/mods | Mod pages, total conversions, mirrors | SK | Public; no Cloudflare observed | simple HTTP |
+| ModDB: Fallout 4 | https://www.moddb.com/games/fallout-4/mods | FO4 large projects, total conversions | FO4 | Public | simple HTTP |
+| ModDB: Fallout New Vegas | https://www.moddb.com/games/fallout-new-vegas/mods | FNV total conversions, legacy mods | FNV | Public | simple HTTP |
+| ModDB: Starfield | https://www.moddb.com/games/starfield/mods | Starfield mod pages, early projects | SF | Public | simple HTTP |
+| Schaken-Mods | https://schaken-mods.com/ | Skyrim/FO4 mods, tutorials, community | SK / FO4 | Public landing; registration for much content | simple HTTP; Playwright/login if gated |
+| AFK Mods Downloads | https://www.afkmods.com/index.php?/files/ | Arthmoor mods, unofficial patch downloads | SK / FO4 / SF | Files visible; some downloads/posts require account | simple HTTP / Playwright (login) |
+| Bethesda Creations: Skyrim | https://creations.bethesda.net/en/skyrim/all | Official Creations, console mods | SK | JS app; login for library | **Playwright (JS app)** |
+| Bethesda Creations: Fallout 4 | https://creations.bethesda.net/en/fallout4/all | FO4 Creations, console mods | FO4 | JS app | **Playwright (JS app)** |
+| Bethesda Creations: Starfield | https://creations.bethesda.net/en/starfield/all | Starfield Creations | SF | JS app | **Playwright (JS app)** |
+| CurseForge Starfield | https://www.curseforge.com/starfield | Starfield mods, performance/INI mods | SF | Public | simple HTTP |
+
+### Section 2 — Dedicated game-or-topic forums
+
+| Name | URL | Primary topics | Games | Access | Fetch strategy |
+|---|---|---|---|---|---|
+| Sim Settlements | https://simsettlements.com/ | Sim Settlements, Workshop Framework, settlement systems | FO4 | **Cloudflare "Just a moment" observed; passed via Playwright after 3s** | **Playwright (Cloudflare)** |
+| AFK Mods Forums | https://www.afkmods.com/index.php?/forum/ | Unofficial patches, mod support, tools, Arthmoor notes | SK / FO4 / SF | Public; some subforums require login | simple HTTP; Playwright/login if blocked |
+| TTW Forums | https://taleoftwowastelands.com/ | Tale of Two Wastelands, FO3-in-FNV, load-order rules | FO3 / FNV | Public phpBB-style; older read-only/historical | simple HTTP |
+| ENBSeries Forum | http://enbdev.com/enbseries/forum/ | ENB binaries, presets, bugs, shader config | SK / FO4 / FO3 / FNV | Public; older forum; no Cloudflare | simple HTTP |
+| ReShade Forum | https://reshade.me/forum | ReShade releases, shader troubleshooting | multi | Public; login for posting | simple HTTP |
+| STEP Forum / Wiki | https://stepmodifications.org/wiki/Main_Page | Guide curation, LOD, tools, stable mod-build methodology | SK / FO4 / FNV | Public wiki | simple HTTP |
+| Bethesda Community Hub | https://bethesda.net/community/ | Official community resources, Discord/Creations links | SK / FO4 / SF | Public | simple HTTP |
+| Bethesda Official Forums (legacy) | https://forums.bethesda.net/ | Historical official forum discussions | SK / FO4 / FO3 / FNV / SF | **Live check failed; treat as dead/moved** | archived snapshot only (Wayback) |
+
+### Section 3 — Wikis and documentation sites
+
+| Name | URL | Primary topics | Games | Access | Fetch strategy |
+|---|---|---|---|---|---|
+| UESP | https://en.uesp.net/wiki/Main_Page | Elder Scrolls lore, quests, records, game data | SK / TES | Public | simple HTTP |
+| **Creation Kit Wiki (UESP mirror)** | https://ck.uesp.net/wiki/Main_Page | Skyrim CK, Papyrus, editor reference, SKSE plugin docs | SK | **Cloudflare/security check; passed via Playwright after 3s** | **Playwright (Cloudflare)** |
+| Official CK Wiki (legacy) | https://www.creationkit.com/index.php?title=Main_Page | Official CK docs | SK / FO4 | **Redirects to Bethesda wiki maintenance page** | archived snapshot only |
+| Official FO4 CK Wiki (legacy) | https://www.creationkit.com/fallout4/index.php?title=Main_Page | FO4 CK docs, Papyrus | FO4 | **Redirects to Bethesda wiki maintenance page** | archived snapshot only |
+| **Community GECK Wiki** | https://geckwiki.com/index.php?title=Main_Page | GECK, FO3/FNV scripting, editor usage | FO3 / FNV | **Cloudflare/security check; passed via Playwright after 3s** | **Playwright (Cloudflare)** |
+| Independent Fallout Wiki | https://fallout.wiki/wiki/Fallout_Wiki | Fallout lore, game data, mod/community pages | FO3 / FNV / FO4 | Public | simple HTTP |
+| Nukapedia / Fallout Fandom | https://fallout.fandom.com/wiki/Fallout_Wiki | Fallout lore, quests, items | FO3 / FNV / FO4 | Public; Fandom scripts | simple HTTP |
+| Elder Scrolls Fandom | https://elderscrolls.fandom.com/wiki/The_Elder_Scrolls_Wiki | TES lore, quests, items | SK / TES | Public; Fandom scripts | simple HTTP |
+| **Starfield Wiki (UESP team)** | https://starfieldwiki.net/wiki/Home | Starfield content, lore, modding links | SF | **Cloudflare/security check; passed via Playwright after 3s** | **Playwright (Cloudflare)** |
+| Starfield Fandom | https://starfield.fandom.com/wiki/Starfield_Wiki | Starfield lore/content | SF | Public; Fandom scripts | simple HTTP |
+| xEdit Docs / Tome of xEdit | https://tes5edit.github.io/docs/ | xEdit, cleaning, conflict resolution, records | SK / FO4 / FO3 / FNV / SF | Public | simple HTTP |
+| LOOT Docs | https://loot.readthedocs.io/ | Load order, metadata, sorting | SK / FO4 / FO3 / FNV / SF | Public | simple HTTP |
+| Wabbajack Wiki | https://wiki.wabbajack.org/ | Modlist installation/authoring, policies | SK / FO4 / FNV | Public | simple HTTP |
+| DynDOLOD Docs | https://dyndolod.info/ | LOD, xLODGen, TexGen, DynDOLOD, occlusion | SK / FO4 | Public | simple HTTP |
+| OpenMW Site | https://openmw.org/ | OpenMW, engine behavior | engine-shared / Morrowind | Public | simple HTTP |
+
+### Section 4 — GitHub orgs / canonical tool repos
+
+| Name | URL | Primary topics | Games |
+|---|---|---|---|
+| TES5Edit / xEdit | https://github.com/TES5Edit/TES5Edit | xEdit source, issues, releases, supported game modes | SK / FO4 / FO3 / FNV / SF |
+| ModOrganizer2 / modorganizer | https://github.com/ModOrganizer2/modorganizer | MO2 source, plugins, usvfs, issues | SK / FO4 / FO3 / FNV / SF |
+| Mutagen | https://github.com/Mutagen-Modding/Mutagen | C# Bethesda plugin parsing/editing | SK / FO4 / FO3 / FNV / SF |
+| Spriggit | https://github.com/Mutagen-Modding/Spriggit | Plugin-to-YAML/JSON serialization, Git workflows | SK / FO4 / FO3 / FNV / SF |
+| Synthesis | https://github.com/Mutagen-Modding/Synthesis | Mutagen patchers, generated patches | SK / FO4 / FO3 / FNV |
+| LOOT | https://github.com/loot/loot | Load-order optimizer, issues, metadata logic | SK / FO4 / FO3 / FNV / SF |
+| Wabbajack | https://github.com/wabbajack-tools/wabbajack | Automated modlist installer | SK / FO4 / FNV |
+| xNVSE | https://github.com/xNVSE/NVSE | New Vegas script extender | FNV |
+| BodySlide / Outfit Studio | https://github.com/ousnius/BodySlide-and-Outfit-Studio | Body morphs, outfit conversion | SK / FO4 |
+| OpenMW | https://github.com/OpenMW/openmw | Open-source engine/editor | engine-shared / Morrowind |
+
+All GitHub URLs: simple HTTP (public), no Cloudflare.
+
+### Section 5 — Reddit (use old.reddit.com for clean extraction)
+
+| Name | URL | Primary topics | Games |
+|---|---|---|---|
+| r/skyrimmods | https://old.reddit.com/r/skyrimmods/ | Skyrim modding, guides, troubleshooting | SK |
+| r/falloutmods | https://old.reddit.com/r/falloutmods/ | Fallout modding, support rules, guides | FO3 / FNV / FO4 |
+| r/fo4 | https://old.reddit.com/r/fo4/ | FO4 discussion, bugs, mod links | FO4 |
+| r/fnv | https://old.reddit.com/r/fnv/ | FNV discussion, Viva New Vegas link, modding guides | FNV |
+| r/fo3 | https://old.reddit.com/r/fo3/ | FO3 discussion, fix guide, mods | FO3 |
+| r/starfield | https://old.reddit.com/r/starfield/ | Starfield discussion, official links | SF |
+| r/starfieldmods | https://old.reddit.com/r/starfieldmods/ | Starfield modding, load orders | SF |
+| r/skyrimvr | https://old.reddit.com/r/skyrimvr/ | Skyrim VR setup, SKSEVR, VRIK, FUS | SK VR |
+| r/Mod_Organizer | https://old.reddit.com/r/Mod_Organizer/ | MO2 support | multi |
+| r/wabbajack | https://old.reddit.com/r/wabbajack/ | Wabbajack support/modlists | multi |
+| r/SkyrimModsXbox | https://old.reddit.com/r/SkyrimModsXbox/ | Xbox load orders, console compatibility | SK |
+| r/xEdit | https://old.reddit.com/r/xEdit/ | xEdit usage/help | multi |
+
+### Section 6 — Discord servers (invites verified via Discord API 2026-06-02)
+
+| Name | Invite | Primary topics | Games |
+|---|---|---|---|
+| xEdit | https://discord.com/invite/5t8RnNQ | xEdit builds, docs, record/protocol discussions | SK / FO4 / FO3 / FNV / SF |
+| Mod Organizer 2 | https://discord.com/invite/ewUVAqyrQX | MO2 support/dev, usvfs, logs | multi |
+| Wabbajack | https://discord.com/invite/wabbajack | Wabbajack support, modlists, authoring | multi |
+| Mutagen / Synthesis | https://discord.com/invite/53KMEsW | Mutagen, Synthesis, Spriggit | SK / FO4 / FO3 / FNV / SF |
+| xNVSE | https://discord.com/invite/EebN93s | xNVSE support/dev | FNV |
+| r/skyrimmods | https://discord.com/invite/M2Hz5v8 | Skyrim modding support/chat | SK |
+| Fallout Network | https://discord.com/invite/tfn | Fallout discussion/modding/lore | FO3 / FNV / FO4 |
+| Bethesda Game Studios | https://discord.com/invite/BethesdaStudios | Official BGS announcements, modding news | SK / FO4 / SF |
+| Wildlander | https://discord.com/invite/8VkDrfq | Wildlander / Ultimate Skyrim support | SK |
+| OpenMW | https://discord.com/invite/bWuqq2e | OpenMW, modding-openmw | Morrowind |
+| Nemesis | https://discord.com/invite/9rXN6gr | Nemesis behavior engine, animation patching | SK |
+
+Discord extraction: invites are link-stable (validated against the public Discord invite API). Pinned-message extraction requires login or a Discord-aware export tool — not directly scrapeable.
+
+### Section 7 — xSE script-extender homes
+
+| Name | URL | Games | Fetch |
+|---|---|---|---|
+| SKSE / SKSE64 / SKSEVR | https://skse.silverlock.org/ | SK LE / SE / AE / VR | simple HTTP |
+| F4SE / F4SEVR | https://f4se.silverlock.org/ | FO4 / FO4 VR | simple HTTP |
+| FOSE | https://fose.silverlock.org/ | FO3 | simple HTTP |
+| xNVSE | https://github.com/xNVSE/NVSE | FNV | simple HTTP |
+| SFSE | https://sfse.silverlock.org/ | SF | simple HTTP |
+
+### Section 8 — ENB / shader / asset-pipeline hubs
+
+| Name | URL | Primary topics | Games |
+|---|---|---|---|
+| ENBSeries main site | http://enbdev.com/ | ENB binaries, ENBoost, graphics mod | SK / FO4 / FO3 / FNV |
+| ENBSeries forum | http://enbdev.com/enbseries/forum/ | ENB troubleshooting, presets, releases | SK / FO4 / FO3 / FNV |
+| ReShade forum | https://reshade.me/forum | ReShade releases, shaders | multi |
+| DynDOLOD | https://dyndolod.info/ | LOD generation, xLODGen, TexGen | SK / FO4 |
+| BodySlide / Outfit Studio | https://github.com/ousnius/BodySlide-and-Outfit-Studio | Body/outfit conversion | SK / FO4 |
+| Cathedral Assets Optimizer | https://www.nexusmods.com/skyrimspecialedition/mods/23316 | BSA / mesh / texture / animation conversion | SK / FO4 / FO3 / FNV |
+
+### Section 9 — Bug trackers
+
+| Name | URL | Topics | Games |
+|---|---|---|---|
+| Bugthesda / Tales from Tamriel | https://www.bugthesda.net/ (Discord-backed) | Bethesda game bug reporting | SK / FO4 / SF |
+| xEdit Issues | https://github.com/TES5Edit/TES5Edit/issues | xEdit bugs/features | multi |
+| MO2 Issues | https://github.com/ModOrganizer2/modorganizer/issues | MO2 bugs/features | multi |
+| LOOT Issues | https://github.com/loot/loot/issues | LOOT bugs/features | multi |
+| OpenMW Issues | https://gitlab.com/OpenMW/openmw/-/issues | OpenMW bugs/features | Morrowind |
+| AFK USSEP Forum | https://www.afkmods.com/index.php?/forum/351-unofficial-skyrim-special-edition-patch/ | USSEP bugs, release notes | SK |
+| AFK UFO4P Forum | https://www.afkmods.com/index.php?/forum/350-unofficial-fallout-4-patch/ | UFO4P bugs, patch discussion | FO4 |
+| AFK USFP Forum | https://www.afkmods.com/index.php?/forum/416-unofficial-starfield-patch/ | USFP/USSP bugs, Starfield patching | SF |
+
+### Section 10 — Long-form dev write-ups / guide ecosystems
+
+| Name | URL | Topics | Games |
+|---|---|---|---|
+| STEP Wiki | https://stepmodifications.org/wiki/Main_Page | Stable mod-build methodology | SK / FO4 / FNV |
+| DynDOLOD Docs / FAQ | https://dyndolod.info/ | LOD generation, warnings/errors | SK / FO4 |
+| Wabbajack Wiki | https://wiki.wabbajack.org/ | Modlist authoring, policies | multi |
+| Mutagen Docs | https://mutagen-modding.github.io/Mutagen/ | Mutagen API, typed records, patcher examples | SK / FO4 / FO3 / FNV / SF |
+| Spriggit Docs | https://mutagen-modding.github.io/Spriggit/ | Plugin serialization, Git workflows | multi |
+| Synthesis Docs | https://mutagen-modding.github.io/Synthesis/ | Patcher development, pipeline usage | multi |
+| xEdit Docs / Tome of xEdit | https://tes5edit.github.io/docs/ | xEdit usage, cleaning, conflicts | multi |
+| Wildlander Site | https://wildlandermod.com/ | Roleplay modlist, support, install | SK |
+| OpenMW Site | https://openmw.org/ | Engine releases, Lua API, mod compatibility | Morrowind |
+| Cathedral Assets Optimizer Nexus page | https://www.nexusmods.com/skyrimspecialedition/mods/23316 | Asset optimization instructions and warnings | SK / FO4 / FO3 / FNV |
+
+### Meta-notes for KB-4 subagent prompts
+
+- **Use Playwright for Cloudflare / anti-bot gates.** Verified during this survey: Sim Settlements, CK UESP mirror, GECK Wiki, Starfield Wiki, and FO3 / FNV Nexus pages all returned challenge pages on simple HTTP and passed via Playwright with `time: 3-8s` wait. Simple HTTP failure does NOT mean the site is dead.
+- **Nexus behavior varies by game/page.** Skyrim / FO4 / Starfield Nexus pages fetched cleanly; FO3 / FNV returned 403 via simple HTTP. For scale, prefer the Nexus public API where it covers the needed fields, and Playwright for description / posts / bugs pages otherwise.
+- **Bethesda's old official forum / wiki surfaces have moved or degraded.** `forums.bethesda.net` was not reachable; `creationkit.com` redirects to a maintenance page. Current routing: Bethesda Community Hub + Bethesda Game Studios Discord `#modding-news`. The CK UESP mirror (`ck.uesp.net`) is the current accessible canonical for the Skyrim CK Wiki.
+- **Discord is often canonical but not scrape-friendly.** Invites are link-stable; pinned-message extraction requires login or a Discord-aware export tool.
+- **Treat community claims by source class.** Official / tool docs and GitHub issues are authoritative for tool behavior; AFK / TTW / Sim Settlements are authoritative for their own projects; Reddit is best for field reports and sidebar guide links, not final truth without cross-checking.
+- **Per-record `sources` discipline**: every KB record's `sources` field cites at minimum the URL and a kind tag (`tooling-docs` / `community-forum` / `official` / `wiki` / `github-issue` / `discord-pinned`). Unsourced facts default to `confidence: low-community` with a `needs verification` note per the KB-4 anti-copy guardrail.
