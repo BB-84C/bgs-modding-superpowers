@@ -8,6 +8,11 @@ import { MCP_ERROR_CODES } from "../types.js";
 import { validateArgs } from "../pipeline/validate.js";
 import { precheck } from "../pipeline/state-precheck.js";
 import { runRules } from "../pipeline/rules.js";
+import { emitAudit } from "../audit-line.js";
+import { mapVerdict, type Verdict } from "../verdict.js";
+
+// Re-export so existing imports `from "tools/inspect-conflicts"` keep working.
+export type { Verdict };
 
 const Args = z.object({
   file: z.string().min(1),
@@ -22,8 +27,6 @@ function stripFormIdPrefix(args: Record<string, unknown>): Record<string, unknow
   return f.startsWith("0x") || f.startsWith("0X") ? { ...args, formId: f.slice(2) } : args;
 }
 
-export type Verdict = "no_conflict" | "itpo" | "itm" | "minor" | "breaking";
-
 export interface InspectConflictsOptions {
   adapter: DaemonAdapter;
   registry: Registry;
@@ -35,22 +38,37 @@ export function makeInspectConflictsHandler(opts: InspectConflictsOptions) {
   return async (args: Record<string, unknown>): Promise<Envelope> => {
     const ctx = opts.getContext();
     if (!ctx) {
-      const env = refuse({
+      // No audit logger before session context exists.
+      return refuse({
         tool: "xedit_inspect_conflicts",
         summary: "Session not established",
         code: MCP_ERROR_CODES.STATE_VIOLATION,
         hint: "Call xedit_session first.",
       });
-      // No audit logger before session context exists.
-      return env;
     }
     const v = validateArgs(Args, args, { tool: "xedit_inspect_conflicts" });
-    if (v) { await auditLine(opts, "xedit_inspect_conflicts", args, v); return v; }
+    if (v) {
+      await emitAudit({ audit: opts.audit, tool: "xedit_inspect_conflicts", args, env: v, ctx });
+      return v;
+    }
     // precheck uses daemon only; load-order owned by LOAD001 rule.
     const p = precheck({ tool: "xedit_inspect_conflicts", args }, { ctx, needs: { daemon: true } });
-    if (p) { await auditLine(opts, "xedit_inspect_conflicts", args, p); return p; }
+    if (p) {
+      await emitAudit({ audit: opts.audit, tool: "xedit_inspect_conflicts", args, env: p, ctx });
+      return p;
+    }
     const r = await runRules({ tool: "xedit_inspect_conflicts", args, ctx, registry: opts.registry });
-    if (r) { await auditLine(opts, "xedit_inspect_conflicts", args, r); return r; }
+    if (r.refusal) {
+      await emitAudit({
+        audit: opts.audit,
+        tool: "xedit_inspect_conflicts",
+        args,
+        env: r.refusal,
+        ctx,
+        ruleHits: r.ruleHits,
+      });
+      return r.refusal;
+    }
 
     const daemonArgs = stripFormIdPrefix(args);
     const [conflict, winning, referencedBy] = await Promise.all([
@@ -66,7 +84,7 @@ export function makeInspectConflictsHandler(opts: InspectConflictsOptions) {
         code: MCP_ERROR_CODES.DAEMON_ERROR,
         hint: conflict.error.message,
       });
-      await auditLine(opts, "xedit_inspect_conflicts", args, env);
+      await emitAudit({ audit: opts.audit, tool: "xedit_inspect_conflicts", args, env, ctx });
       return env;
     }
 
@@ -94,65 +112,16 @@ export function makeInspectConflictsHandler(opts: InspectConflictsOptions) {
         winningOverride: winning.ok ? winning.result : null,
         referencedBy: referencedBy.ok ? referencedBy.result : null,
       },
+      warnings: r.warnings,
     });
-    await auditLine(opts, "xedit_inspect_conflicts", args, env);
+    await emitAudit({
+      audit: opts.audit,
+      tool: "xedit_inspect_conflicts",
+      args,
+      env,
+      ctx,
+      ruleHits: r.ruleHits.length ? r.ruleHits : undefined,
+    });
     return env;
   };
-}
-
-async function auditLine(
-  opts: InspectConflictsOptions,
-  tool: string,
-  args: Record<string, unknown>,
-  env: Envelope,
-) {
-  await opts.audit.append({
-    tool,
-    argsHash: simpleHash(args),
-    decision: env.ok ? "ok" : "refused",
-    ok: env.ok,
-    code: env.ok ? undefined : env.code,
-  });
-}
-
-function simpleHash(args: Record<string, unknown>): string {
-  let h = 0;
-  const s = JSON.stringify(args);
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return Math.abs(h).toString(16);
-}
-/**
- * Map xEdit's conflict-all enum (or legacy flat status strings) to MCP verdict.
- *
- * xEdit conflict-all enum (from `records.conflict_status` -> `result.conflict.all`):
- *  - caUnknown / caOnlyOne / caNoConflict   -> no_conflict
- *  - caITM                                  -> itm   (identical to master)
- *  - caITPO                                 -> itpo  (identical to previous override)
- *  - caOverride / caConflictBenign          -> minor (override present, content benign)
- *  - caConflict                             -> minor (real semantic conflict)
- *  - caConflictCritical                     -> breaking
- *
- * Legacy flat string statuses (e.g. unit-test mocks that send "no_conflict",
- * "conflict_critical", "ITPO") are still recognized.
- */
-function mapVerdict(status: string): Verdict {
-  const s = status.toLowerCase();
-  if (s === "caitpo" || s.includes("itpo")) return "itpo";
-  if (s === "caitm" || s.includes("itm")) return "itm";
-  if (
-    s === "caunknown" ||
-    s === "caonlyone" ||
-    s === "canoconflict" ||
-    s === "no_conflict" ||
-    s === "no conflict"
-  ) {
-    return "no_conflict";
-  }
-  if (s === "caconflictcritical" || s.includes("critical") || s.includes("breaking")) {
-    return "breaking";
-  }
-  if (s === "caoverride" || s === "caconflictbenign") return "minor";
-  if (s === "caconflict") return "minor";
-  if (s.includes("conflict")) return "minor";
-  return "minor";
 }
