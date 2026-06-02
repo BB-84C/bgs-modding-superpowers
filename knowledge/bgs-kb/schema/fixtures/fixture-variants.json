@@ -1,0 +1,50 @@
+{
+  "id": "asset-precedence.loose-over-archive.v1",
+  "title": "Loose files win over archived assets at runtime",
+  "domains": ["archive-precedence", "file-conflicts", "install-planning"],
+  "appliesTo": {
+    "games": ["SkyrimLE", "SkyrimSE", "SkyrimAE", "SkyrimVR", "Fallout4", "Fallout4VR", "Fallout3", "FalloutNV", "Starfield"],
+    "engineFamilies": ["gamebryo", "creation-engine", "creation-engine-2"]
+  },
+  "canonical": {
+    "answer": "Loose files generally take precedence over archived assets, so plugin load order by itself does not determine every visible asset winner.",
+    "confidence": "high"
+  },
+  "variants": {
+    "Fallout4": {
+      "additions": [
+        "BA2 packaging and precombine/previs state can explain visible results even when plugin records appear clean."
+      ],
+      "warnings": [
+        {
+          "code": "PREVIS",
+          "severity": "high",
+          "text": "Check precombine and previs integrity before blaming load order alone."
+        }
+      ]
+    },
+    "SkyrimSE": {
+      "additions": [
+        "Generated behavior outputs from tools such as Nemesis or FNIS can dominate animation behavior."
+      ],
+      "warnings": [
+        {
+          "code": "GENERATED_OUTPUTS",
+          "severity": "medium",
+          "text": "Inspect generated animation behavior files when assets look correct but behavior does not."
+        }
+      ]
+    }
+  },
+  "queryKeys": ["loose files win", "archive precedence", "BSA", "BA2"],
+  "severity": "high",
+  "sources": [
+    {
+      "kind": "project-internal-doc",
+      "ref": "docs/internal/superpowers/specs/2026-06-02-agentic-cross-game-kb-design.md",
+      "sectionPath": "§10 Example 2"
+    }
+  ],
+  "lastReviewed": "2026-06-02",
+  "schemaVersion": 1
+}

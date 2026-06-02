@@ -1,0 +1,24 @@
+{
+  "id": "load-order.plugins-txt.modern.v1",
+  "title": "Modern plugins.txt marks active plugins with an asterisk",
+  "domains": ["load-order"],
+  "appliesTo": {
+    "games": ["SkyrimSE", "SkyrimAE", "SkyrimVR", "Fallout4", "Fallout4VR", "Starfield"],
+    "engineFamilies": ["creation-engine", "creation-engine-2"]
+  },
+  "canonical": {
+    "answer": "Modern Bethesda load-order files use an asterisk prefix in plugins.txt to show which plugins are active.",
+    "confidence": "verified-project-doc"
+  },
+  "related": ["load-order.plugins-txt.legacy.v1"],
+  "seeAlso": ["load-order.custom-plugin-list.v1", "archive-precedence.loose-over-archive.v1"],
+  "sources": [
+    {
+      "kind": "project-skill",
+      "ref": "skills/writing-bgs-load-order/SKILL.md",
+      "sectionPath": "plugins.txt format"
+    }
+  ],
+  "lastReviewed": "2026-06-02",
+  "schemaVersion": 1
+}

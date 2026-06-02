@@ -1,0 +1,21 @@
+{
+  "id": "engine.cross-game-scope.v1",
+  "title": "KB records state their game scope explicitly",
+  "domains": ["engine"],
+  "appliesTo": {
+    "games": ["Fallout4"]
+  },
+  "canonical": {
+    "answer": "Every knowledge-base record declares the games it applies to so retrieval can avoid offering cross-game advice blindly.",
+    "confidence": "verified-project-doc"
+  },
+  "sources": [
+    {
+      "kind": "project-internal-doc",
+      "ref": "docs/internal/superpowers/specs/2026-06-02-agentic-cross-game-kb-design.md",
+      "sectionPath": "§5.2"
+    }
+  ],
+  "lastReviewed": "2026-06-02",
+  "schemaVersion": 1
+}

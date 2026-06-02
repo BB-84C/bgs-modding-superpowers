@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bgs-modding-superpowers/schemas/record/v1",
+  "title": "BGS Knowledge Base Record Frontmatter",
+  "description": "JSON Schema for the structured frontmatter object on an agentic cross-game Bethesda Game Studios knowledge-base record.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "domains",
+    "appliesTo",
+    "canonical",
+    "sources",
+    "lastReviewed",
+    "schemaVersion"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Stable kebab-case dotted namespace for the record, ending in a lifetime schema version segment such as .v1.",
+      "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+)*\\.v[0-9]+$"
+    },
+    "title": {
+      "type": "string",
+      "description": "One-line human-readable title for the knowledge-base record.",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "domains": {
+      "type": "array",
+      "description": "Closed taxonomy labels used for retrieval, filtering, and review assignment.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "description": "A domain enum value from the BGS KB taxonomy.",
+        "enum": [
+          "xedit",
+          "plugin-format",
+          "load-order",
+          "archive-precedence",
+          "papyrus",
+          "engine",
+          "tooling.spriggit",
+          "tooling.mutagen",
+          "tooling.loot",
+          "save-file",
+          "debugging",
+          "game-specific.vr",
+          "version-differences",
+          "file-conflicts",
+          "install-planning"
+        ]
+      }
+    },
+    "appliesTo": {
+      "type": "object",
+      "description": "Game and engine-family scope for this record, including explicit exclusions when needed.",
+      "additionalProperties": false,
+      "required": ["games"],
+      "properties": {
+        "games": {
+          "type": "array",
+          "description": "Game codes this record applies to before exclusions are considered.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/gameCode",
+            "description": "A supported Bethesda game code."
+          }
+        },
+        "engineFamilies": {
+          "type": "array",
+          "description": "Optional engine-family scope used for cross-game grouping and filtering.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "description": "A supported Bethesda engine family.",
+            "enum": ["gamebryo", "creation-engine", "creation-engine-2"]
+          }
+        },
+        "excludes": {
+          "type": "array",
+          "description": "Game codes explicitly excluded from an otherwise broader record scope.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/gameCode",
+            "description": "A supported Bethesda game code excluded from this record."
+          }
+        }
+      }
+    },
+    "canonical": {
+      "type": "object",
+      "description": "Canonical retrieval snippet and confidence level for the base record before any per-game variant merge.",
+      "additionalProperties": false,
+      "required": ["answer", "confidence"],
+      "properties": {
+        "answer": {
+          "type": "string",
+          "description": "One to three sentence canonical answer used as the default retrieval synopsis.",
+          "minLength": 10
+        },
+        "confidence": {
+          "type": "string",
+          "description": "Evidence level for the canonical answer.",
+          "enum": [
+            "verified-official",
+            "verified-tooling",
+            "verified-project-doc",
+            "high",
+            "medium",
+            "low-community"
+          ]
+        }
+      }
+    },
+    "variants": {
+      "type": "object",
+      "description": "Optional per-game overlays merged into the canonical record when callers request a specific game.",
+      "propertyNames": {
+        "description": "Variant keys must be supported game codes.",
+        "enum": [
+          "SkyrimLE",
+          "SkyrimSE",
+          "SkyrimAE",
+          "SkyrimVR",
+          "Fallout4",
+          "Fallout4VR",
+          "Fallout3",
+          "FalloutNV",
+          "Starfield"
+        ]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "description": "Game-specific additions, warnings, and textual deletions for a base record.",
+        "additionalProperties": false,
+        "properties": {
+          "additions": {
+            "type": "array",
+            "description": "Game-specific notes appended to the base record during variant merge.",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "description": "A game-specific addition to append.",
+              "minLength": 1
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "description": "Game-specific callouts rendered during variant merge.",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "description": "A warning emitted with a game-specific variant.",
+              "additionalProperties": false,
+              "required": ["code", "severity", "text"],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "Short stable warning code displayed in variant callouts.",
+                  "pattern": "^[A-Z0-9_]+$",
+                  "minLength": 1
+                },
+                "severity": {
+                  "type": "string",
+                  "description": "Warning severity for the variant callout.",
+                  "enum": ["low", "medium", "high", "critical"]
+                },
+                "text": {
+                  "type": "string",
+                  "description": "Human-readable warning text for the variant callout.",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "deletions": {
+            "type": "array",
+            "description": "Exact textual substrings to delete from the canonical body during variant merge.",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "description": "Exact deletion target text.",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "queryKeys": {
+      "type": "array",
+      "description": "Optional lexical aliases and task phrases boosted by retrieval.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "description": "A query alias for this record.",
+        "minLength": 1
+      }
+    },
+    "severity": {
+      "type": "string",
+      "description": "Optional impact level used as a retrieval sort tie-breaker.",
+      "enum": ["low", "medium", "high", "critical"]
+    },
+    "sources": {
+      "type": "array",
+      "description": "Structured citations supporting the record; every record must include at least one source.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "description": "A structured source citation for a KB record.",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "Source category for review and trust calibration.",
+            "enum": [
+              "official",
+              "tooling-docs",
+              "wiki",
+              "community-forum",
+              "github-issue",
+              "discord-pinned",
+              "project-skill",
+              "project-internal-doc"
+            ]
+          },
+          "ref": {
+            "type": "string",
+            "description": "Human-readable source reference such as a file path, issue id, page title, or pinned-message label.",
+            "minLength": 1
+          },
+          "url": {
+            "type": "string",
+            "description": "Optional URL for a web-addressable source.",
+            "format": "uri"
+          },
+          "sectionPath": {
+            "type": "string",
+            "description": "Optional source section, heading, or path within the cited reference.",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "related": {
+      "type": "array",
+      "description": "Strong knowledge-graph links to sibling records that should be considered together.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "description": "Stable id of a related record.",
+        "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+)*\\.v[0-9]+$"
+      }
+    },
+    "seeAlso": {
+      "type": "array",
+      "description": "Soft cross-references to records that may provide useful adjacent context.",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "description": "Stable id of a see-also record.",
+        "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+)*\\.v[0-9]+$"
+      }
+    },
+    "lastReviewed": {
+      "type": "string",
+      "description": "Date when this record was last reviewed, in ISO yyyy-mm-dd form.",
+      "format": "date"
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "description": "Frontmatter schema version for this record shape.",
+      "const": 1
+    }
+  },
+  "$defs": {
+    "gameCode": {
+      "type": "string",
+      "description": "Canonical supported Bethesda game code.",
+      "enum": [
+        "SkyrimLE",
+        "SkyrimSE",
+        "SkyrimAE",
+        "SkyrimVR",
+        "Fallout4",
+        "Fallout4VR",
+        "Fallout3",
+        "FalloutNV",
+        "Starfield"
+      ]
+    }
+  }
+}

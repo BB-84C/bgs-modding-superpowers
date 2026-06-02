@@ -1,0 +1,15 @@
+{
+  "id": "xedit.invalid-empty-sources.v1",
+  "title": "Invalid fixture with empty sources",
+  "domains": ["xedit"],
+  "appliesTo": {
+    "games": ["SkyrimLE", "SkyrimSE", "SkyrimAE", "SkyrimVR", "Fallout4", "Fallout4VR", "Fallout3", "FalloutNV", "Starfield"]
+  },
+  "canonical": {
+    "answer": "This fixture mirrors a universal record shape but intentionally leaves sources empty so validation must reject it.",
+    "confidence": "verified-project-doc"
+  },
+  "sources": [],
+  "lastReviewed": "2026-06-02",
+  "schemaVersion": 1
+}

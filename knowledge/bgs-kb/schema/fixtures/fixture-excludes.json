@@ -1,0 +1,25 @@
+{
+  "id": "papyrus.reload-detection.v1",
+  "title": "Use Papyrus reload events instead of treating OnInit as a reload hook",
+  "domains": ["papyrus", "version-differences"],
+  "appliesTo": {
+    "games": ["SkyrimLE", "SkyrimSE", "SkyrimAE", "SkyrimVR", "Fallout4", "Fallout4VR", "Starfield"],
+    "engineFamilies": ["creation-engine", "creation-engine-2"],
+    "excludes": ["Fallout3", "FalloutNV"]
+  },
+  "canonical": {
+    "answer": "Papyrus initialization is not a general reload signal; use game reload or update registration patterns when a script must respond after loading a save.",
+    "confidence": "high"
+  },
+  "queryKeys": ["OnInit", "OnGameReload", "reload detection"],
+  "severity": "medium",
+  "sources": [
+    {
+      "kind": "project-internal-doc",
+      "ref": "docs/internal/superpowers/specs/2026-06-02-agentic-cross-game-kb-design.md",
+      "sectionPath": "§10 Example 3"
+    }
+  ],
+  "lastReviewed": "2026-06-02",
+  "schemaVersion": 1
+}
