@@ -104,9 +104,36 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 
 The reshape to a Superpowers-shaped multi-harness plugin is complete in the local repo (`main`). Immediate next targets:
 
-1. **Portable publishability** — remove the local-only Codex workaround and produce a real `plugins/<name>/` release surface.
-2. **Read-only xEdit completion** — finish the post-acceptance cleanups (e.g. richer GUI parity evidence, representative W2 matrix, audit uniformity).
-3. **Operator UX** — keep the visible-MO2 and non-blocking MCP invariants intact while smoothing first-run setup for end users.
+1. **Portable publishability** — `scripts/build-portable-plugin.ps1` now stages a self-contained `dist/portable-plugin/bgs-modding-superpowers/` tree (no junctions, no machine-specific paths). Remaining work: stage that tree onto a release branch (or release artifact) so end-users on Codex can consume it without running the build script.
+2. **Read-only xEdit completion** — Batch 2 carry-forwards #2 / #4 / #5 / #6 are closed (see STATUS file). Remaining: representative W2 matrix needs a `breaking` fixture (CF #1), manual GUI parity evidence under `.opencode/artifacts/xedit-mcp/acceptance/<batch>/manual-parity/` (CF #3), daemon-adapter latency measurement before any snapshot/preview-heavy mutating flow (CF #7).
+
+Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
+
+## 2026-06-01 — Batch 2 carry-forwards + portable publishability + Target 3 closure
+
+**Delivered**
+
+- **Batch 2 carry-forwards closed**:
+  - CF #2 (audit uniformity): `xedit_session` and `xedit_list_capabilities` now emit stage-[7] audit lines via a shared `src/audit-line.ts` helper. `xedit_inspect_conflicts` audit lines now carry `daemonPid` and `sessionId` matching `xedit_read_record`'s shape.
+  - CF #4 (MEDIUM findings): `runRules` returns `{ refusal, warnings, ruleHits }`. MEDIUM (and HIGH with `blockHigh=false`) findings surface as `Warning` entries on the success envelope's `warnings` array. CRITICAL still always blocks; HIGH blocks by default. Safe to add the first MEDIUM seed rule.
+  - CF #5 (precheck.targetFileFromArg): retired. Load-order checks are owned by LOAD001 in the rule layer for every record-side tool. `find-record.ts` migrated off the precheck flag; the dead field was removed from `PrecheckNeeds`.
+  - CF #6 (mapVerdict): lifted into `src/verdict.ts` so future record-side tools share one verdict vocabulary against the xEdit `caXxx` enum.
+  - Bonus fix: `xedit_find_record` locators now round-trip the caller's `formId` / `file` style (e.g. `0x012345` stays `0x012345` instead of being downgraded to `012345` by the daemon's prefix-stripped echo).
+- **Target 1 progress (portable publishability)**: `scripts/build-portable-plugin.ps1` materializes a self-contained portable plugin tree to `dist/portable-plugin/bgs-modding-superpowers/` (122 files, ~2.7 MB before `npm install`, zero reparse points) plus a sibling Codex-shape `marketplace.json`. The materialized `.mcp.json` and `tools/xedit-mcp/package.json` are rewritten for portable consumption (relative MCP path; `prepare`/`build`/`test`/`typecheck` scripts and devDependencies stripped). Semantic verification: stdio `initialize` + `tools/list` returns all 12 expected tools from the materialized tree after `npm install --omit=dev`.
+- **Target 3 closed (Operator UX)**: "Smoothing first-run setup" had no concrete acceptance criteria. The invariants it referenced are already shipped — visible MO2 (`scripts/start-mo2.ps1`), non-blocking MCP lifecycle (`xedit_status` / `xedit_start` / `xedit_health` / `xedit_dirty` / `xedit_stop` / `xedit_restart`) — and the first-run orchestrator is the existing `setting-up-bgs-modding-environment` skill. Removed from Current Focus.
+
+**Now known (from real implementation + verification)**
+
+- The Batch 1 STATUS file claimed `precheck.targetFileFromArg` was unused after Batch 1 — that was wrong. `find-record.ts:62` was still using it. The carry-forward closure required migrating find-record onto LOAD001 first, then deleting the field. Lesson: when a carry-forward says "X is unused", grep the call sites before retiring.
+- The portable plugin build cannot reuse the dev `package.json` as-is. The dev `prepare: npm run build` script and `devDependencies` (typescript, @types/node) would force any `npm install --omit=dev` consumer to also install dev deps or break. The build script rewrites the materialized `package.json` to drop both. `dist/` is the source of truth for the portable shape.
+- Codex's marketplace schema is the only constraint that forced the `plugins/<name>/` layout. The local-only workaround under repo-root `plugins/` (gitignored) used directory junctions, which Codex's cache copy step silently drops. The portable script avoids junctions entirely.
+- The MCP entry parses + runs from a freshly materialized tree against only the two runtime deps (`@modelcontextprotocol/sdk`, `zod`). No hidden coupling to the dev tree.
+
+**Implications for later phases**
+
+- A release-engineering step can now stage `dist/portable-plugin/bgs-modding-superpowers/` onto a release branch (or zip it as a release artifact) without further code changes.
+- Batch 3 (mutating workflows) can now ship MEDIUM-severity rules confidently: the warnings channel is in place, so MEDIUM findings become visible without changing tool signatures.
+- The shared `src/audit-line.ts` and `src/verdict.ts` modules are the canonical seams for any future tool that needs uniform stage-[7] auditing or `caXxx`-enum verdict mapping. Do not re-derive either per tool.
 
 ## 2026-06-01 — Reshape closeout (Superpowers-shaped multi-harness plugin)
 
