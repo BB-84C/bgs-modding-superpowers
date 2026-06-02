@@ -15,7 +15,7 @@ The forked xEdit daemon exposes 49 commands across 7 groups (system, session, fi
 - **Reading records & conflicts** — `xedit_find_record`, `xedit_read_record`, `xedit_inspect_conflicts`. These are the W2 (conflict audit) backbone.
 - **Atomic passthrough** — `xedit_call(command, args)`. For any native daemon command that does not have an intent tool yet. Still runs the full pipeline (validation → state → rules → audit). Use it whenever the intent tools do not fit.
 
-For the deep reference (all 49 commands, error codes, save semantics, locator format, UESP CK wiki, glossary), see the companion file `xedit-knowledgebase.md` in this skill directory.
+For deep reference material, query the structured BGS KB first (`bgs_kb_query` / `bgs_kb_get`). The old companion file `xedit-knowledgebase.md` is now a redirect kept only for back-compat inbound links.
 
 ## Routing doctrine (which path to use)
 
@@ -63,8 +63,19 @@ When delegating, do not hard-code role names — the harness will map them. Use 
 
 After any session that produced a footgun (an unexpected refusal, a non-obvious recovery, a surprising daemon behavior):
 
-1. Append a short note to `xedit-knowledgebase.md` under "Lessons" — file/record/element involved, what went wrong, what worked.
-2. If the footgun is mechanically detectable, draft a rule at `tools/xedit-mcp/src/rules/candidates/<id>.ts` describing the check and the corrective hint. Candidates require human review before promotion.
+1. Identify whether the gotcha is a durable fact, not project-internal noise. Project-local lessons that do not belong in the public KB go in the project devlog instead.
+2. Author a KB record at `<pack-root>/records/<domain>/<slug>.v1.md` with YAML frontmatter that validates against `knowledge/bgs-kb/schema/record.schema.json`.
+3. Pick the pack deliberately: cross-game / cross-tool facts go under `knowledge/bgs-kb/packs/core/records/`; game-specific facts go into the matching per-game pack (`bgs-kb-skyrim`, `bgs-kb-fallout4`, `bgs-kb-fallout3-fnv`, `bgs-kb-starfield`).
+4. Run `node tools/bgs-kb-mcp/dist/cli.js validate <pack-root>` and then `node tools/bgs-kb-mcp/dist/cli.js build <pack-root>` to refresh that pack, unless the current phase explicitly forbids rebuilds and gives a narrower validation path.
+5. Verify retrieval from a fresh MCP connection with `bgs_kb_query` and confirm the new record appears for a query a future agent would actually use.
+6. If the footgun is mechanically detectable, mark the KB record as a rule candidate when the schema supports it and track the reserved rule ID in a planning doc. Candidates require human review before promotion into `tools/xedit-mcp` enforcement.
+
+Worked example:
+
+1. Gotcha: xEdit daemon responses may include `0x`-prefixed FormIDs, while the MCP normalizes them at the edge.
+2. Pack/path: `knowledge/bgs-kb/packs/core/records/xedit/formid-prefix-normalization.v1.md`.
+3. Validate/build: `node tools/bgs-kb-mcp/dist/cli.js validate knowledge/bgs-kb/packs/core` then `node tools/bgs-kb-mcp/dist/cli.js build knowledge/bgs-kb/packs/core`.
+4. Verify: query `bgs_kb_query({ query: "0x FormID normalization", domains: ["xedit"] })` and confirm the record is returned.
 
 ## When this skill applies
 
