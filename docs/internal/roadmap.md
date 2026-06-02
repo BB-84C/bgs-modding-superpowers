@@ -125,6 +125,35 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
 
 
+## 2026-06-02 - KB-5 closeout (lesson-log migration; xedit-knowledgebase.md retired)
+
+**Delivered (on branch `feat/kb-5-lesson-log-migration`)**
+
+- Updated `skills/xedit-automation/SKILL.md` so durable xEdit automation lessons are authored as structured KB records instead of appended to `xedit-knowledgebase.md`.
+- Retired `skills/xedit-automation/xedit-knowledgebase.md` to a short redirect note that preserves the path for historical links and points agents to `bgs_kb_query` / `bgs_kb_get` and source records.
+- Marked KB-5c `cli render` as skipped because KB-5b chose retire-with-redirect over generated handbook maintenance.
+- Added the additive `kind` schema enum with `rule-candidate`, then marked three core records as rule candidates and reserved follow-up rule IDs in `docs/internal/plans/2026-06-02-kb5d-rule-candidates.md`.
+- Completed the lesson-log acceptance walkthrough by authoring `debugging.node-sqlite-windows-handle-leak.v1` for the Windows `node:sqlite` / `kb.sqlite` `EBUSY` handle gotcha found during KB-4.
+
+**Now known**
+
+- The existing record schema did not yet expose record-level `kind`; only source citations had `sources[].kind`, while `bgs_kb_query` already accepted a `kinds` filter shape. KB-5 added a record-level `kind` property as an additive schema v1 extension, but the current built SQLite/query path does not yet index or filter by that property.
+- Retiring the handbook is lower-maintenance than adding `cli render`: current active skills can point at KB retrieval directly, while historical plans and old source citations can safely keep resolving through the redirect.
+- The new lesson-log workflow can be exercised without rebuilding locked core SQLite artifacts: record authoring plus schema/CLI validation is sufficient until a fresh-shell core rebuild is available.
+
+**Implications for later phases**
+
+- A future bgs-kb-mcp pass should decide whether to persist record-level `kind` into `kb.sqlite` and make the existing `kinds` query filter semantically active.
+- Future xEdit MCP rule work has three reserved starting points: `RULE_SAVE_DURABILITY_001`, `RULE_DATA_PATH_001`, and `RULE_DIRTY_STATE_001`.
+- KB-6 should continue treating KB records as the source of truth and should not revive a generated monolithic handbook unless a concrete consumer appears.
+
+**Acceptance evidence**
+
+- `node tools/bgs-kb-mcp/dist/cli.js validate knowledge/bgs-kb/packs/core` passed after the schema enum addition, after the rule-candidate markings, and after the KB-5e record addition.
+- Single-record Ajv check passed for `debugging.node-sqlite-windows-handle-leak.v1`.
+- No `cli build` was run for the core pack, preserving the KB-4 carry-forward constraint that core `kb.sqlite` may still be locked on Windows.
+- Inbound-reference grep was run for `xedit-knowledgebase`; active skill references were updated to KB retrieval, while historical plans / old source citations are covered by the redirect path.
+
 ## 2026-06-02 - KB-4 closeout (Stage A + Stage B fan-out: 227 KB records across 5 packs)
 
 **Delivered (on branch feat/kb-4-fanout)**
