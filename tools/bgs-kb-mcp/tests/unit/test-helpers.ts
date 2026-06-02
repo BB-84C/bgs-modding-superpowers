@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { spawn } from "node:child_process";
 
 export const cleanupRoots: string[] = [];
 
@@ -76,4 +77,26 @@ export async function writeFixturePack(packRoot: string, records: Array<{ path: 
       }),
     );
   }
+}
+
+export interface CliResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  combined: string;
+}
+
+export async function runCli(args: string[]): Promise<CliResult> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ["dist/cli.js", ...args], { cwd: process.cwd() });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("close", (code) => resolve({ code, stdout, stderr, combined: `${stdout}${stderr}` }));
+  });
 }
