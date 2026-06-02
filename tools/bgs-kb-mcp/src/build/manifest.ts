@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -7,6 +6,7 @@ import { promisify } from "node:util";
 import yaml from "js-yaml";
 
 import type { PackManifest, PackMeta, SourceRecord } from "./types.js";
+import { sha256File } from "../discovery/sha256.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -49,11 +49,7 @@ export async function readPackMeta(packRoot: string): Promise<PackMeta> {
   return { ...defaults, ...(parsed ?? {}) };
 }
 
-export async function sha256File(path: string): Promise<string> {
-  const hash = createHash("sha256");
-  hash.update(await readFile(path));
-  return hash.digest("hex");
-}
+export { sha256File };
 
 export async function readSourceCommit(packRoot: string): Promise<string | undefined> {
   try {

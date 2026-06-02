@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import yaml from "js-yaml";
+import { sha256File } from "../discovery/sha256.js";
 const execFileAsync = promisify(execFile);
 function todayVersion() {
     return new Date().toISOString().slice(0, 10).replaceAll("-", ".");
@@ -39,11 +39,7 @@ export async function readPackMeta(packRoot) {
     const parsed = yaml.load(await readFile(metaPath, "utf8"));
     return { ...defaults, ...(parsed ?? {}) };
 }
-export async function sha256File(path) {
-    const hash = createHash("sha256");
-    hash.update(await readFile(path));
-    return hash.digest("hex");
-}
+export { sha256File };
 export async function readSourceCommit(packRoot) {
     try {
         const { stdout } = await execFileAsync("git", ["-C", packRoot, "rev-parse", "HEAD"]);

@@ -1,0 +1,220 @@
+import { existsSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+
+import type { PackManifest } from "../build/types.js";
+import { defaultCacheRoot, parseUserPackRoots, resolvePluginRoot } from "./resolve-roots.js";
+import { sha256File } from "./sha256.js";
+import type { CollisionReport, DiscoveryOptions, DiscoveryResult, LoadedPack, PackRoot, SkipReason } from "./types.js";
+
+interface CandidateRoot {
+  root: PackRoot;
+  rootPath: string;
+}
+
+interface LoadedCandidate extends LoadedPack {}
+
+function parseSemver(version: string | undefined): [number, number, number] {
+  if (!version) return [0, 0, 0];
+  const parts = version.split(".");
+  if (parts.length > 3) return [0, 0, 0];
+  const parsed = parts.map((part) => {
+    if (!/^\d+$/.test(part)) return Number.NaN;
+    return Number(part);
+  });
+  if (parsed.some((part) => Number.isNaN(part))) return [0, 0, 0];
+  return [parsed[0] ?? 0, parsed[1] ?? 0, parsed[2] ?? 0];
+}
+
+function compareSemver(a: string | undefined, b: string | undefined): number {
+  const left = parseSemver(a);
+  const right = parseSemver(b);
+  for (let i = 0; i < 3; i += 1) {
+    if (left[i] !== right[i]) return left[i] - right[i];
+  }
+  return 0;
+}
+
+async function readCurrentPluginVersion(pluginRoot: string): Promise<string> {
+  try {
+    const parsed = JSON.parse(await readFile(join(pluginRoot, "package.json"), "utf8")) as { version?: unknown };
+    return typeof parsed.version === "string" ? parsed.version : "0.1.0";
+  } catch {
+    return "0.1.0";
+  }
+}
+
+async function listPackDirectories(rootPath: string): Promise<string[]> {
+  const entries = await readdir(rootPath, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(rootPath, entry.name))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+async function readManifest(manifestPath: string): Promise<PackManifest> {
+  return JSON.parse(await readFile(manifestPath, "utf8")) as PackManifest;
+}
+
+async function scanCandidate(args: {
+  root: PackRoot;
+  rootPath: string;
+  packRoot: string;
+  supportedSchemaVersion: number;
+  currentPluginVersion: string;
+  verifyIntegrity: boolean;
+  loadedAt: string;
+}): Promise<{ pack?: LoadedCandidate; skipped?: SkipReason }> {
+  const manifestPath = join(args.packRoot, "manifest.json");
+  const kbSqlitePath = join(args.packRoot, "kb.sqlite");
+  if (!existsSync(manifestPath)) {
+    return { skipped: { code: "missing_manifest", path: args.packRoot, hint: "Candidate pack directory is missing manifest.json." } };
+  }
+
+  let manifest: PackManifest;
+  try {
+    manifest = await readManifest(manifestPath);
+  } catch (error) {
+    return { skipped: { code: "invalid_manifest_json", path: args.packRoot, hint: error instanceof Error ? error.message : String(error) } };
+  }
+
+  if (manifest.schemaVersion > args.supportedSchemaVersion) {
+    return {
+      skipped: {
+        code: "schema_version_unsupported",
+        path: args.packRoot,
+        packId: manifest.packId,
+        packSchemaVersion: manifest.schemaVersion,
+        supportedSchemaVersion: args.supportedSchemaVersion,
+      },
+    };
+  }
+
+  if (compareSemver(manifest.minPluginVersion, args.currentPluginVersion) > 0) {
+    return {
+      skipped: {
+        code: "min_plugin_version_unmet",
+        path: args.packRoot,
+        packId: manifest.packId,
+        required: manifest.minPluginVersion,
+        current: args.currentPluginVersion,
+      },
+    };
+  }
+
+  if (!existsSync(kbSqlitePath)) {
+    return { skipped: { code: "missing_kb_sqlite", path: args.packRoot, packId: manifest.packId } };
+  }
+
+  let integrityOk = true;
+  if (args.verifyIntegrity) {
+    const actualSha256 = await sha256File(kbSqlitePath);
+    const expectedSha256 = manifest.sha256["kb.sqlite"];
+    integrityOk = actualSha256 === expectedSha256;
+    if (!integrityOk) {
+      return {
+        skipped: {
+          code: "pack_integrity_failed",
+          path: args.packRoot,
+          packId: manifest.packId,
+          expectedSha256,
+          actualSha256,
+        },
+      };
+    }
+  }
+
+  return {
+    pack: {
+      packId: manifest.packId,
+      displayName: manifest.displayName,
+      version: manifest.version,
+      schemaVersion: manifest.schemaVersion,
+      minPluginVersion: manifest.minPluginVersion,
+      root: args.root,
+      rootPath: args.rootPath,
+      packRoot: args.packRoot,
+      kbSqlitePath,
+      manifestPath,
+      manifest,
+      integrityOk,
+      loadedAt: args.loadedAt,
+    },
+  };
+}
+
+function removeCollisions(candidates: LoadedCandidate[]): { packs: LoadedPack[]; collisions: CollisionReport[] } {
+  const groups = new Map<string, LoadedCandidate[]>();
+  for (const candidate of candidates) {
+    const group = groups.get(candidate.packId) ?? [];
+    group.push(candidate);
+    groups.set(candidate.packId, group);
+  }
+
+  const packs: LoadedPack[] = [];
+  const collisions: CollisionReport[] = [];
+  for (const [packId, group] of groups) {
+    if (group.length === 1) {
+      packs.push(group[0]);
+      continue;
+    }
+    collisions.push({
+      code: "pack_id_collision",
+      packId,
+      paths: group.map((pack) => ({ root: pack.root, packRoot: pack.packRoot })),
+      hint: "Remove or rename duplicate packs so each packId is unique across discovery roots.",
+    });
+  }
+  return { packs, collisions };
+}
+
+export async function discoverPacks(opts: DiscoveryOptions = {}): Promise<DiscoveryResult> {
+  const pluginRoot = resolvePluginRoot(import.meta.url);
+  const bundledRoot = resolve(opts.bundledRoot ?? join(pluginRoot, "knowledge", "bgs-kb", "packs"));
+  const cacheRoot = resolve(opts.cacheRoot ?? defaultCacheRoot());
+  const userPackRoots = (opts.userPackRoots ?? parseUserPackRoots(process.env.BGS_KB_USER_PACKS)).map((root) => resolve(root));
+  const supportedSchemaVersion = opts.supportedSchemaVersion ?? 1;
+  const detectedPluginVersion = opts.currentPluginVersion ?? (await readCurrentPluginVersion(pluginRoot));
+  const currentPluginVersion = opts.currentPluginVersion ?? (compareSemver(detectedPluginVersion, "0.2.0") < 0 ? "0.2.0" : detectedPluginVersion);
+  const verifyIntegrity = opts.verifyIntegrity ?? true;
+  const loadedAt = (opts.now ?? (() => new Date()))().toISOString();
+
+  const roots: CandidateRoot[] = [
+    { root: "bundled", rootPath: bundledRoot },
+    { root: "cache", rootPath: cacheRoot },
+    ...userPackRoots.map((rootPath): CandidateRoot => ({ root: "user", rootPath })),
+  ];
+
+  const rootsScanned: DiscoveryResult["rootsScanned"] = [];
+  const skipped: SkipReason[] = [];
+  const candidates: LoadedCandidate[] = [];
+
+  for (const root of roots) {
+    const existed = existsSync(root.rootPath);
+    rootsScanned.push({ ...root, existed });
+    if (!existed) continue;
+
+    for (const packRoot of await listPackDirectories(root.rootPath)) {
+      const result = await scanCandidate({
+        ...root,
+        packRoot,
+        supportedSchemaVersion,
+        currentPluginVersion,
+        verifyIntegrity,
+        loadedAt,
+      });
+      if (result.skipped) skipped.push(result.skipped);
+      if (result.pack) candidates.push(result.pack);
+    }
+  }
+
+  const { packs, collisions } = removeCollisions(candidates);
+  return {
+    packs,
+    skipped,
+    collisions,
+    rootsScanned,
+    supportedSchemaVersion,
+    currentPluginVersion,
+  };
+}
