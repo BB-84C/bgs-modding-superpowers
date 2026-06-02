@@ -27,6 +27,11 @@
       "minLength": 1,
       "maxLength": 200
     },
+    "kind": {
+      "type": "string",
+      "description": "Optional coarse record kind for retrieval and future promotion workflows.",
+      "enum": ["rule", "workflow", "gotcha", "explanation", "source-map", "rule-candidate"]
+    },
     "domains": {
       "type": "array",
       "description": "Closed taxonomy labels used for retrieval, filtering, and review assignment.",
