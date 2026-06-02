@@ -1,0 +1,46 @@
+{
+  "name": "bgs-kb-mcp",
+  "version": "0.1.0",
+  "description": "Sibling MCP server for the BGS Modding agentic knowledge base. Pack-based SQLite + FTS5 + BM25 retrieval across cross-game and per-game packs.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "bgs-kb-mcp": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "start": "node dist/index.js",
+    "cli": "node dist/cli.js",
+    "test": "vitest run --exclude tests/integration",
+    "test:watch": "vitest",
+    "test:integration": "cross-env BGS_KB_MCP_INTEGRATION=1 vitest run tests/integration",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "package.json",
+    "tsconfig.json"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.25.0",
+    "gray-matter": "^4.0.3",
+    "js-yaml": "^4.1.0",
+    "ajv": "^8.17.0",
+    "ajv-formats": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "cross-env": "^7.0.3",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
