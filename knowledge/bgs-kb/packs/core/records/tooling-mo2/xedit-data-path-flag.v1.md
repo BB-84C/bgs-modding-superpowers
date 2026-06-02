@@ -1,6 +1,7 @@
 ---
 id: tooling-mo2.xedit-data-path-flag.v1
 title: "xEdit -D: data-path flag overrides registry-discovered Steam install"
+kind: rule-candidate
 domains: [xedit, load-order, debugging]
 appliesTo:
   games: [SkyrimLE, SkyrimSE, SkyrimAE, SkyrimVR, Fallout4, Fallout4VR, Fallout3, FalloutNV, Starfield]

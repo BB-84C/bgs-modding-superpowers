@@ -1,6 +1,7 @@
 ---
 id: debugging.dirty-state-before-stop-restart.v1
 title: Check xEdit dirty state before stop or restart
+kind: rule-candidate
 domains: [debugging, xedit]
 appliesTo:
   games: [SkyrimLE, SkyrimSE, SkyrimAE, SkyrimVR, Fallout4, Fallout4VR, Fallout3, FalloutNV, Starfield]

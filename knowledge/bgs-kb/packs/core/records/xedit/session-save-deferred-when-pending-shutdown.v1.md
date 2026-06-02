@@ -1,6 +1,7 @@
 ---
 id: xedit.session-save-deferred-when-pending-shutdown.v1
 title: session.save with savedFilesPendingShutdown > 0 is deferred, not durable
+kind: rule-candidate
 domains: [xedit, debugging]
 appliesTo:
   games: [SkyrimLE, SkyrimSE, SkyrimAE, SkyrimVR, Fallout4, Fallout4VR, Fallout3, FalloutNV, Starfield]
