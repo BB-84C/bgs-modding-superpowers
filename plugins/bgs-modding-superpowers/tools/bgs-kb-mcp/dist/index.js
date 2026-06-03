@@ -12,30 +12,86 @@ import { makeGetTool } from "./tools/get.js";
 import { makeInstallPackTool } from "./tools/install-pack.js";
 import { makeQueryTool } from "./tools/query.js";
 import { makeStatusTool } from "./tools/status.js";
+import { DOMAIN_VALUES, GAME_CODE_VALUES } from "./types/enums.js";
 const SERVER_NAME = "bgs-kb-mcp";
 const SERVER_VERSION = "0.1.0";
+const RECORD_KIND_VALUES = ["rule", "workflow", "gotcha", "explanation", "source-map"];
+const DETAIL_LEVEL_VALUES = ["summary", "expanded"];
+// Explicit per-tool JSON Schemas. These mirror the Zod `.strict()` contracts in
+// each tool handler so MCP clients (OpenCode, Claude Code, Codex) can route the
+// model's arguments correctly. The previous loose `additionalProperties: true`
+// shortcut left OpenCode unable to forward arguments to the parameterized
+// tools, which surfaced as 'Invalid bgs_kb_query request: query is required'.
 export const TOOL_DEFINITIONS = [
     {
         name: "bgs_kb_status",
         description: "Returns loaded KB packs, cache roots, versions, and compatibility warnings. Works before MO2/xEdit are configured.",
+        inputSchema: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+        },
     },
     {
         name: "bgs_kb_query",
-        description: "Searches the local BGS Modding knowledge base (SQLite + FTS5 + BM25) across loaded packs. Supports game/domain/pack filters.",
+        description: "Searches the local BGS Modding knowledge base (SQLite + FTS5 + BM25) across loaded packs. Supports game/domain/pack filters. Pass { query, games?, domains?, toolchains?, kinds?, packIds?, maxResults?, detailLevel?, includeVariants?, includeSources?, cursor? }.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                query: { type: "string", description: "Free-text FTS query against title, body, and canonical answer." },
+                games: { type: "array", items: { type: "string", enum: [...GAME_CODE_VALUES] }, description: "Filter hits to records that apply to any of these game codes." },
+                domains: { type: "array", items: { type: "string", enum: [...DOMAIN_VALUES] }, description: "Filter hits to records that target any of these knowledge domains." },
+                toolchains: { type: "array", items: { type: "string" }, description: "Filter hits to records that mention any of these toolchains (e.g. 'xedit', 'mutagen')." },
+                kinds: { type: "array", items: { type: "string", enum: [...RECORD_KIND_VALUES] }, description: "Filter hits by KB record kind." },
+                packIds: { type: "array", items: { type: "string" }, description: "Restrict the search to specific pack ids." },
+                maxResults: { type: "integer", minimum: 1, description: "Cap on returned hits; capped server-side at 20." },
+                detailLevel: { type: "string", enum: [...DETAIL_LEVEL_VALUES], description: "summary = title + snippet only; expanded = include bodyExcerpt." },
+                includeVariants: { type: "boolean", description: "Include per-game variantNotes in each hit. Default: true." },
+                includeSources: { type: "boolean", description: "Include the sources array in each hit. Default: true." },
+                cursor: { type: "string", description: "Reserved for future paging. Currently ignored." },
+            },
+            required: ["query"],
+            additionalProperties: false,
+        },
     },
     {
         name: "bgs_kb_get",
-        description: "Fetches one full KB record by id, optionally merged for a specific game variant.",
+        description: "Fetches one full KB record by id, optionally merged for a specific game variant. Pass { id, game?, packId? }.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                id: { type: "string", minLength: 1, description: "Canonical record id, e.g. 'load-order.fallout4.plugins-txt.v1'." },
+                game: { type: "string", enum: [...GAME_CODE_VALUES], description: "Optional game code; when set, variant additions/warnings for that game are merged into the returned record." },
+                packId: { type: "string", minLength: 1, description: "Optional pack id to disambiguate when multiple packs declare the same record id." },
+            },
+            required: ["id"],
+            additionalProperties: false,
+        },
     },
     {
         name: "bgs_kb_check_updates",
         description: "Checks loaded KB packs against the latest GitHub Release manifest-index.json and reports available upgrades.",
+        inputSchema: {
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+        },
     },
     {
         name: "bgs_kb_install_pack",
-        description: "Downloads, verifies, and installs a pinned KB pack version into the local cache. Supports dryRun verification.",
+        description: "Downloads, verifies, and installs a pinned KB pack version into the local cache. Supports dryRun verification. Pass { packId, version, dryRun? }.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                packId: { type: "string", minLength: 1, description: "Canonical pack id, e.g. 'bgs-kb-core'." },
+                version: { type: "string", minLength: 1, description: "Exact pack version; the string 'latest' is rejected — run bgs_kb_check_updates first." },
+                dryRun: { type: "boolean", description: "If true, downloads and verifies the archive without writing the final install path." },
+            },
+            required: ["packId", "version"],
+            additionalProperties: false,
+        },
     },
-].map((tool) => ({ ...tool, inputSchema: { type: "object", additionalProperties: true } }));
+];
 export function jsonResult(body, isError = false) {
     return {
         content: [{ type: "text", text: JSON.stringify(body) }],
