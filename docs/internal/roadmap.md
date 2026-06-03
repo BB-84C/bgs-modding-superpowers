@@ -125,6 +125,96 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
 
 
+## 2026-06-02 - KB-* loop complete (all 6 phases shipped; 2 carry-forwards to next session)
+
+The full KB roadmap — from architecture decision through acceptance evidence — shipped in a single autonomous loop spanning six phases on `main`.
+
+### Phase summary
+
+| Phase | Shipped | Commits | Tests added |
+|---|---|---|---|
+| KB-1 | schema + 46 seed records + pack-build CLI (build/validate/info) | 18 | 22 unit + 1 integration |
+| KB-2 | sibling `bgs-kb-mcp` MCP server + 3 read-side tools + portable-plugin integration + bootstrap skill update | 14 | 100 unit + 2 integration (cumulative) |
+| KB-3 | `maintaining-modding-environments` skill + `setting-up` split + bootstrap registration | 5 | docs-only |
+| KB-4 | 8 parallel subagents (4 Stage A core + 4 Stage B per-game) -> 181 new records across 5 packs | 51 | per-pack manifests committed |
+| KB-5 | xedit-automation lesson-log migrated to KB record authoring; `xedit-knowledgebase.md` retired to redirect; schema gained `kind` enum (+`rule-candidate`); 3 rule candidates marked | 7 | acceptance walkthrough record committed |
+| KB-6 | `bgs_kb_check_updates` + `bgs_kb_install_pack` + `cli prune-cache` + 20-query eval gold set + mock-based install integration; MCP server now exposes 5 tools | 10 | 119 unit + 4 integration |
+
+### Final state
+
+- **228 KB records across 5 packs**: `bgs-kb-core` 113 + `bgs-kb-skyrim` 33 + `bgs-kb-fallout4` 34 + `bgs-kb-fallout3-fnv` 28 + `bgs-kb-starfield` 20
+- **5 MCP tools** at the bgs-kb-mcp surface: `bgs_kb_status`, `bgs_kb_query`, `bgs_kb_get`, `bgs_kb_check_updates`, `bgs_kb_install_pack`
+- **5 CLI subcommands**: `build`, `validate`, `info`, `prune-cache`, `--help`
+- **119 unit + 4 integration tests** in `tools/bgs-kb-mcp/`; eval retrieval@3 = **0.800** (16/20 gold queries) on the current corpus
+- **Anti-copy clean** across all 228 records: 0 verbatim >=40-char matches vs `WingedGuardian/skyrimvr-claude-toolkit/KNOWLEDGEBASE.md`
+- **Sources structured** (kind + ref/url) on every record; 0 unsourced records
+- **Per-pack manifests** committed + sha256-verified for skyrim / fallout4 / fallout3-fnv / starfield (core manifest stale per carry-forward below)
+- Plugin version bumped to `0.2.0` to match `minPluginVersion` gates
+- Three skills updated to teach the new surface: `using-bgs-modding-superpowers` (bootstrap), `setting-up-bgs-modding-environment` (first-run + KB acquisition), `maintaining-modding-environments` (ongoing care, custom packs, cache prune, update flow)
+- `xedit-automation` skill migrated; durable lessons now author KB records instead of appending to a markdown handbook
+
+### Two carry-forwards (require fresh-shell session)
+
+**CF-1 — Rebuild core `kb.sqlite`**
+
+The Windows file handle on `knowledge/bgs-kb/packs/core/kb.sqlite` got pinned during KB-4's parallel subagent CLI invocations and never released for the remainder of this session (8+ retries with cumulative 60s wait all returned `EBUSY` on `unlink`). The records on disk are correct; the core `manifest.json` still reports the pre-Stage-A count of 46 records.
+
+To clear: open a fresh PowerShell / shell, then:
+```powershell
+cd D:\awesome-bgs-mod-master
+node tools/bgs-kb-mcp/dist/cli.js build knowledge/bgs-kb/packs/core
+git add knowledge/bgs-kb/packs/core/manifest.json
+git commit -m "chore(kb): rebuild core manifest post-KB-4 (113 records)"
+```
+
+The expected sha256 will change; that's normal.
+
+**CF-2 — Publish GitHub Release artifacts**
+
+Once CF-1 is resolved, the publishing flow is straightforward; all the wire shape is implemented and proven by the KB-6 mock-based integration test:
+
+```powershell
+# in a fresh shell
+# 1. ensure all 5 pack manifests are fresh
+foreach ($p in @('core','bgs-kb-skyrim','bgs-kb-fallout4','bgs-kb-fallout3-fnv','bgs-kb-starfield')) {
+  node tools/bgs-kb-mcp/dist/cli.js build "knowledge/bgs-kb/packs/$p"
+}
+# 2. zip each pack into bgs-kb-<id>-2026.06.02.zip
+# 3. compute sha256 + sizeBytes per zip
+# 4. build manifest-index.json listing all 5 packs with releaseUrl + sha256 + sizeBytes
+# 5. gh release create kb-2026.06.02 *.zip manifest-index.json
+# 6. run `bgs_kb_check_updates` + `bgs_kb_install_pack` against the live Release as KB-6e proper acceptance
+```
+
+After CF-2, the KB-6 acceptance walkthrough graduates from mock-backed to real-Release-backed.
+
+### Now known across the full loop
+
+- `node:sqlite` is good enough for both build and runtime, but holds Windows handles tenaciously across parallel worker processes. For parallel KB-authoring loops, consider building each pack in its own subprocess with explicit `db.close()` before exit (which the CLI already does), but also accept that the orchestrator may need a fresh shell to re-acquire write access after a heavy fan-out.
+- Best-of-N was deliberately NOT used in KB-4 fan-out; single-fixer dispatches with structured prompts + Ajv validation + anti-copy diff + URL spot-check were sufficient at this scale.
+- Playwright is essential for verifying any Cloudflare-gated BGS modding source (CK UESP mirror, Sim Settlements, AFK Mods, GECK Wiki, Starfield Wiki). Simple HTTP probes will silently lie about content; the source-survey appendix's per-entry fetch-strategy column is the contract subagents must follow.
+- `bgs_kb_query` BM25 ranking on the 228-record corpus gives retrieval@3 = 0.800 on a hand-curated gold set. That's a decent baseline; lifting it past 0.9 will probably require either embedding-augmented re-ranking (KB-6+) or curation of `queryKeys` / aliases on the records that miss.
+- The `debugging` domain still tags too many records (~60% of the core pack); narrowing it remains a future curation pass.
+- End-user pack authoring works as designed: the KB-2 acceptance fixture proved `$BGS_KB_USER_PACKS` points at directories containing pack directories (not at a pack directory itself), and the `maintaining-modding-environments` skill phrases this carefully.
+
+### Implications going forward
+
+- The KB architecture is **production-ready as a local-first system today**. Network distribution is one fresh-shell release-engineering session away.
+- KB-6's mock-based install integration test will become a real-Release integration test the moment CF-2 lands.
+- The schema's new `kind` enum (with `rule-candidate`) opens a clean seam for promoting durable mechanical footguns into LOAD-style `xedit-mcp` rules without further schema churn.
+- The Stage A controller-side anti-copy + URL spot-check pattern is the template for any future KB expansion (additional games, deeper per-game packs, or community-contributed packs via `$BGS_KB_USER_PACKS`).
+
+### Repo state at loop end
+
+- All six phase branches merged to `origin/main`:
+  - `feat/kb-1-schema-and-seed-records` -> `7cde092`
+  - `feat/kb-2-mcp-server` -> `9b81f9a`
+  - `feat/kb-3-maintaining-skill` -> `8a09ded`
+  - `feat/kb-4-fanout` -> `f4a3771`
+  - `feat/kb-5-lesson-log-migration` -> `00ffc1a`
+  - `feat/kb-6-updates-and-eval` -> `f5ff2b2`
+- 105 KB-loop commits cumulatively shipped across the six branches.
+
 ## 2026-06-02 - KB-6 closeout (updates + install + cache prune + eval harness)
 
 **Delivered (on branch `feat/kb-6-updates-and-eval`)**
