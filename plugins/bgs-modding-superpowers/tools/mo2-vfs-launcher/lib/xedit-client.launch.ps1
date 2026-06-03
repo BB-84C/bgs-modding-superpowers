@@ -364,9 +364,9 @@ function Invoke-XeditClientProcessLaunch {
 
         $normalizedLauncherCommand = Get-XeditClientNormalizedLauncherCommand -LauncherPath $launcherPath -GameModeArgument $gameModeArgument
         $session = New-XeditClientSessionContext -PluginLines $pluginSource.PluginLines
-        $normalizedLauncherCommand.ArgumentList = @($normalizedLauncherCommand.ArgumentList + @('-automation-serve', ('-P:' + $session.SessionPluginsFilePath)))
+        $normalizedLauncherCommand.ArgumentList = @(@($normalizedLauncherCommand.ArgumentList) + @('-automation-serve', ('-P:' + $session.SessionPluginsFilePath)))
         $nativeTargetArgumentList = if ($normalizedLauncherCommand.PSObject.Properties.Name -contains 'NativeArgumentList') { @(ConvertTo-XeditClientFlatStringArray -Values @($normalizedLauncherCommand.NativeArgumentList)) } else { @(ConvertTo-XeditClientFlatStringArray -Values @($normalizedLauncherCommand.ArgumentList)) }
-        $nativeTargetArgumentList = @(ConvertTo-XeditClientFlatStringArray -Values @($nativeTargetArgumentList + @('-automation-serve', ('-P:' + $session.SessionPluginsFilePath))))
+        $nativeTargetArgumentList = @(ConvertTo-XeditClientFlatStringArray -Values @(@($nativeTargetArgumentList) + @('-automation-serve', ('-P:' + $session.SessionPluginsFilePath))))
 
         # --data-path (optional) translates to xEdit's -D:<path>\ flag.
         # xEdit's docs Section 2.8.1 require a trailing backslash for -D:. Without
