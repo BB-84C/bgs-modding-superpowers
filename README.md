@@ -39,20 +39,39 @@ The bundled `xedit` and `bgs_kb` MCP servers are declared in [`.mcp.json`](./.mc
 
 ### Codex
 
-```text
-/plugins
-bgs-modding-superpowers
-Select "Install Plugin".
-```
+Codex doesn't auto-import `.mcp.json` the way Claude Code does, so the full install has three steps: add the marketplace, install the plugin, and wire the `xedit` + `bgs_kb` MCP servers. The bundled `scripts/install-codex.ps1` does all three idempotently.
 
-Codex's marketplace cache copies files (it does not follow directory junctions), so a portable install needs a self-contained tree under `plugins/<name>/` with no machine-specific paths. Maintainers stage that tree with:
+**One-liner (recommended):**
 
 ```powershell
-# in the repo root, with the MCP dist/ directories already built
-pwsh scripts/build-portable-plugin.ps1
+iwr -useb https://raw.githubusercontent.com/BB-84C/bgs-modding-superpowers/main/scripts/install-codex.ps1 | iex
 ```
 
-This produces `dist/portable-plugin/bgs-modding-superpowers/` (all real files, all paths relative, MCP runtime dependencies included) plus a sibling `marketplace.json`.
+**Manual (equivalent, inspect before you trust):**
+
+```powershell
+codex plugin marketplace add BB-84C/bgs-modding-superpowers
+codex plugin add bgs-modding-superpowers@bgs-modding-superpowers
+
+# Find where Codex installed the plugin:
+codex plugin list --marketplace bgs-modding-superpowers
+# -> last column is the on-disk path; call it $PLUGIN
+
+# Wire the two MCP servers:
+codex mcp add xedit  -- node "$PLUGIN\tools\xedit-mcp\dist\index.js"
+codex mcp add bgs_kb -- node "$PLUGIN\tools\bgs-kb-mcp\dist\index.js"
+```
+
+Verify with `codex mcp list` — both `xedit` and `bgs_kb` should appear. Restart any open Codex session for the new MCP servers and skills to load.
+
+After a `codex plugin marketplace upgrade bgs-modding-superpowers`, re-point the MCP paths at the new cache location with:
+
+```powershell
+$s = iwr -useb https://raw.githubusercontent.com/BB-84C/bgs-modding-superpowers/main/scripts/install-codex.ps1
+& ([scriptblock]::Create($s.Content)) -McpOnly
+```
+
+Maintainers building a portable, redistributable tree (zip, offline install, alternative marketplace) can stage it with `pwsh scripts/build-portable-plugin.ps1`; the output lands in `dist/portable-plugin/bgs-modding-superpowers/` with all paths relative and MCP runtime dependencies included.
 
 ## First run
 
