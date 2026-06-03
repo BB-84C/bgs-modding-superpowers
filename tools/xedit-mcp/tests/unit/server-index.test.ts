@@ -83,16 +83,29 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
     expect((schema.properties.force as { type: string }).type).toBe("boolean");
   });
 
-  test("xedit_find_record declares the union of formId-mode and editorId-mode properties without required", () => {
+  test("xedit_find_record declares the union of formId-mode and editorId-mode as oneOf with minLength guards", () => {
     const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_find_record")!;
     const schema = tool.inputSchema as {
-      properties: Record<string, unknown>;
+      properties: Record<string, { type: string; minLength?: number; pattern?: string }>;
       required?: string[];
+      oneOf?: Array<{ required: string[] }>;
     };
     // Union: handler validates one mode OR the other; no field is unconditionally required.
     expect(Object.keys(schema.properties).sort()).toEqual(["editorId", "file", "formId", "signature"]);
     expect(schema.required ?? []).toEqual([]);
-    expect((schema.properties.formId as { pattern: string }).pattern).toBe("^(0x)?[0-9a-fA-F]{1,8}$");
+
+    // minLength guards reject empty-string placeholders at the schema layer.
+    expect(schema.properties.file.minLength).toBe(1);
+    expect(schema.properties.editorId.minLength).toBe(1);
+    expect(schema.properties.formId.pattern).toBe("^(0x)?[0-9a-fA-F]{1,8}$");
+
+    // oneOf forces the model/client to pick a single mode instead of filling
+    // every declared property as the OpenCode 2026-06-03 repro did.
+    expect(schema.oneOf).toBeDefined();
+    expect(schema.oneOf).toHaveLength(2);
+    const required = schema.oneOf!.map((branch) => branch.required.slice().sort());
+    expect(required).toContainEqual(["file", "formId"]);
+    expect(required).toContainEqual(["editorId"]);
   });
 
   test("xedit_read_record requires file + formId", () => {

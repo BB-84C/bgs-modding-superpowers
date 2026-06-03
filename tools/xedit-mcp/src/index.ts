@@ -337,31 +337,46 @@ export const TOOL_DEFINITIONS = [
   {
     name: "xedit_find_record",
     description:
-      "Requires the daemon to be ready. Locates records by either {file, formId} (exact override lookup) OR {editorId, signature?} (Editor ID search across the load order). Prefer one search mode; if both are supplied, {file, formId} wins. Fast-fails with code='not_ready' if the daemon is not ready.",
+      "Requires the daemon to be ready. Locates records by either {file, formId} (exact override lookup) OR {editorId, signature?} (Editor ID search across the load order). " +
+      "Pass EXACTLY ONE search mode — do not send empty-string placeholders for the unused mode. " +
+      "If both modes validate, {file, formId} wins. Fast-fails with code='not_ready' if the daemon is not ready.",
     inputSchema: {
       type: "object" as const,
       properties: {
         file: {
           type: "string" as const,
-          description: "Plugin filename including extension, e.g. 'kinggathcreations_spaceship.esm'.",
+          minLength: 1,
+          description:
+            "Plugin filename including extension, e.g. 'kinggathcreations_spaceship.esm'. Required for the {file, formId} search mode. Do NOT pass an empty string in editorId mode.",
         },
         formId: {
           type: "string" as const,
           pattern: FORM_ID_PATTERN,
           description:
-            "FormID as hex, with or without 0x prefix, e.g. '0000003C' or '0x0000003C'. Up to 8 hex digits.",
+            "FormID as hex, with or without 0x prefix, e.g. '0000003C' or '0x0000003C'. Up to 8 hex digits. Required for the {file, formId} search mode. Do NOT pass a zero placeholder in editorId mode.",
         },
         editorId: {
           type: "string" as const,
-          description: "Editor ID to search for, e.g. 'PlayerRef'. Alternative to file+formId.",
+          minLength: 1,
+          description:
+            "Editor ID to search for, e.g. 'PlayerRef'. Required for the {editorId} search mode.",
         },
         signature: {
           type: "string" as const,
           description:
-            "Optional 4-char record signature filter for editorId search, e.g. 'QUST', 'NPC_', 'WEAP'.",
+            "Optional 4-char record signature filter for editorId search, e.g. 'QUST', 'NPC_', 'WEAP'. Only meaningful in {editorId} mode.",
         },
       },
       additionalProperties: false,
+      // oneOf nudges the model/client to pick a single mode instead of filling
+      // every declared property with placeholder garbage. The handler also
+      // validates each Zod branch and falls back gracefully if a client
+      // ignores oneOf, but having it here is the cheapest way to keep models
+      // from sending file:"" + formId:"00000000" alongside a real editorId.
+      oneOf: [
+        { required: ["file", "formId"] },
+        { required: ["editorId"] },
+      ],
     },
   },
   {
