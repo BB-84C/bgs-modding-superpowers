@@ -1,6 +1,6 @@
 {
-  "name": "bgs-modding-superpowers-dev",
-  "description": "Development marketplace for bgs-modding-superpowers",
+  "name": "bgs-modding-superpowers",
+  "description": "Marketplace for bgs-modding-superpowers",
   "owner": {
     "name": "awesome-bgs-mod-master contributors"
   },
