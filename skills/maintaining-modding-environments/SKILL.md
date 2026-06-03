@@ -39,6 +39,15 @@ Cache root on Windows:
 
 Each version directory contains `manifest.json`, `records/`, and `kb.sqlite`. Current policy: retain the current version and the immediately previous version as rollback/fallback. Prune versions older than that only after confirming the pack is not pinned by the user or referenced by a current modpack workflow.
 
+Use the KB MCP CLI for routine pruning:
+
+```powershell
+node <plugin>\tools\bgs-kb-mcp\dist\cli.js prune-cache --dry-run
+node <plugin>\tools\bgs-kb-mcp\dist\cli.js prune-cache
+```
+
+The dry run should be surfaced before deletion when the user has not already approved cache mutation. The command keeps the highest version and the immediately previous version per pack, then removes older cached versions.
+
 Do not delete `incoming/` while an install is running. If an install failed earlier and no installer is active, stale `incoming/` contents can be removed after surfacing the path to the user.
 
 ## Custom pack authoring + registration
