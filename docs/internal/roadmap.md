@@ -125,6 +125,39 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
 
 
+## 2026-06-03 - KB-* loop carry-forwards cleared (release live, end-to-end acceptance green)
+
+Both carry-forwards documented in the 2026-06-02 `KB-* loop complete` entry are now closed.
+
+**CF-1 cleared** (core kb.sqlite rebuild): a non-Node Windows process held kb.sqlite open with FILE_SHARE_READ + FILE_SHARE_WRITE but NOT FILE_SHARE_DELETE -- node:sqlite write-open succeeded, but `rm` returned EBUSY. Added `scripts/rebuild-locked-pack.mjs` (commit `bc87419`) as the durable escape hatch: drop all user-created schema objects in place, re-apply schema, repopulate, with a 60s `PRAGMA busy_timeout` to retry around external readers. Core pack now correctly reports **113 records**.
+
+**CF-2 cleared** (Release artifacts published): `kb-2026.06.02` is live at https://github.com/BB-84C/bgs-modding-superpowers/releases/tag/kb-2026.06.02 with 6 assets:
+
+| Asset | sha256 | Size |
+|---|---|---|
+| manifest-index.json | - | ~2 KB |
+| core-2026.06.02.zip | 8e62033d2389... | 248.6 KB |
+| bgs-kb-skyrim-2026.06.02.zip | d694f1fae684... | 84.8 KB |
+| bgs-kb-fallout4-2026.06.02.zip | 7e1f778fed66... | 80.2 KB |
+| bgs-kb-fallout3-fnv-2026.06.02.zip | ff6b379bbb01... | 67.4 KB |
+| bgs-kb-starfield-2026.06.02.zip | df007b7843bb... | 46.3 KB |
+
+**KB-6e graduates from mock to live**: `bgs_kb_check_updates({})` against the live Release returns `ok: true` with all 5 packs at `upgradeAvailable: false` (local matches latest) and `breakingChange: false` (plugin v0.2.0 >= each pack's `minPluginVersion` 0.2.0). The MCP server entry passes `currentPluginVersion: discovery.currentPluginVersion` correctly; the v0.2.0 plugin sees the v0.2.0 packs as compatible.
+
+**Now known**
+
+- The lock holder was outside Node's reach (likely Defender / Search Indexer / a sync client). Killing stale Node orphans did not release it. The structural fix is to not depend on file-level delete for in-place rebuild; the rebuild script does this by treating the file as a mutable SQLite database rather than a replaceable blob.
+- `scripts/rebuild-locked-pack.mjs` is kept in-repo as a maintenance utility. The main `cli build` still tries the unlink-first deterministic path because it produces a cleaner inode under normal conditions; the rebuild helper is the explicit fallback when a contributor hits the lock.
+- The maintenance utility uses a single 60s `PRAGMA busy_timeout` rather than wrapping the insert loop in an outer transaction (`insertRecord` already wraps each row in BEGIN/COMMIT and the SQLite driver rejects nested transactions). Per-row COMMIT retries are still fast enough at 228-record scale.
+
+**The KB system is fully production-live**:
+- 228 records across 5 packs queryable via `bgs_kb_query`
+- update + install flow works against the real GitHub Release (not just the KB-6 mock)
+- per-pack manifest sha256s match the published assets
+- all six phases (KB-1..KB-6) plus both carry-forwards complete
+
+No remaining open items from the KB-* loop. Future expansion would be additional records, additional games, or community-contributed packs via `\` -- not blocked by anything in this repo.
+
 ## 2026-06-02 - KB-* loop complete (all 6 phases shipped; 2 carry-forwards to next session)
 
 The full KB roadmap — from architecture decision through acceptance evidence — shipped in a single autonomous loop spanning six phases on `main`.
