@@ -218,20 +218,227 @@ function resolveLaunchOpts(overrides: LaunchOverrides = {}): ResolvedLaunchOpts 
   }
 }
 
-const TOOL_DEFINITIONS = [
-  { name: "xedit_status", description: "Returns the current xEdit daemon lifecycle state without blocking. status is one of 'not_started' | 'starting' | 'ready' | 'failed'. Use this to poll while waiting for a launch." },
-  { name: "xedit_start", description: "Kicks off an asynchronous xEdit daemon launch (if not already starting/ready). Returns immediately with the current status. Optional args override the env-var defaults: { moRoot?: string (absolute path to the user's MO2 install root; defaults to $env:BGS_MO2_ROOT, used both for plugins.txt lookup and for the launcher path default <moRoot>/tools/xEdit/xEdit.exe), launcherPath?: string (xEdit.exe override), gameMode?: string ('Fallout4' etc.), dataPath?: string (-D: Data dir; pass MO2's <gamePath>\\Data to avoid xEdit's registry-discovered Steam path), pluginsFile?: string (-P: custom plugins.txt; defaults to MO2 profile), moProfile?: string ('Default' etc.) }. Reads MO2 ModOrganizer.ini gamePath via the setting-up-bgs-modding-environment skill for the canonical dataPath." },
-  { name: "xedit_health", description: "When the daemon is ready, sends system.ping through the named pipe to confirm it is still responsive (catches zombie daemons). Otherwise returns the same shape as xedit_status." },
-  { name: "xedit_dirty", description: "Returns xEdit's dirty state immediately. When ready: wraps session.get_dirty_state and returns { dirty, dirtyFiles, unsavedChangeCount }. Otherwise: returns the same shape as xedit_status." },
-  { name: "xedit_stop", description: "Stops the xEdit daemon and clears MCP state. Before shutdown it checks session.get_dirty_state. If there are unsaved changes and force!==true, returns code='dirty_state' with dirtyFiles instead of stopping. If the daemon is a zombie, use force:true to abandon unsaved work and clear the state." },
-  { name: "xedit_restart", description: "Stops the current daemon (same dirty-state safety as xedit_stop) and immediately kicks off a fresh asynchronous launch. Accepts the same overrides as xedit_start plus force?: boolean. Use this to reboot with a new pluginsFile or dataPath instead of reconnecting /mcp manually." },
-  { name: "xedit_session", description: "Non-blocking. If the daemon is ready: returns gameMode, loadOrderSize, daemonPid. If not_started: auto-initiates launch. Otherwise: returns current status + hint to poll xedit_status." },
-  { name: "xedit_list_capabilities", description: "Requires the daemon to be ready. Returns the curated 49-command digest + live drift report. Fast-fails with code='not_ready' otherwise." },
-  { name: "xedit_find_record", description: "Requires the daemon to be ready. Locates records by {file, formId} or {editorId}. Fast-fails with code='not_ready' otherwise." },
-  { name: "xedit_read_record", description: "Requires the daemon to be ready. Composite read: record + winning override + base record + conflict status. Fast-fails with code='not_ready' otherwise." },
-  { name: "xedit_inspect_conflicts", description: "Requires the daemon to be ready. Conflict audit verdict + winning + referencedBy. Fast-fails with code='not_ready' otherwise." },
-  { name: "xedit_call", description: "Requires the daemon to be ready. Atomic passthrough for any native daemon command, still in-harness. Fast-fails with code='not_ready' otherwise." },
-].map((t) => ({ ...t, inputSchema: { type: "object" as const, additionalProperties: true } }));
+// IMPORTANT: every parameterized tool MUST declare its `properties` and (where the
+// handler enforces them) `required` explicitly. OpenCode's tool-routing layer
+// inspects this JSON Schema to decide whether to forward args at all; a tool
+// whose schema lacks `properties` receives `{}` on every call regardless of what
+// the user/model wrote. See bgs-kb-mcp commit 15adaa7 for the parallel fix that
+// landed this rule on the sibling KB MCP. Keep these schemas in sync with the
+// Zod schemas in `src/tools/*.ts`. Tools with no inputs use the explicit empty
+// `properties: {}` form so the schema is still introspectable.
+const FORM_ID_PATTERN = "^(0x)?[0-9a-fA-F]{1,8}$";
+
+const LAUNCH_OVERRIDE_PROPERTIES = {
+  moRoot: {
+    type: "string" as const,
+    description:
+      "Absolute path to the user's MO2 install root (the directory containing ModOrganizer.exe). " +
+      "Defaults to $env:BGS_MO2_ROOT. Used for plugins.txt lookup and as the base for the launcher path default <moRoot>/tools/xEdit/xEdit.exe.",
+  },
+  launcherPath: {
+    type: "string" as const,
+    description:
+      "Absolute path to xEdit.exe. Override the default <moRoot>/tools/xEdit/xEdit.exe.",
+  },
+  gameMode: {
+    type: "string" as const,
+    description: "xEdit game mode string, e.g. 'Fallout4', 'SkyrimSE', 'Starfield'.",
+  },
+  dataPath: {
+    type: "string" as const,
+    description:
+      "-D: flag value: absolute path to the game Data directory. Pass MO2's <gamePath>\\Data to avoid xEdit's registry-discovered Steam path. Use backslashes; the launcher normalizes mixed slashes.",
+  },
+  pluginsFile: {
+    type: "string" as const,
+    description:
+      "-P: flag value: absolute path to a custom plugins.txt. Defaults to the active MO2 profile's plugins.txt.",
+  },
+  moProfile: {
+    type: "string" as const,
+    description: "MO2 profile name, e.g. 'Default'. Defaults to $env:BGS_MO2_PROFILE or 'Default'.",
+  },
+};
+
+export const TOOL_DEFINITIONS = [
+  {
+    name: "xedit_status",
+    description:
+      "Returns the current xEdit daemon lifecycle state without blocking. status is one of 'not_started' | 'starting' | 'ready' | 'failed'. Use this to poll while waiting for a launch.",
+    inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+  {
+    name: "xedit_start",
+    description:
+      "Kicks off an asynchronous xEdit daemon launch (if not already starting/ready). Returns immediately with the current status. All arguments are optional and override env-var defaults.",
+    inputSchema: {
+      type: "object" as const,
+      properties: { ...LAUNCH_OVERRIDE_PROPERTIES },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "xedit_health",
+    description:
+      "When the daemon is ready, sends system.ping through the named pipe to confirm it is still responsive (catches zombie daemons). Otherwise returns the same shape as xedit_status.",
+    inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+  {
+    name: "xedit_dirty",
+    description:
+      "Returns xEdit's dirty state immediately. When ready: wraps session.get_dirty_state and returns { dirty, dirtyFiles, unsavedChangeCount }. Otherwise: returns the same shape as xedit_status.",
+    inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+  {
+    name: "xedit_stop",
+    description:
+      "Stops the xEdit daemon and clears MCP state. Before shutdown it checks session.get_dirty_state. If there are unsaved changes and force!==true, returns code='dirty_state' with dirtyFiles instead of stopping. If the daemon is a zombie, use force:true to abandon unsaved work and clear the state.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        force: {
+          type: "boolean" as const,
+          description:
+            "If true, stop even when xEdit has unsaved changes (abandons in-memory edits). Default false.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "xedit_restart",
+    description:
+      "Stops the current daemon (same dirty-state safety as xedit_stop) and immediately kicks off a fresh asynchronous launch. Accepts the same overrides as xedit_start plus force?: boolean. Use this to reboot with a new pluginsFile or dataPath instead of reconnecting /mcp manually.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        ...LAUNCH_OVERRIDE_PROPERTIES,
+        force: {
+          type: "boolean" as const,
+          description:
+            "If true, restart even when xEdit has unsaved changes (abandons in-memory edits). Default false.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "xedit_session",
+    description:
+      "Non-blocking. If the daemon is ready: returns gameMode, loadOrderSize, daemonPid. If not_started: auto-initiates launch. Otherwise: returns current status + hint to poll xedit_status.",
+    inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+  {
+    name: "xedit_list_capabilities",
+    description:
+      "Requires the daemon to be ready. Returns the curated 49-command digest + live drift report. Fast-fails with code='not_ready' otherwise.",
+    inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+  {
+    name: "xedit_find_record",
+    description:
+      "Requires the daemon to be ready. Locates records by either {file, formId} (exact override lookup) OR {editorId, signature?} (Editor ID search across the load order). Prefer one search mode; if both are supplied, {file, formId} wins. Fast-fails with code='not_ready' if the daemon is not ready.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        file: {
+          type: "string" as const,
+          description: "Plugin filename including extension, e.g. 'kinggathcreations_spaceship.esm'.",
+        },
+        formId: {
+          type: "string" as const,
+          pattern: FORM_ID_PATTERN,
+          description:
+            "FormID as hex, with or without 0x prefix, e.g. '0000003C' or '0x0000003C'. Up to 8 hex digits.",
+        },
+        editorId: {
+          type: "string" as const,
+          description: "Editor ID to search for, e.g. 'PlayerRef'. Alternative to file+formId.",
+        },
+        signature: {
+          type: "string" as const,
+          description:
+            "Optional 4-char record signature filter for editorId search, e.g. 'QUST', 'NPC_', 'WEAP'.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "xedit_read_record",
+    description:
+      "Requires the daemon to be ready. Composite read of a specific record: full record + winning override + base record + conflict status. Fast-fails with code='not_ready' if the daemon is not ready.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        file: {
+          type: "string" as const,
+          description: "Plugin filename including extension, e.g. 'kinggathcreations_spaceship.esm'.",
+        },
+        formId: {
+          type: "string" as const,
+          pattern: FORM_ID_PATTERN,
+          description:
+            "FormID as hex, with or without 0x prefix, e.g. '0000003C' or '0x0000003C'. Up to 8 hex digits.",
+        },
+      },
+      required: ["file", "formId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "xedit_inspect_conflicts",
+    description:
+      "Requires the daemon to be ready. Conflict-audit verdict (no_conflict / itpo / itm / minor / breaking) + winning override + referenced_by listing. Fast-fails with code='not_ready' if the daemon is not ready.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        file: {
+          type: "string" as const,
+          description: "Plugin filename including extension, e.g. 'kinggathcreations_spaceship.esm'.",
+        },
+        formId: {
+          type: "string" as const,
+          pattern: FORM_ID_PATTERN,
+          description:
+            "FormID as hex, with or without 0x prefix, e.g. '0000003C' or '0x0000003C'. Up to 8 hex digits.",
+        },
+      },
+      required: ["file", "formId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "xedit_call",
+    description:
+      "Requires the daemon to be ready. Atomic passthrough for any of the ~49 native daemon commands, still in-harness (audit + rules + precheck still apply). " +
+      "Use xedit_list_capabilities to enumerate the live command set. For multi-record read/edit work, prefer the scripts.write + scripts.run recipe: " +
+      "xedit_call({ command: 'scripts.write', args: { id: 'Agent/my-procedure', source: '<Pascal>', overwrite: true } }) followed by " +
+      "xedit_call({ command: 'scripts.run', args: { id: 'Agent/my-procedure', targets: [{file, formId}, ...], timeoutMs: 30000, maxStatements: 1000000 } }). " +
+      "Fast-fails with code='not_ready' if the daemon is not ready.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        command: {
+          type: "string" as const,
+          description:
+            "Native daemon command name, e.g. 'files.list', 'records.list', 'records.referenced_by', 'scripts.write', 'scripts.run'.",
+        },
+        args: {
+          type: "object" as const,
+          description:
+            "Args object for the daemon command. Shape depends on the command — see xedit_list_capabilities. Examples: " +
+            "{} for commands like files.list and system.ping; " +
+            "{ file: 'kinggathcreations_spaceship.esm', signature: 'QUST' } for records.list; " +
+            "{ file, formId } for records.get / .winning_override / .base_record / .conflict_status / .referenced_by / .children.",
+          additionalProperties: true,
+        },
+      },
+      required: ["command"],
+      additionalProperties: false,
+    },
+  },
+];
 
 // State machine
 type LaunchState =
