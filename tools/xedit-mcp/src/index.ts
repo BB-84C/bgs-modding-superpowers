@@ -338,8 +338,16 @@ export const TOOL_DEFINITIONS = [
     name: "xedit_find_record",
     description:
       "Requires the daemon to be ready. Locates records by either {file, formId} (exact override lookup) OR {editorId, signature?} (Editor ID search across the load order). " +
-      "Pass EXACTLY ONE search mode — do not send empty-string placeholders for the unused mode. " +
-      "If both modes validate, {file, formId} wins. Fast-fails with code='not_ready' if the daemon is not ready.",
+      "Pass EXACTLY ONE search mode and OMIT the unused mode's fields entirely. " +
+      "DO NOT fill the unused mode with empty-string or zero placeholders — the handler will reject empty file or empty editorId. " +
+      "Examples: { file: 'Patch.esp', formId: '00ABCDEF' } OR { editorId: 'PlayerRef' } OR { editorId: 'PlayerRef', signature: 'NPC_' }. " +
+      "If both modes are supplied with valid non-empty values, {file, formId} wins. Fast-fails with code='not_ready' if the daemon is not ready.",
+    // NOTE: top-level oneOf/anyOf/allOf/enum/not is forbidden by OpenAI-style
+    // strict tool-schema backends; the handler-side Zod branch validation in
+    // src/tools/find-record.ts is the real gate that rejects empty placeholders
+    // and routes the call into the correct mode. minLength:1 on file and
+    // editorId is allowed and still rejects empty-string placeholders at the
+    // schema layer for clients that DO enforce that check.
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -347,19 +355,19 @@ export const TOOL_DEFINITIONS = [
           type: "string" as const,
           minLength: 1,
           description:
-            "Plugin filename including extension, e.g. 'kinggathcreations_spaceship.esm'. Required for the {file, formId} search mode. Do NOT pass an empty string in editorId mode.",
+            "Plugin filename including extension, e.g. 'kinggathcreations_spaceship.esm'. Required for the {file, formId} search mode. OMIT this field in editorId mode — do not pass an empty string.",
         },
         formId: {
           type: "string" as const,
           pattern: FORM_ID_PATTERN,
           description:
-            "FormID as hex, with or without 0x prefix, e.g. '0000003C' or '0x0000003C'. Up to 8 hex digits. Required for the {file, formId} search mode. Do NOT pass a zero placeholder in editorId mode.",
+            "FormID as hex, with or without 0x prefix, e.g. '0000003C' or '0x0000003C'. Up to 8 hex digits. Required for the {file, formId} search mode. OMIT this field in editorId mode — do not pass a zero placeholder.",
         },
         editorId: {
           type: "string" as const,
           minLength: 1,
           description:
-            "Editor ID to search for, e.g. 'PlayerRef'. Required for the {editorId} search mode.",
+            "Editor ID to search for, e.g. 'PlayerRef'. Required for the {editorId} search mode. OMIT this field in {file, formId} mode.",
         },
         signature: {
           type: "string" as const,
@@ -368,15 +376,6 @@ export const TOOL_DEFINITIONS = [
         },
       },
       additionalProperties: false,
-      // oneOf nudges the model/client to pick a single mode instead of filling
-      // every declared property with placeholder garbage. The handler also
-      // validates each Zod branch and falls back gracefully if a client
-      // ignores oneOf, but having it here is the cheapest way to keep models
-      // from sending file:"" + formId:"00000000" alongside a real editorId.
-      oneOf: [
-        { required: ["file", "formId"] },
-        { required: ["editorId"] },
-      ],
     },
   },
   {

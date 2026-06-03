@@ -83,12 +83,11 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
     expect((schema.properties.force as { type: string }).type).toBe("boolean");
   });
 
-  test("xedit_find_record declares the union of formId-mode and editorId-mode as oneOf with minLength guards", () => {
+  test("xedit_find_record declares both modes' properties with minLength guards and no top-level oneOf/anyOf/allOf/enum/not", () => {
     const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_find_record")!;
-    const schema = tool.inputSchema as {
+    const schema = tool.inputSchema as Record<string, unknown> & {
       properties: Record<string, { type: string; minLength?: number; pattern?: string }>;
       required?: string[];
-      oneOf?: Array<{ required: string[] }>;
     };
     // Union: handler validates one mode OR the other; no field is unconditionally required.
     expect(Object.keys(schema.properties).sort()).toEqual(["editorId", "file", "formId", "signature"]);
@@ -99,13 +98,27 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
     expect(schema.properties.editorId.minLength).toBe(1);
     expect(schema.properties.formId.pattern).toBe("^(0x)?[0-9a-fA-F]{1,8}$");
 
-    // oneOf forces the model/client to pick a single mode instead of filling
-    // every declared property as the OpenCode 2026-06-03 repro did.
-    expect(schema.oneOf).toBeDefined();
-    expect(schema.oneOf).toHaveLength(2);
-    const required = schema.oneOf!.map((branch) => branch.required.slice().sort());
-    expect(required).toContainEqual(["file", "formId"]);
-    expect(required).toContainEqual(["editorId"]);
+    // Top-level oneOf/anyOf/allOf/enum/not are forbidden by OpenAI-style strict
+    // tool-schema backends. The handler-side Zod branch validation in
+    // src/tools/find-record.ts is the real gate that picks the mode.
+    expect(schema.oneOf, "no top-level oneOf").toBeUndefined();
+    expect(schema.anyOf, "no top-level anyOf").toBeUndefined();
+    expect(schema.allOf, "no top-level allOf").toBeUndefined();
+    expect(schema.not, "no top-level not").toBeUndefined();
+    expect(schema.enum, "no top-level enum").toBeUndefined();
+  });
+
+  test("no tool inputSchema uses forbidden top-level keywords (oneOf/anyOf/allOf/enum/not)", () => {
+    // Regression for the OpenAI-style strict tool-schema backend that rejects
+    // any top-level union/enum/negation keyword. Catches the next time someone
+    // tries the same trick.
+    const forbidden = ["oneOf", "anyOf", "allOf", "enum", "not"] as const;
+    for (const tool of TOOL_DEFINITIONS) {
+      const schema = tool.inputSchema as Record<string, unknown>;
+      for (const keyword of forbidden) {
+        expect(schema[keyword], `${tool.name}.inputSchema.${keyword} must be undefined`).toBeUndefined();
+      }
+    }
   });
 
   test("xedit_read_record requires file + formId", () => {
