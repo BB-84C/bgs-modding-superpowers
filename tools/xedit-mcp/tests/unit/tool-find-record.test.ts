@@ -171,6 +171,162 @@ describe("xedit_find_record tool", () => {
     expect(locators[0].formId).toBe("2B000810");
   });
 
+  it("does NOT route bogus-string file + zero formId into formId mode when editorId is provided (reported 2026-06-03 case 1)", async () => {
+    // Exact downstream-agent envelope: model filled file with placeholder
+    // prose and formId with "0". Before the fix, handler routed to mode A
+    // because file passed ByFormId.min(1) and formId="0" matched the regex,
+    // hitting LOAD001 with the bogus filename. After the fix, formId="0"
+    // is recognized as an all-zero placeholder, so mode A short-circuits
+    // and routing falls through to mode B.
+    let formIdCalls = 0;
+    let editorIdCalls = 0;
+    const adapter = makeMockAdapter({
+      "records.find_by_form_id": () => {
+        formIdCalls += 1;
+        return {};
+      },
+      "records.find_by_editor_id": () => {
+        editorIdCalls += 1;
+        return {
+          hits: [
+            {
+              locator: { file: "kinggathcreations_spaceship.esm", formId: "02000810", path: "" },
+              object: { signature: "QUST", editorId: "kgcShip_QUST_Manager_Main" },
+            },
+          ],
+        };
+      },
+    });
+    const handler = makeFindRecordHandler({
+      adapter,
+      registry: defaultRegistry(),
+      audit,
+      getContext: () => ctx,
+    });
+    const env = await handler({
+      file: "Kinggath Placeholder Should Be Ignored",
+      formId: "0",
+      editorId: "kgcShip_QUST_Manager_Main",
+      signature: "QUST",
+    });
+    expect(env.ok).toBe(true);
+    if (!env.ok) throw new Error("expected ok");
+    expect(formIdCalls, "must NOT call records.find_by_form_id on zero formId placeholder").toBe(0);
+    expect(editorIdCalls, "must route to records.find_by_editor_id").toBe(1);
+    const locators = (env.data as { locators: Array<Record<string, unknown>> }).locators;
+    expect(locators[0].file).toBe("kinggathcreations_spaceship.esm");
+    expect(locators[0].formId).toBe("02000810");
+  });
+
+  it("does NOT produce a fake-positive locator for real file + zero formId (reported 2026-06-03 case 2)", async () => {
+    // Second downstream-agent envelope: model filled file with a REAL loaded
+    // plugin and formId with "0". Before the fix, mode A passed all checks,
+    // daemon returned nothing for FormID 0, and normalizeLocator echoed
+    // file+formId back as a fake "found" locator. After the fix, formId="0"
+    // is recognized as a placeholder regardless of whether file is real, so
+    // routing falls through to mode B and we get the genuine daemon hit.
+    let formIdCalls = 0;
+    let editorIdCalls = 0;
+    const adapter = makeMockAdapter({
+      "records.find_by_form_id": () => {
+        formIdCalls += 1;
+        return {};
+      },
+      "records.find_by_editor_id": () => {
+        editorIdCalls += 1;
+        return {
+          hits: [
+            {
+              locator: { file: "kinggathcreations_spaceship.esm", formId: "020008A8", path: "" },
+              object: { signature: "PACK", editorId: "kgcShip_PACK_ShipFollowPackage_Short" },
+            },
+          ],
+        };
+      },
+    });
+    const handler = makeFindRecordHandler({
+      adapter,
+      registry: defaultRegistry(),
+      audit,
+      getContext: () => ctx,
+    });
+    const env = await handler({
+      file: "kinggathcreations_spaceship.esm",
+      formId: "0",
+      editorId: "kgcShip_PACK_ShipFollowPackage_Short",
+      signature: "PACK",
+    });
+    expect(env.ok).toBe(true);
+    if (!env.ok) throw new Error("expected ok");
+    expect(formIdCalls, "must NOT call records.find_by_form_id on zero formId").toBe(0);
+    expect(editorIdCalls, "must route to records.find_by_editor_id").toBe(1);
+    const locators = (env.data as { locators: Array<Record<string, unknown>> }).locators;
+    expect(locators).toHaveLength(1);
+    expect(locators[0].formId, "real daemon FormID, not placeholder echo").toBe("020008A8");
+  });
+
+  it("recognizes various all-zero formId placeholder spellings", async () => {
+    // Cover the spelling variants a model might emit when forced to fill the
+    // field: "0", "00", "00000000", "0x0", "0x00000000".
+    for (const placeholderFormId of ["0", "00", "00000000", "0x0", "0x00000000"]) {
+      let formIdCalls = 0;
+      let editorIdCalls = 0;
+      const adapter = makeMockAdapter({
+        "records.find_by_form_id": () => {
+          formIdCalls += 1;
+          return {};
+        },
+        "records.find_by_editor_id": () => {
+          editorIdCalls += 1;
+          return { hits: [{ locator: { file: "Patch.esp", formId: "01000001" }, object: { editorId: "X" } }] };
+        },
+      });
+      const handler = makeFindRecordHandler({
+        adapter,
+        registry: defaultRegistry(),
+        audit,
+        getContext: () => ctx,
+      });
+      const env = await handler({ file: "Patch.esp", formId: placeholderFormId, editorId: "X" });
+      expect(env.ok, `placeholder ${placeholderFormId}`).toBe(true);
+      expect(formIdCalls, `must not route ${placeholderFormId} to find_by_form_id`).toBe(0);
+      expect(editorIdCalls, `must route ${placeholderFormId} to find_by_editor_id`).toBe(1);
+    }
+  });
+
+  it("file+formId mode still wins when both fields are REAL non-placeholder values", async () => {
+    // Critical regression: when the caller supplies a real file AND a real
+    // (non-zero) formId AND an editorId, file+formId mode must still win.
+    // This preserves the documented "if both supplied with valid values,
+    // {file, formId} wins" semantic.
+    let formIdCalls = 0;
+    let editorIdCalls = 0;
+    const adapter = makeMockAdapter({
+      "records.find_by_form_id": (args) => {
+        formIdCalls += 1;
+        return { file: args.file, formId: args.formId, signature: "WEAP", editorId: "FromDaemon" };
+      },
+      "records.find_by_editor_id": () => {
+        editorIdCalls += 1;
+        return { hits: [] };
+      },
+    });
+    const handler = makeFindRecordHandler({
+      adapter,
+      registry: defaultRegistry(),
+      audit,
+      getContext: () => ctx,
+    });
+    const env = await handler({
+      file: "Patch.esp",
+      formId: "0x012345",
+      editorId: "SomeEditorId",
+    });
+    expect(env.ok).toBe(true);
+    expect(formIdCalls, "real file+formId wins over EDID").toBe(1);
+    expect(editorIdCalls).toBe(0);
+  });
+
   it("refuses garbage where neither mode validates", async () => {
     const adapter = makeMockAdapter({});
     const handler = makeFindRecordHandler({
