@@ -1,0 +1,51 @@
+# Default to platform-native EOL handling for text files via core.autocrlf,
+# unless a more specific rule below overrides it.
+* text=auto
+
+# Build outputs are emitted by tsc and the portable-plugin materializer with
+# LF line endings on every platform. Pinning them as `eol=lf` keeps the index
+# stable across Windows/macOS/Linux builds and prevents the perpetual
+# "LF will be replaced by CRLF the next time Git touches it" noise that
+# core.autocrlf=true produces against a CRLF-stored blob.
+**/dist/**       text eol=lf
+*.js.map         text eol=lf
+
+# Bundled binary assets — never let text=auto + autocrlf touch these. Some
+# of the listed formats (notably .dll) have NUL-free header regions long
+# enough that text=auto's heuristic misfires and corrupts them on checkout.
+*.sqlite         binary
+*.zip            binary
+*.tar            binary
+*.tar.gz         binary
+*.tgz            binary
+*.gz             binary
+*.7z             binary
+*.rar            binary
+*.dll            binary
+*.exe            binary
+*.so             binary
+*.dylib          binary
+*.pdb            binary
+*.lib            binary
+*.bin            binary
+*.ba2            binary
+*.bsa            binary
+*.dds            binary
+*.tga            binary
+*.png            binary
+*.jpg            binary
+*.jpeg           binary
+*.webp           binary
+*.gif            binary
+*.bmp            binary
+*.ico            binary
+*.pdf            binary
+*.heapsnapshot   binary
+
+# Plugin / archive binary formats live in bgs-mod-plugins fixtures.
+*.esp            binary
+*.esm            binary
+*.esl            binary
+*.nif            binary
+*.bgsm           binary
+*.bgem           binary
