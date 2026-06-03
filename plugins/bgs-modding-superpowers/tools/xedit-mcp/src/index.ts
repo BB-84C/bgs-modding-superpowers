@@ -337,11 +337,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "xedit_find_record",
     description:
-      "Requires the daemon to be ready. Locates records by either {file, formId} (exact override lookup) OR {editorId, signature?} (Editor ID search across the load order). " +
-      "Pass EXACTLY ONE search mode and OMIT the unused mode's fields entirely. " +
-      "DO NOT fill the unused mode with empty-string or zero placeholders — the handler will reject empty file or empty editorId. " +
-      "Examples: { file: 'Patch.esp', formId: '00ABCDEF' } OR { editorId: 'PlayerRef' } OR { editorId: 'PlayerRef', signature: 'NPC_' }. " +
-      "If both modes are supplied with valid non-empty values, {file, formId} wins. Fast-fails with code='not_ready' if the daemon is not ready.",
+      "Requires the daemon to be ready. Locates records by either {file, formId} (exact override lookup) OR {editorId, signature?} (Editor ID search across the load order). Pass EXACTLY ONE search mode and OMIT the unused mode's fields entirely. DO NOT fill the unused mode with empty-string or zero placeholders — the handler will reject empty file or empty editorId. Examples: { file: 'Patch.esp', formId: '00ABCDEF' } OR { editorId: 'PlayerRef' } OR { editorId: 'PlayerRef', signature: 'NPC_' }. If both modes are supplied with valid non-empty values, {file, formId} wins. Fast-fails with code='not_ready' if the daemon is not ready.",
     // NOTE: top-level oneOf/anyOf/allOf/enum/not is forbidden by OpenAI-style
     // strict tool-schema backends; the handler-side Zod branch validation in
     // src/tools/find-record.ts is the real gate that rejects empty placeholders
