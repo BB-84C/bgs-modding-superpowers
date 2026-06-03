@@ -61,6 +61,22 @@ export interface LaunchedDaemon {
   stop: () => Promise<void>;
 }
 
+async function stopLaunchedPidBestEffort(pwsh: string, clientScript: string, pid: number): Promise<void> {
+  try {
+    await runPwshCapture(pwsh, [
+      "-NoProfile",
+      "-File",
+      clientScript,
+      "process",
+      "stop",
+      "--xedit-pid",
+      String(pid),
+    ]);
+  } catch {
+    /* best effort */
+  }
+}
+
 /**
  * Launches the MO2-backed xEdit automation daemon via `xedit-client.ps1 process launch`
  * and waits for both daemon readiness AND plugins-loaded confirmation.
@@ -80,115 +96,112 @@ export async function launchDaemon(opts: LaunchOptions): Promise<LaunchedDaemon>
   const pwsh = opts.pwshExe ?? "pwsh";
   const profile = opts.moProfile ?? "Default";
   const deadline = Date.now() + (opts.readyTimeoutMs ?? 180_000);
+  let pid: number | undefined;
 
-  const launchArgs: string[] = [
-    "-NoProfile",
-    "-File",
-    opts.clientScript,
-    "process",
-    "launch",
-    "--launcher-path",
-    opts.launcherPath,
-    "--game-mode",
-    opts.gameMode,
-    "--mo-profile",
-    profile,
-  ];
-  if (opts.moRoot) {
-    launchArgs.push("--mo2-root", opts.moRoot);
-  }
-  if (opts.dataPath) {
-    launchArgs.push("--data-path", opts.dataPath);
-  }
-  if (opts.pluginsFile) {
-    launchArgs.push("--plugins-file", opts.pluginsFile);
-  }
-  const launchOut = await runPwshCapture(pwsh, launchArgs);
-
-  const pid = parseLaunchPid(launchOut);
-  if (!pid) {
-    throw new Error(`xedit-client process launch returned no pid: ${launchOut.slice(0, 600)}`);
-  }
-
-  // Phase A: process wait until the daemon answers (or refuses with exited).
-  let dwReady = false;
-  let lastWaitErr: unknown;
-  while (Date.now() < deadline) {
-    try {
-      const waitOut = await runPwshCapture(pwsh, [
-        "-NoProfile",
-        "-File",
-        opts.clientScript,
-        "process",
-        "wait",
-        "--xedit-pid",
-        String(pid),
-        "--timeout-seconds",
-        "1",
-      ]);
-      if (!/^status:\s*exited\s*$/im.test(waitOut)) {
-        dwReady = true;
-        break;
-      }
-      lastWaitErr = new Error(`Daemon exited before readiness confirmation: ${waitOut.slice(0, 400)}`);
-    } catch (err) {
-      lastWaitErr = err;
+  try {
+    const launchArgs: string[] = [
+      "-NoProfile",
+      "-File",
+      opts.clientScript,
+      "process",
+      "launch",
+      "--launcher-path",
+      opts.launcherPath,
+      "--game-mode",
+      opts.gameMode,
+      "--mo-profile",
+      profile,
+    ];
+    if (opts.moRoot) {
+      launchArgs.push("--mo2-root", opts.moRoot);
     }
-    await sleep(750);
-  }
-  if (!dwReady) {
-    const detail = lastWaitErr instanceof Error ? ` Last error: ${lastWaitErr.message}` : "";
-    throw new Error(`Daemon not ready within ${opts.readyTimeoutMs ?? 180_000} ms (pid=${pid}).${detail}`);
-  }
-
-  const adapter = createPowershellAdapter({
-    clientScript: opts.clientScript,
-    pid,
-    scratchDir: join(tmpdir(), "xedit-mcp-calls", String(pid)),
-    pwshExe: pwsh,
-  });
-
-  // Phase B: poll files.list until it reports a non-empty load order.
-  // xEdit may serve the pipe before plugin load completes; this guards against the race.
-  let lastFilesCount = 0;
-  while (Date.now() < deadline) {
-    try {
-      const res = await adapter.call({ command: "files.list", args: {} });
-      if (res.ok) {
-        const files = (res.result as { files?: unknown }).files;
-        if (Array.isArray(files)) {
-          lastFilesCount = files.length;
-          if (files.length > 0) break;
-        }
-      }
-    } catch {
-      /* swallow; we'll keep polling */
+    if (opts.dataPath) {
+      launchArgs.push("--data-path", opts.dataPath);
     }
-    await sleep(1_500);
-  }
-  // Note: returns even if lastFilesCount is still 0 after the budget — the caller
-  // sees an empty load order via xedit_session and the integration test fails the
-  // appropriate assertion with the empty envelope captured as semantic-RED evidence.
+    if (opts.pluginsFile) {
+      launchArgs.push("--plugins-file", opts.pluginsFile);
+    }
+    const launchOut = await runPwshCapture(pwsh, launchArgs);
 
-  return {
-    pid,
-    adapter,
-    stop: async () => {
+    pid = parseLaunchPid(launchOut);
+    if (!pid) {
+      throw new Error(`xedit-client process launch returned no pid: ${launchOut.slice(0, 600)}`);
+    }
+    const launchedPid = pid;
+
+    // Phase A: process wait until the daemon answers (or refuses with exited).
+    let dwReady = false;
+    let lastWaitErr: unknown;
+    while (Date.now() < deadline) {
       try {
-        await runPwshCapture(pwsh, [
+        const waitOut = await runPwshCapture(pwsh, [
           "-NoProfile",
           "-File",
           opts.clientScript,
           "process",
-          "stop",
+          "wait",
           "--xedit-pid",
-          String(pid),
+          String(launchedPid),
+          "--timeout-seconds",
+          "1",
         ]);
-      } catch {
-        /* best-effort */
+        if (!/^status:\s*exited\s*$/im.test(waitOut)) {
+          dwReady = true;
+          break;
+        }
+        lastWaitErr = new Error(`Daemon exited before readiness confirmation: ${waitOut.slice(0, 400)}`);
+      } catch (err) {
+        lastWaitErr = err;
       }
-    },
-  };
+      await sleep(750);
+    }
+    if (!dwReady) {
+      const detail = lastWaitErr instanceof Error ? ` Last error: ${lastWaitErr.message}` : "";
+      throw new Error(`Daemon not ready within ${opts.readyTimeoutMs ?? 180_000} ms (pid=${launchedPid}).${detail}`);
+    }
+
+    const adapter = createPowershellAdapter({
+      clientScript: opts.clientScript,
+      pid: launchedPid,
+      scratchDir: join(tmpdir(), "xedit-mcp-calls", String(launchedPid)),
+      pwshExe: pwsh,
+    });
+
+    // Phase B: poll files.list until it reports a non-empty load order.
+    // xEdit may serve the pipe before plugin load completes; this guards against the race.
+    let lastFilesCount = 0;
+    while (Date.now() < deadline) {
+      try {
+        const res = await adapter.call({ command: "files.list", args: {} });
+        if (res.ok) {
+          const files = (res.result as { files?: unknown }).files;
+          if (Array.isArray(files)) {
+            lastFilesCount = files.length;
+            if (files.length > 0) break;
+          }
+        }
+      } catch {
+        /* swallow; we'll keep polling */
+      }
+      await sleep(1_500);
+    }
+    // Note: returns even if lastFilesCount is still 0 after the budget — the caller
+    // sees an empty load order via xedit_session and the integration test fails the
+    // appropriate assertion with the empty envelope captured as semantic-RED evidence.
+
+    return {
+      pid: launchedPid,
+      adapter,
+      stop: async () => {
+        await stopLaunchedPidBestEffort(pwsh, opts.clientScript, launchedPid);
+      },
+    };
+  } catch (err) {
+    if (pid) {
+      await stopLaunchedPidBestEffort(pwsh, opts.clientScript, pid);
+    }
+    throw err;
+  }
 }
 
 function parseLaunchPid(output: string): number | undefined {
