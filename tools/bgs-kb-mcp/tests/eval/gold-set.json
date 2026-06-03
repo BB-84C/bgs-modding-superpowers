@@ -1,0 +1,22 @@
+[
+  { "name": "xedit formid prefix", "args": { "query": "FormID prefix", "domains": ["xedit"], "maxResults": 5 }, "expectedIds": ["xedit.formid-prefix-stripping.v1"] },
+  { "name": "session save durability", "args": { "query": "session.save pending shutdown durability", "domains": ["xedit"], "maxResults": 5 }, "expectedIds": ["xedit.session-save-deferred-when-pending-shutdown.v1"] },
+  { "name": "data path launch", "args": { "query": "xEdit dataPath MO2 gamePath Data", "maxResults": 5 }, "expectedIds": ["tooling-mo2.xedit-data-path-flag.v1"] },
+  { "name": "loose files override", "args": { "query": "loose files override archive", "maxResults": 5 }, "expectedIds": ["archive-precedence.loose-over-archive.v1"] },
+  { "name": "fallout4 plugins modern", "args": { "query": "plugins", "games": ["Fallout4"], "domains": ["load-order"], "maxResults": 5 }, "expectedIds": ["load-order.plugins-txt-modern-asterisk.v1"] },
+  { "name": "fallout3 papyrus excluded", "args": { "query": "OnInit", "games": ["Fallout3"], "domains": ["papyrus"], "maxResults": 5 }, "expectedIds": [] },
+  { "name": "fo4 precombine previs", "args": { "query": "precombine previs PRP", "games": ["Fallout4"], "maxResults": 5 }, "expectedIds": ["fo4-previs.precombines-and-previs-are-one-minefield.v1"] },
+  { "name": "fo4 buffout crash log", "args": { "query": "Buffout crash log", "games": ["Fallout4"], "maxResults": 5 }, "expectedIds": ["fo4-buffout.buffout4-is-f4se-crash-logger-stack.v1"] },
+  { "name": "fo4 vr f4sevr", "args": { "query": "F4SEVR separate runtime", "games": ["Fallout4VR"], "maxResults": 5 }, "expectedIds": ["fo4-vr.f4sevr-is-separate-from-f4se.v1"] },
+  { "name": "skyrim skse runtime", "args": { "query": "SKSE runtime matrix", "games": ["SkyrimSE"], "maxResults": 5 }, "expectedIds": ["skyrim-scripts.skse-runtime-matrix.v1"] },
+  { "name": "skyrim nemesis", "args": { "query": "Nemesis behavior framework", "games": ["SkyrimSE"], "maxResults": 5 }, "expectedIds": ["skyrim-animation.nemesis-behavior-framework.v1"] },
+  { "name": "skyrim vr higgs", "args": { "query": "HIGGS interaction stack", "games": ["SkyrimVR"], "maxResults": 5 }, "expectedIds": ["skyrim-vr.higgs-interaction-stack.v1"] },
+  { "name": "geck blocktypes", "args": { "query": "GECK Begin GameMode OnActivate", "games": ["FalloutNV"], "maxResults": 5 }, "expectedIds": ["geck-scripting.begin-end-blocktypes-drive-scripts.v1"] },
+  { "name": "ttw both games", "args": { "query": "TTW requires both games DLC", "games": ["FalloutNV"], "maxResults": 5 }, "expectedIds": ["ttw-interop.ttw-requires-both-games-and-dlcs.v1"] },
+  { "name": "xnvse", "args": { "query": "xNVSE New Vegas Script Extender", "games": ["FalloutNV"], "maxResults": 5 }, "expectedIds": ["nvse-fose.xnvse-is-new-vegas-extender.v1"] },
+  { "name": "starfield creations", "args": { "query": "Bethesda Creations Starfield", "games": ["Starfield"], "maxResults": 5 }, "expectedIds": ["sf-creations.bethesda-creations-is-official-starfield-mod-surface.v1"] },
+  { "name": "starfield sfse", "args": { "query": "SFSE Game Pass", "games": ["Starfield"], "maxResults": 5 }, "expectedIds": ["sf-sfse.sfse-does-not-support-gamepass.v1"] },
+  { "name": "starfield ba2", "args": { "query": "Starfield BA2 archives", "games": ["Starfield"], "maxResults": 5 }, "expectedIds": ["sf-asset-model.starfield-uses-ba2-archives-in-xedit-mode.v1"] },
+  { "name": "loot metadata", "args": { "query": "LOOT user metadata rules", "domains": ["tooling.loot"], "maxResults": 5 }, "expectedIds": ["tooling-mo2.loot-user-metadata-rules.v1"] },
+  { "name": "node sqlite handle leak", "args": { "query": "node sqlite Windows EBUSY", "domains": ["debugging"], "maxResults": 5 }, "expectedIds": ["debugging.node-sqlite-windows-handle-leak.v1"] }
+]
