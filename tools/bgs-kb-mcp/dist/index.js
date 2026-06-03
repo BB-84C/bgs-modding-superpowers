@@ -1,12 +1,15 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { discoverPacks } from "./discovery/index.js";
 import { refuse } from "./envelope/index.js";
 import { KB_ERROR_CODES } from "./envelope/types.js";
 import { openSessions } from "./session/index.js";
+import { makeCheckUpdatesTool } from "./tools/check-updates.js";
 import { makeGetTool } from "./tools/get.js";
+import { makeInstallPackTool } from "./tools/install-pack.js";
 import { makeQueryTool } from "./tools/query.js";
 import { makeStatusTool } from "./tools/status.js";
 const SERVER_NAME = "bgs-kb-mcp";
@@ -24,6 +27,14 @@ export const TOOL_DEFINITIONS = [
         name: "bgs_kb_get",
         description: "Fetches one full KB record by id, optionally merged for a specific game variant.",
     },
+    {
+        name: "bgs_kb_check_updates",
+        description: "Checks loaded KB packs against the latest GitHub Release manifest-index.json and reports available upgrades.",
+    },
+    {
+        name: "bgs_kb_install_pack",
+        description: "Downloads, verifies, and installs a pinned KB pack version into the local cache. Supports dryRun verification.",
+    },
 ].map((tool) => ({ ...tool, inputSchema: { type: "object", additionalProperties: true } }));
 export function jsonResult(body, isError = false) {
     return {
@@ -36,6 +47,8 @@ export function buildServerToolset(opts) {
         bgs_kb_status: opts.status,
         bgs_kb_query: opts.query,
         bgs_kb_get: opts.get,
+        bgs_kb_check_updates: opts.checkUpdates,
+        bgs_kb_install_pack: opts.installPack,
     };
     return {
         list: () => TOOL_DEFINITIONS,
@@ -46,7 +59,7 @@ export function buildServerToolset(opts) {
                     tool: name,
                     summary: `Unknown tool: ${name}`,
                     code: KB_ERROR_CODES.INVALID_REQUEST,
-                    hint: "List available tools via tools/list and call one of: bgs_kb_status, bgs_kb_query, bgs_kb_get.",
+                    hint: "List available tools via tools/list and call one of: bgs_kb_status, bgs_kb_query, bgs_kb_get, bgs_kb_check_updates, bgs_kb_install_pack.",
                     severity: "MEDIUM",
                 });
             }
@@ -70,10 +83,19 @@ export function buildServerToolset(opts) {
 export async function main() {
     const discovery = await discoverPacks();
     const registry = openSessions(discovery.packs);
+    const cachePackRoot = discovery.rootsScanned.find((root) => root.root === "cache")?.rootPath;
+    const installCacheRoot = cachePackRoot ? dirname(cachePackRoot) : undefined;
     const toolset = buildServerToolset({
         status: makeStatusTool({ discovery, registry }),
         query: makeQueryTool({ registry }),
         get: makeGetTool({ registry }),
+        checkUpdates: makeCheckUpdatesTool({ registry, currentPluginVersion: discovery.currentPluginVersion }),
+        installPack: makeInstallPackTool({
+            registry,
+            cacheRoot: installCacheRoot ?? "",
+            currentPluginVersion: discovery.currentPluginVersion,
+            supportedSchemaVersion: discovery.supportedSchemaVersion,
+        }),
     });
     const server = new Server({ name: SERVER_NAME, version: SERVER_VERSION }, { capabilities: { tools: {} } });
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolset.list() }));

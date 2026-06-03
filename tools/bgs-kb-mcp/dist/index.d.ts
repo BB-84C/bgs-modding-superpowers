@@ -12,6 +12,8 @@ export interface ServerToolsetOptions {
     status: ToolHandler;
     query: ToolHandler;
     get: ToolHandler;
+    checkUpdates: ToolHandler;
+    installPack: ToolHandler;
 }
 export interface ServerToolset {
     list: () => typeof TOOL_DEFINITIONS;
