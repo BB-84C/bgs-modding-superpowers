@@ -83,6 +83,33 @@ You can install MO2 yourself, ask the agent to install it (explicit consent), or
 - A target game: Skyrim SE/AE, Fallout 4, Fallout 76, or Starfield. Skyrim LE and Oblivion can work but are untested.
 - Node 22+ (the bundled MCP servers run on Node).
 
+## Pointing the xEdit MCP at your own MO2 install
+
+Out of the box the `xedit` MCP server has no idea where your MO2 install lives. Tell it via the `BGS_MO2_ROOT` env var on the MCP server entry in your harness config; the value is the absolute path to the directory containing `ModOrganizer.exe`.
+
+Examples:
+
+- OpenCode (`~/.config/opencode/opencode.json`, harness MCP block — set the env on the `xedit` server entry):
+
+  ```json
+  {
+    "mcp": {
+      "xedit": { "env": { "BGS_MO2_ROOT": "D:\\Starfield MO2" } }
+    }
+  }
+  ```
+
+- Codex (`~/.codex/config.toml`, after `codex plugin add`):
+
+  ```toml
+  [mcp_servers.xedit.env]
+  BGS_MO2_ROOT = "D:\\Starfield MO2"
+  ```
+
+- Claude Code: edit the materialized plugin's `.mcp.json` env block, or set the env var in the shell that launches Claude Code.
+
+Once set, the launcher defaults to `<BGS_MO2_ROOT>/tools/xEdit/xEdit.exe` and resolves `plugins.txt` from `<BGS_MO2_ROOT>/profiles/<profile>/`. Per-call overrides (`xedit_start({ moRoot, launcherPath, ... })`) win over the env var. The `setting-up-bgs-modding-environment` skill detects your MO2 install during first-run and walks you through wiring the env var.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Internal design docs and plans live under [`docs/internal/`](docs/internal/).

@@ -14,7 +14,22 @@ function Get-XeditClientProjectRoot {
     return $worktreeRoot
 }
 
-function Get-XeditClientDefaultMo2SandboxRoot { return Join-Path (Get-XeditClientProjectRoot) '.artifacts\mo2' }
+function Get-XeditClientDefaultMo2SandboxRoot {
+    # Resolution priority for the MO2 root the launcher should drive:
+    #   1. $env:BGS_MO2_ROOT  — end-user install path (set by the harness MCP
+    #      server config, or by the setting-up-bgs-modding-environment skill
+    #      once MO2 is detected).
+    #   2. <project-root>\.artifacts\mo2  — dev sandbox; only used when it
+    #      actually exists. End-user clones do not carry this tree.
+    # If neither resolves, callers see an empty string and surface a clear
+    # error rather than silently constructing a wrong sandbox path under the
+    # plugin install location.
+    $envRoot = [System.Environment]::GetEnvironmentVariable('BGS_MO2_ROOT')
+    if (-not [string]::IsNullOrWhiteSpace($envRoot)) { return $envRoot }
+    $devRoot = Join-Path (Get-XeditClientProjectRoot) '.artifacts\mo2'
+    if (Test-Path -LiteralPath $devRoot -PathType Container) { return $devRoot }
+    return ''
+}
 function Get-XeditClientMo2LaunchStateFilePath { param([pscustomobject]$Session) return Join-Path $Session.SessionPath 'mo2-launch-state.json' }
 function Get-XeditClientMo2LaunchRequestFilePath { param([pscustomobject]$Session) return Join-Path $Session.SessionPath 'mo2-launch-request.json' }
 function Get-XeditClientMo2LaunchResponseFilePath { param([pscustomobject]$Session) return Join-Path $Session.SessionPath 'mo2-launch-response.json' }
@@ -323,7 +338,7 @@ function Invoke-XeditClientProcessLaunch {
 
     $processId = $null
     try {
-        $options = ConvertTo-XeditClientOptionMap -Arguments $Arguments -AllowedNames @('--launcher-path', '--game-mode', '--plugins-file', '--mo-profile', '--load-mode', '--plugin', '--data-path')
+        $options = ConvertTo-XeditClientOptionMap -Arguments $Arguments -AllowedNames @('--launcher-path', '--game-mode', '--plugins-file', '--mo-profile', '--load-mode', '--plugin', '--data-path', '--mo2-root')
         if ($null -eq (Get-XeditClientRequiredOptionValues -Options $options -Names @('--launcher-path', '--game-mode'))) { return 1 }
         $unsupportedLegacyOptions = @(Get-XeditClientUnsupportedLegacyLaunchOptions -Options $options)
         if ($unsupportedLegacyOptions.Count -gt 0) { Write-Host "Legacy options are no longer supported: $($unsupportedLegacyOptions -join ', ')"; return 1 }
@@ -333,7 +348,18 @@ function Invoke-XeditClientProcessLaunch {
         if ($null -eq $gameModeArgument) { return 1 }
         $moProfile = Get-XeditClientValidatedMoProfile -Options $options
         if ($moProfile -is [bool] -and -not $moProfile) { return 1 }
-        $pluginSource = Get-XeditClientResolvedPluginSource -Options $options -GameMode $options['--game-mode'] -MoProfile $moProfile -SandboxRoot $null
+        # MO2 sandbox root: explicit --mo2-root wins; else fall through to
+        # Get-XeditClientDefaultMo2SandboxRoot which honors $env:BGS_MO2_ROOT
+        # and the dev-sandbox fallback. End-user installs MUST pass one of
+        # those; otherwise we surface a clear error rather than constructing
+        # a wrong path under the plugin install root.
+        $sandboxRootOverride = if ($options.ContainsKey('--mo2-root')) { [string]$options['--mo2-root'] } else { $null }
+        $resolvedSandboxRoot = if (-not [string]::IsNullOrWhiteSpace($sandboxRootOverride)) { $sandboxRootOverride } else { Get-XeditClientDefaultMo2SandboxRoot }
+        if ([string]::IsNullOrWhiteSpace($resolvedSandboxRoot)) {
+            Write-Host "MO2 sandbox root is not configured. Pass --mo2-root <path>, set `$env:BGS_MO2_ROOT, or run from a dev checkout that has .artifacts\mo2\."
+            return 1
+        }
+        $pluginSource = Get-XeditClientResolvedPluginSource -Options $options -GameMode $options['--game-mode'] -MoProfile $moProfile -SandboxRoot $resolvedSandboxRoot
         if ($null -eq $pluginSource) { return 1 }
 
         $normalizedLauncherCommand = Get-XeditClientNormalizedLauncherCommand -LauncherPath $launcherPath -GameModeArgument $gameModeArgument
@@ -362,7 +388,7 @@ function Invoke-XeditClientProcessLaunch {
         $mo2LaunchRequest = $null
         $mo2LaunchResult = $null
         if ($null -ne $moProfile) {
-            $mo2LaunchRequest = New-XeditClientMo2LaunchRequest -Profile $moProfile -SandboxRoot $null -TargetPath $normalizedLauncherCommand.DetectionPath -TargetArguments $nativeTargetArgumentList -TargetWorkingDirectory $normalizedLauncherCommand.WorkingDirectory -Session $session
+            $mo2LaunchRequest = New-XeditClientMo2LaunchRequest -Profile $moProfile -SandboxRoot $resolvedSandboxRoot -TargetPath $normalizedLauncherCommand.DetectionPath -TargetArguments $nativeTargetArgumentList -TargetWorkingDirectory $normalizedLauncherCommand.WorkingDirectory -Session $session
             Write-XeditClientMo2LaunchRequestArtifact -LaunchRequest $mo2LaunchRequest
         }
 

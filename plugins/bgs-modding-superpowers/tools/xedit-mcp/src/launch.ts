@@ -24,6 +24,14 @@ export interface LaunchOptions {
   /** MO2 profile name; defaults to "Default". */
   moProfile?: string;
   /**
+   * Absolute path to the user's MO2 install root (the directory holding
+   * ModOrganizer.exe). Forwarded to xedit-client.ps1 as `--mo2-root` so the
+   * launcher resolves plugins.txt + profile state from the right tree. If
+   * omitted, xedit-client.ps1 falls back to `$env:BGS_MO2_ROOT` and finally
+   * to `<plugin-checkout>/.artifacts/mo2/` (dev sandbox only).
+   */
+  moRoot?: string;
+  /**
    * Absolute path to the Data directory xEdit should use (passed as `-D:`).
    * If omitted, xEdit auto-discovers the game install via the Windows
    * registry — which on Steam-installed games points at the Steam library,
@@ -86,6 +94,9 @@ export async function launchDaemon(opts: LaunchOptions): Promise<LaunchedDaemon>
     "--mo-profile",
     profile,
   ];
+  if (opts.moRoot) {
+    launchArgs.push("--mo2-root", opts.moRoot);
+  }
   if (opts.dataPath) {
     launchArgs.push("--data-path", opts.dataPath);
   }

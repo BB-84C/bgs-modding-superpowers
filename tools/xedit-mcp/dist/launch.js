@@ -35,6 +35,9 @@ export async function launchDaemon(opts) {
         "--mo-profile",
         profile,
     ];
+    if (opts.moRoot) {
+        launchArgs.push("--mo2-root", opts.moRoot);
+    }
     if (opts.dataPath) {
         launchArgs.push("--data-path", opts.dataPath);
     }

@@ -65,18 +65,24 @@ function resolveLaunchOpts(overrides = {}) {
     const envProfile = process.env.BGS_MO2_PROFILE ?? "Default";
     const envDataPath = process.env.BGS_XEDIT_DATA_PATH;
     const envPluginsFile = process.env.BGS_XEDIT_PLUGINS_FILE;
+    const envMoRoot = process.env.BGS_MO2_ROOT;
     // Resolution priority: explicit overrides (from xedit_start args) > env vars > auto-detect.
-    const launcherPath = overrides.launcherPath ?? envLauncher;
+    const moRoot = overrides.moRoot ?? envMoRoot;
     const gameMode = overrides.gameMode ?? envGameMode;
     const moProfile = overrides.moProfile ?? envProfile;
     const dataPath = overrides.dataPath ?? envDataPath;
     const pluginsFile = overrides.pluginsFile ?? envPluginsFile;
+    // launcherPath default: explicit override > env > <moRoot>/tools/xEdit/xEdit.exe
+    const launcherPath = overrides.launcherPath
+        ?? envLauncher
+        ?? (moRoot ? resolve(moRoot, "tools/xEdit/xEdit.exe") : undefined);
     if (envClient && launcherPath && gameMode) {
         return {
             clientScript: envClient,
             launcherPath,
             gameMode,
             moProfile,
+            moRoot,
             dataPath,
             pluginsFile,
         };
@@ -85,7 +91,13 @@ function resolveLaunchOpts(overrides = {}) {
         const thisFile = fileURLToPath(import.meta.url);
         const pluginRoot = resolve(dirname(thisFile), "..", "..", "..");
         const candidateClient = envClient ?? resolve(pluginRoot, "tools/mo2-vfs-launcher/xedit-client.ps1");
-        const candidateLauncher = launcherPath ?? resolve(pluginRoot, ".artifacts/mo2/tools/xEdit/xEdit.exe");
+        // Dev-sandbox fallback: only honored when the .artifacts/mo2 tree actually
+        // exists. End-user clones don't have it, so this branch fails cleanly into
+        // the configuration error below.
+        const devSandboxLauncher = resolve(pluginRoot, ".artifacts/mo2/tools/xEdit/xEdit.exe");
+        const devSandboxMoRoot = resolve(pluginRoot, ".artifacts/mo2");
+        const candidateLauncher = launcherPath ?? devSandboxLauncher;
+        const candidateMoRoot = moRoot ?? devSandboxMoRoot;
         statSync(candidateClient);
         statSync(candidateLauncher);
         return {
@@ -93,25 +105,29 @@ function resolveLaunchOpts(overrides = {}) {
             launcherPath: candidateLauncher,
             gameMode: gameMode ?? "Fallout4",
             moProfile,
+            moRoot: candidateMoRoot,
             dataPath,
             pluginsFile,
         };
     }
     catch {
         return {
-            error: "xedit-mcp is not configured. Set env vars on the MCP server: " +
-                "BGS_XEDIT_CLIENT_SCRIPT (path to xedit-client.ps1), " +
-                "BGS_XEDIT_LAUNCHER_PATH (path to xEdit.exe), " +
-                "BGS_XEDIT_GAME_MODE (e.g. 'Fallout4'). " +
-                "Optional: BGS_XEDIT_DATA_PATH (-D: flag, MO2 Data dir), BGS_XEDIT_PLUGINS_FILE (-P: flag). " +
-                "Auto-detect fallback expects xEdit at <plugin-root>/.artifacts/mo2/tools/xEdit/xEdit.exe (dev sandbox). " +
-                "Or pass these as xedit_start({ launcherPath, gameMode, dataPath, pluginsFile, moProfile }) overrides at runtime.",
+            error: "xedit-mcp is not configured. The harness MCP server entry needs at minimum: " +
+                "BGS_MO2_ROOT (absolute path to the user's MO2 install root, i.e. the directory " +
+                "containing ModOrganizer.exe). With BGS_MO2_ROOT set, the xEdit launcher defaults " +
+                "to <BGS_MO2_ROOT>/tools/xEdit/xEdit.exe. " +
+                "Optional env vars: BGS_XEDIT_CLIENT_SCRIPT (path to xedit-client.ps1; auto-detected " +
+                "next to this MCP), BGS_XEDIT_LAUNCHER_PATH (override the xEdit.exe location), " +
+                "BGS_XEDIT_GAME_MODE (e.g. 'Fallout4'), BGS_MO2_PROFILE (default 'Default'), " +
+                "BGS_XEDIT_DATA_PATH (-D: flag, MO2 Data dir), BGS_XEDIT_PLUGINS_FILE (-P: flag). " +
+                "Or pass these as xedit_start({ moRoot, launcherPath, gameMode, dataPath, pluginsFile, moProfile }) " +
+                "overrides at runtime.",
         };
     }
 }
 const TOOL_DEFINITIONS = [
     { name: "xedit_status", description: "Returns the current xEdit daemon lifecycle state without blocking. status is one of 'not_started' | 'starting' | 'ready' | 'failed'. Use this to poll while waiting for a launch." },
-    { name: "xedit_start", description: "Kicks off an asynchronous xEdit daemon launch (if not already starting/ready). Returns immediately with the current status. Optional args override the env-var defaults: { launcherPath?: string (xEdit.exe), gameMode?: string ('Fallout4' etc.), dataPath?: string (-D: Data dir; pass MO2's <gamePath>\\Data to avoid xEdit's registry-discovered Steam path), pluginsFile?: string (-P: custom plugins.txt; defaults to MO2 profile), moProfile?: string ('Default' etc.) }. Reads MO2 ModOrganizer.ini gamePath via the setting-up-bgs-modding-environment skill for the canonical dataPath." },
+    { name: "xedit_start", description: "Kicks off an asynchronous xEdit daemon launch (if not already starting/ready). Returns immediately with the current status. Optional args override the env-var defaults: { moRoot?: string (absolute path to the user's MO2 install root; defaults to $env:BGS_MO2_ROOT, used both for plugins.txt lookup and for the launcher path default <moRoot>/tools/xEdit/xEdit.exe), launcherPath?: string (xEdit.exe override), gameMode?: string ('Fallout4' etc.), dataPath?: string (-D: Data dir; pass MO2's <gamePath>\\Data to avoid xEdit's registry-discovered Steam path), pluginsFile?: string (-P: custom plugins.txt; defaults to MO2 profile), moProfile?: string ('Default' etc.) }. Reads MO2 ModOrganizer.ini gamePath via the setting-up-bgs-modding-environment skill for the canonical dataPath." },
     { name: "xedit_health", description: "When the daemon is ready, sends system.ping through the named pipe to confirm it is still responsive (catches zombie daemons). Otherwise returns the same shape as xedit_status." },
     { name: "xedit_dirty", description: "Returns xEdit's dirty state immediately. When ready: wraps session.get_dirty_state and returns { dirty, dirtyFiles, unsavedChangeCount }. Otherwise: returns the same shape as xedit_status." },
     { name: "xedit_stop", description: "Stops the xEdit daemon and clears MCP state. Before shutdown it checks session.get_dirty_state. If there are unsaved changes and force!==true, returns code='dirty_state' with dirtyFiles instead of stopping. If the daemon is a zombie, use force:true to abandon unsaved work and clear the state." },
@@ -287,6 +303,7 @@ export async function main() {
         if (name === "xedit_start") {
             // Extract override args (all optional). Unknown extra keys ignored.
             const overrides = {
+                moRoot: typeof args.moRoot === "string" ? args.moRoot : undefined,
                 launcherPath: typeof args.launcherPath === "string" ? args.launcherPath : undefined,
                 gameMode: typeof args.gameMode === "string" ? args.gameMode : undefined,
                 dataPath: typeof args.dataPath === "string" ? args.dataPath : undefined,
@@ -398,6 +415,7 @@ export async function main() {
         if (name === "xedit_restart") {
             const force = args.force === true;
             const overrides = {
+                moRoot: typeof args.moRoot === "string" ? args.moRoot : undefined,
                 launcherPath: typeof args.launcherPath === "string" ? args.launcherPath : undefined,
                 gameMode: typeof args.gameMode === "string" ? args.gameMode : undefined,
                 dataPath: typeof args.dataPath === "string" ? args.dataPath : undefined,

@@ -69,6 +69,33 @@ step 2.
 Persist the confirmed install root in conversation context as `MO2_Root`. All
 subsequent steps reference this variable.
 
+**Also surface the `BGS_MO2_ROOT` env-var requirement.** The `xedit` MCP server
+needs to know `MO2_Root` so it can resolve `<MO2_Root>/tools/xEdit/xEdit.exe`
+and `<MO2_Root>/profiles/<profile>/plugins.txt`. Without it, the MCP either
+falls back to a stale dev-sandbox path (silent wrong-answer on dev clones) or
+errors with a "MO2 sandbox root is not configured" message (on end-user
+installs). Tell the user where to set it for their harness:
+
+- **OpenCode**: add to the `xedit` MCP entry's env block in `opencode.json`:
+  ```json
+  { "mcp": { "xedit": { "env": { "BGS_MO2_ROOT": "<MO2_Root>" } } } }
+  ```
+- **Codex**: append to `~/.codex/config.toml`:
+  ```toml
+  [mcp_servers.xedit.env]
+  BGS_MO2_ROOT = "<MO2_Root>"
+  ```
+- **Claude Code**: set the env var in the shell that launches Claude Code, or
+  edit `<plugin-root>/.mcp.json` to add an `env` block on the `xedit` entry.
+
+After the user sets it, the user must restart their harness session so the
+MCP server picks up the new env. Confirm by calling `xedit_status({})` and
+checking that the returned hint no longer mentions BGS_MO2_ROOT.
+
+Per-call override is also available: `xedit_start({ moRoot: "<MO2_Root>", ... })`.
+Useful for one-off testing, but the env-var path is what makes restarts and
+subsequent sessions work without re-passing it.
+
 ### Step 2 - If MO2 absent: branch the user
 
 Surface a `[BLOCKED]` notice and offer THREE paths, in order of preference:
