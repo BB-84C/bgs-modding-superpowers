@@ -220,6 +220,44 @@ hdtTES5EditUTF8_loader.exe FO4Edit.exe
     Assert-Equal -Actual $cliResponse.result.launch_id -Expected 'launch-123' -Message 'The CLI response artifact should preserve the control-plane launch id'
     Assert-Equal -Actual $cliResponse.result.artifacts.backend -Expected 'organizer' -Message 'The CLI response artifact should preserve the organizer backend'
 
+    $script:CapturedSingleNativeArgLaunchRequest = $null
+    function Test-XeditClientLauncherPath { param([string]$Path) return $true }
+    function Get-XeditClientNormalizedLauncherCommand {
+        param([string]$LauncherPath, [string]$GameModeArgument)
+        return [pscustomobject]@{
+            FilePath = 'D:\xedit\SF1Edit64.exe'
+            ArgumentList = @($GameModeArgument)
+            NativeArgumentList = @($GameModeArgument)
+            SourcePath = $LauncherPath
+            DetectionPath = 'D:\xedit\SF1Edit64.exe'
+            WorkingDirectory = 'D:\xedit'
+        }
+    }
+    function Invoke-Mo2ControlPlaneClientRequest {
+        param([hashtable]$Request, [string]$LiveRoot)
+        $script:CapturedSingleNativeArgLaunchRequest = [pscustomobject]@{ Request = $Request; LiveRoot = $LiveRoot }
+        $stateFile = [string]$Request.payload.state.file
+        $stateDirectory = Split-Path -Path $stateFile -Parent
+        if (-not (Test-Path $stateDirectory)) { $null = New-Item -ItemType Directory -Path $stateDirectory -Force }
+        @{ status = 'spawned'; pid = 65432; session_id = [string]$Request.session_id; target_path = [string]$Request.payload.target.path; args = @($Request.payload.target.args) } |
+            ConvertTo-Json -Depth 10 | Set-Content -Path $stateFile
+        return [ordered]@{ ok = $true; result = [ordered]@{ launch_id = 'single-native-arg-launch'; pid = 65432; status = 'running'; artifacts = [ordered]@{ backend = 'organizer' } } }
+    }
+    function Wait-XeditClientAutomationReady {
+        param([string]$XeditExecutablePath, [int]$XeditPid, [string]$SessionPath, [int]$TimeoutSeconds = 30)
+        return @{ ok = $true; result = @{ command = 'system.describe' } }
+    }
+
+    $singleNativeArgLaunch = Invoke-ProcessLaunchWithOutput -Arguments @('--launcher-path', 'D:\xedit\SF1Edit64.exe', '--game-mode', 'Starfield', '--plugins-file', $callerPluginsPath, '--mo-profile', 'Default')
+    Assert-Equal -Actual $singleNativeArgLaunch.Result -Expected 0 -Message 'single native xEdit mode launch should succeed while constructing the MO2 launch request'
+    Assert-True -Condition ($null -ne $script:CapturedSingleNativeArgLaunchRequest) -Message 'single native xEdit mode launch should dispatch an MO2 request'
+    $singleNativeArgTargetArgs = @($script:CapturedSingleNativeArgLaunchRequest.Request.payload.target.args)
+    Assert-Equal -Actual $singleNativeArgTargetArgs.Count -Expected 3 -Message 'single native xEdit mode launch should preserve three distinct native arguments'
+    Assert-Equal -Actual $singleNativeArgTargetArgs[0] -Expected '-SF1' -Message 'single native xEdit mode launch should preserve the mapped game mode as its own argument'
+    Assert-Equal -Actual $singleNativeArgTargetArgs[1] -Expected '-automation-serve' -Message 'single native xEdit mode launch should preserve automation serve as a separate argument'
+    Assert-True -Condition ($singleNativeArgTargetArgs[2].StartsWith('-P:')) -Message 'single native xEdit mode launch should preserve the session plugins file as a separate argument'
+    Assert-True -Condition (-not ($singleNativeArgTargetArgs | Where-Object { $_ -like '-SF1-automation-serve*' })) -Message 'single native xEdit mode launch should never glue the game mode and automation flags into one token'
+
     $script:CapturedDirectReadiness = $null
     function Test-XeditClientLauncherPath { param([string]$Path) return $true }
     function Get-XeditClientNormalizedLauncherCommand {
