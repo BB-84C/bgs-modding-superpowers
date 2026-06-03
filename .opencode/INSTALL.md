@@ -11,7 +11,11 @@ Add the plugin to the `plugin` array in your `opencode.json` (global or project-
 Restart OpenCode. The plugin installs through OpenCode's plugin manager and registers:
 
 - All skills under `skills/` (including the per-session bootstrap and first-run setup skills)
-- The bundled `xedit` MCP server (`tools/xedit-mcp/dist/index.js`)
+- Two MCP servers wired by the root-level `.mcp.json`:
+  - `xedit` (`plugins/bgs-modding-superpowers/tools/xedit-mcp/dist/index.js`)
+  - `bgs_kb` (`plugins/bgs-modding-superpowers/tools/bgs-kb-mcp/dist/index.js`)
+
+The materialized plugin tree under `plugins/bgs-modding-superpowers/` ships with both MCP packages' `node_modules/` and the bundled `bgs-kb-core` SQLite database already populated, so `node <entry>.js` works on a fresh clone with no `npm install` step.
 
 ## Verify
 
@@ -55,10 +59,8 @@ If you cloned this repo and want to run the plugin from your local checkout, poi
 }
 ```
 
-The plugin's `prepare` script will build `tools/xedit-mcp/dist/` on install. You can also rebuild manually:
+The committed `plugins/bgs-modding-superpowers/` tree is what `.mcp.json` resolves against, so a plain clone is enough to run both MCPs. You only need a per-MCP `npm install && npm run build` if you are actively editing the TypeScript sources under `tools/xedit-mcp/src/` or `tools/bgs-kb-mcp/src/`; in that case re-materialize the plugin tree afterward with:
 
 ```powershell
-cd tools\xedit-mcp
-npm install
-npm run build
+pwsh scripts/build-portable-plugin.ps1 -OutputDir plugins -PluginName bgs-modding-superpowers -McpPathStrategy relative -Force
 ```
