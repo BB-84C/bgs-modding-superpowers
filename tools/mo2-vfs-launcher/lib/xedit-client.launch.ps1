@@ -44,6 +44,12 @@ function Get-XeditClientPwshPath {
 
 function ConvertTo-XeditClientPowerShellSingleQuotedLiteral { param([string]$Value) return "'" + ($Value -replace "'", "''") + "'" }
 
+function ConvertTo-XeditClientNativeWindowsPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $Path }
+    return ($Path -replace '/', '\')
+}
+
 function ConvertTo-XeditClientFlatStringArray {
     param([object[]]$Values)
 
@@ -375,9 +381,9 @@ function Invoke-XeditClientProcessLaunch {
         # MO2's Stock Game Data. Pass an explicit dataPath to force the agent's
         # intended Data directory.
         if ($options.ContainsKey('--data-path')) {
-            $dataPathArg = [string]$options['--data-path']
+            $dataPathArg = ConvertTo-XeditClientNativeWindowsPath -Path ([string]$options['--data-path'])
             if (-not [string]::IsNullOrWhiteSpace($dataPathArg)) {
-                if (-not $dataPathArg.EndsWith('\') -and -not $dataPathArg.EndsWith('/')) {
+                if (-not $dataPathArg.EndsWith('\')) {
                     $dataPathArg += '\'
                 }
                 $normalizedLauncherCommand.ArgumentList = @($normalizedLauncherCommand.ArgumentList + @('-D:' + $dataPathArg))
@@ -437,8 +443,11 @@ function Invoke-XeditClientProcessLaunch {
     }
     catch {
         if ($null -ne $processId) {
-            Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-            Write-Host "cleanup-xedit-pid: $processId"
+            $validatedCleanupProcess = Get-XeditClientValidatedLiveProcess -ProcessId $processId
+            if ($null -ne $validatedCleanupProcess) {
+                Stop-Process -Id $validatedCleanupProcess.ProcessId -Force -ErrorAction SilentlyContinue
+                Write-Host "cleanup-xedit-pid: $($validatedCleanupProcess.ProcessId)"
+            }
         }
         Write-Host $_.Exception.Message
         return 1

@@ -258,6 +258,44 @@ hdtTES5EditUTF8_loader.exe FO4Edit.exe
     Assert-True -Condition ($singleNativeArgTargetArgs[2].StartsWith('-P:')) -Message 'single native xEdit mode launch should preserve the session plugins file as a separate argument'
     Assert-True -Condition (-not ($singleNativeArgTargetArgs | Where-Object { $_ -like '-SF1-automation-serve*' })) -Message 'single native xEdit mode launch should never glue the game mode and automation flags into one token'
 
+    $script:CapturedMixedSlashDataPathLaunchRequest = $null
+    function Test-XeditClientLauncherPath { param([string]$Path) return $true }
+    function Get-XeditClientNormalizedLauncherCommand {
+        param([string]$LauncherPath, [string]$GameModeArgument)
+        return [pscustomobject]@{
+            FilePath = 'D:\xedit\SF1Edit64.exe'
+            ArgumentList = @($GameModeArgument)
+            NativeArgumentList = @($GameModeArgument)
+            SourcePath = $LauncherPath
+            DetectionPath = 'D:\xedit\SF1Edit64.exe'
+            WorkingDirectory = 'D:\xedit'
+        }
+    }
+    function Invoke-Mo2ControlPlaneClientRequest {
+        param([hashtable]$Request, [string]$LiveRoot)
+        $script:CapturedMixedSlashDataPathLaunchRequest = [pscustomobject]@{ Request = $Request; LiveRoot = $LiveRoot }
+        $stateFile = [string]$Request.payload.state.file
+        $stateDirectory = Split-Path -Path $stateFile -Parent
+        if (-not (Test-Path $stateDirectory)) { $null = New-Item -ItemType Directory -Path $stateDirectory -Force }
+        @{ status = 'spawned'; pid = 76543; session_id = [string]$Request.session_id; target_path = [string]$Request.payload.target.path; args = @($Request.payload.target.args) } |
+            ConvertTo-Json -Depth 10 | Set-Content -Path $stateFile
+        return [ordered]@{ ok = $true; result = [ordered]@{ launch_id = 'mixed-slash-data-path-launch'; pid = 76543; status = 'running'; artifacts = [ordered]@{ backend = 'organizer' } } }
+    }
+    function Wait-XeditClientAutomationReady {
+        param([string]$XeditExecutablePath, [int]$XeditPid, [string]$SessionPath, [int]$TimeoutSeconds = 30)
+        return @{ ok = $true; result = @{ command = 'system.describe' } }
+    }
+
+    $mixedSlashDataPath = 'D:/SteamLibrary/steamapps/common/Starfield/Data'
+    $mixedSlashDataPathLaunch = Invoke-ProcessLaunchWithOutput -Arguments @('--launcher-path', 'D:\xedit\SF1Edit64.exe', '--game-mode', 'Starfield', '--plugins-file', $callerPluginsPath, '--mo-profile', 'Default', '--data-path', $mixedSlashDataPath)
+    Assert-Equal -Actual $mixedSlashDataPathLaunch.Result -Expected 0 -Message 'mixed-slash data path launch should succeed while constructing the MO2 launch request'
+    Assert-True -Condition ($null -ne $script:CapturedMixedSlashDataPathLaunchRequest) -Message 'mixed-slash data path launch should dispatch an MO2 request'
+    $mixedSlashDataPathTargetArgs = @($script:CapturedMixedSlashDataPathLaunchRequest.Request.payload.target.args)
+    $dataPathArg = $mixedSlashDataPathTargetArgs | Where-Object { $_ -like '-D:*' } | Select-Object -First 1
+    Assert-Equal -Actual $dataPathArg -Expected '-D:D:\SteamLibrary\steamapps\common\Starfield\Data\' -Message 'mixed-slash data path launch should normalize the native -D: argument to backslashes with a trailing slash'
+    Assert-True -Condition (-not ($mixedSlashDataPathTargetArgs | Where-Object { $_ -like '-I:*' })) -Message 'mixed-slash data path launch should not inject a native -I: override and should preserve xEdit native ini routing'
+    Assert-True -Condition (-not ($mixedSlashDataPathTargetArgs | Where-Object { $_ -like '-M:*' })) -Message 'mixed-slash data path launch should not inject a native -M: override and should preserve xEdit native ini routing'
+
     $script:CapturedDirectReadiness = $null
     function Test-XeditClientLauncherPath { param([string]$Path) return $true }
     function Get-XeditClientNormalizedLauncherCommand {
@@ -294,6 +332,10 @@ hdtTES5EditUTF8_loader.exe FO4Edit.exe
     function Stop-Process {
         param([int]$Id, [switch]$Force, [System.Management.Automation.ActionPreference]$ErrorAction)
         $script:StoppedPidsAfterReadinessFailure += $Id
+    }
+    function Get-XeditClientValidatedLiveProcess {
+        param([string]$ProcessId)
+        return [pscustomobject]@{ ProcessId = [int]$ProcessId }
     }
     function Wait-XeditClientAutomationReady {
         param([string]$XeditExecutablePath, [int]$XeditPid, [string]$SessionPath, [int]$TimeoutSeconds = 30)
