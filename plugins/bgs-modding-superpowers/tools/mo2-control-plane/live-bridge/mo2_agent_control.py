@@ -1,0 +1,1529 @@
+"""MO2 live bootstrap bridge.
+
+This module lives at `<MO2_Root>/plugins/mo2_agent_control.py` once deployed.
+Runtime files stay under `<MO2_Root>/plugins/Mo2AgentControl/bootstrap/runtime`.
+It now exposes `createPlugin()` so MO2 can load it as a real Python plugin.
+Bootstrap runtime publication happens during plugin initialization, not at import.
+File-bootstrap is retained only as discovery and liveness, not as the command transport.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import json
+import os
+import queue
+import subprocess
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+import mobase
+
+PLUGIN_NAME = "Mo2AgentControl"
+PLUGIN_SOURCE_SUBTREE = "tools/mo2-control-plane/live-bridge/"
+# Deployment targets are relative to the user's MO2 root, supplied by the
+# installer (scripts/install-mo2-control-plane.ps1). The dev sandbox is no
+# longer assumed.
+PLUGIN_DEPLOYMENT_TARGET = "plugins/mo2_agent_control.py"
+PLUGIN_SUPPORT_TARGET = "plugins/Mo2AgentControl/"
+BOOTSTRAP_MODE = "file-bootstrap"
+BOOTSTRAP_DIRECTORY_NAME = "bootstrap"
+RUNTIME_DIRECTORY_NAME = "runtime"
+
+RUNTIME_SCHEMA_VERSION = 1
+RUNTIME_READY_STATE = "ok"
+RUNTIME_TRANSPORT = "named-pipe"
+RUNTIME_ENDPOINT_FIELD = "endpoint"
+RUNTIME_PIPE_NAME_PREFIX = "mo2-control-plane-"
+RUNTIME_PIPE_NAME_OVERRIDE = None
+
+RUNTIME_STATUS_FILE = "status.json"
+RUNTIME_CAPABILITIES_FILE = "capabilities.json"
+RUNTIME_ENDPOINT_FILE = "endpoint.json"
+BLOCKER_EVENTS_FILE = "blocker-events.jsonl"
+PROTOCOL_VERSION = "1"
+
+KNOWN_BLOCKER_DIALOGS = (
+    {
+        "type": "unlock",
+        "title": "ModOrganizer",
+        "textPrefix": "Mod Organizer is locked while the application is running.\n",
+        "buttons": ("Unlock",),
+    },
+    {
+        "type": "exit-now",
+        "title": "ModOrganizer",
+        "textPrefix": "Mod Organizer is waiting on an application to close before exiting.\n",
+        "buttons": ("Exit Now", "Cancel"),
+    },
+)
+
+NAMED_PIPE_BUFFER_SIZE = 4096
+NAMED_PIPE_PREFIX = "\\\\.\\pipe\\"
+
+PIPE_ACCESS_DUPLEX = 0x00000003
+PIPE_TYPE_BYTE = 0x00000000
+PIPE_READMODE_BYTE = 0x00000000
+PIPE_WAIT = 0x00000000
+PIPE_UNLIMITED_INSTANCES = 255
+
+ERROR_BROKEN_PIPE = 109
+ERROR_NO_DATA = 232
+ERROR_PIPE_CONNECTED = 535
+WAIT_OBJECT_0 = 0x00000000
+WAIT_TIMEOUT = 0x00000102
+INFINITE = 0xFFFFFFFF
+STILL_ACTIVE = 259
+
+PROCESS_TERMINATE = 0x0001
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+SYNCHRONIZE = 0x00100000
+
+INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+KERNEL32.CreateNamedPipeW.argtypes = [
+    ctypes.c_wchar_p,
+    ctypes.c_uint32,
+    ctypes.c_uint32,
+    ctypes.c_uint32,
+    ctypes.c_uint32,
+    ctypes.c_uint32,
+    ctypes.c_uint32,
+    ctypes.c_void_p,
+]
+KERNEL32.CreateNamedPipeW.restype = ctypes.c_void_p
+
+KERNEL32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+KERNEL32.OpenProcess.restype = ctypes.c_void_p
+
+KERNEL32.ConnectNamedPipe.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+KERNEL32.ConnectNamedPipe.restype = ctypes.c_int
+
+KERNEL32.ReadFile.argtypes = [
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_uint32,
+    ctypes.POINTER(ctypes.c_uint32),
+    ctypes.c_void_p,
+]
+KERNEL32.ReadFile.restype = ctypes.c_int
+
+KERNEL32.WriteFile.argtypes = [
+    ctypes.c_void_p,
+    ctypes.c_void_p,
+    ctypes.c_uint32,
+    ctypes.POINTER(ctypes.c_uint32),
+    ctypes.c_void_p,
+]
+KERNEL32.WriteFile.restype = ctypes.c_int
+
+KERNEL32.FlushFileBuffers.argtypes = [ctypes.c_void_p]
+KERNEL32.FlushFileBuffers.restype = ctypes.c_int
+
+KERNEL32.DisconnectNamedPipe.argtypes = [ctypes.c_void_p]
+KERNEL32.DisconnectNamedPipe.restype = ctypes.c_int
+
+KERNEL32.CloseHandle.argtypes = [ctypes.c_void_p]
+KERNEL32.CloseHandle.restype = ctypes.c_int
+
+KERNEL32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+KERNEL32.WaitForSingleObject.restype = ctypes.c_uint32
+
+KERNEL32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
+KERNEL32.GetExitCodeProcess.restype = ctypes.c_int
+
+KERNEL32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+KERNEL32.TerminateProcess.restype = ctypes.c_int
+
+_ACTIVE_NAMED_PIPE_TRANSPORTS: list[dict[str, object]] = []
+_SEEN_BLOCKER_DIALOG_FINGERPRINTS: dict[str, set[str]] = {
+    "handled": set(),
+    "ignored": set(),
+    "failed": set(),
+}
+
+
+class MainThreadCall:
+    """Represent one callable scheduled onto the plugin main thread."""
+
+    def __init__(self, callback) -> None:
+        self.callback = callback
+        self.completed = threading.Event()
+        self.result = None
+        self.error = None
+
+
+class MainThreadCallPump:
+    """Queue cross-thread work and execute it when the main thread pumps."""
+
+    def __init__(self) -> None:
+        self._owner_thread_id = threading.get_ident()
+        self._calls: queue.Queue[MainThreadCall] = queue.Queue()
+
+    def invoke(self, callback):
+        """Run work on the owning thread, blocking callers from other threads."""
+
+        if threading.get_ident() == self._owner_thread_id:
+            return callback()
+
+        call = MainThreadCall(callback)
+        self._calls.put(call)
+        call.completed.wait()
+        if call.error is not None:
+            raise call.error
+
+        return call.result
+
+    def pending_count(self) -> int:
+        """Return the approximate number of queued main-thread calls."""
+
+        return self._calls.qsize()
+
+    def pump_once(self, timeout_seconds: float = 0.0) -> bool:
+        """Execute at most one queued call on the owning thread."""
+
+        if timeout_seconds > 0:
+            try:
+                call = self._calls.get(timeout=timeout_seconds)
+            except queue.Empty:
+                return False
+        else:
+            try:
+                call = self._calls.get_nowait()
+            except queue.Empty:
+                return False
+
+        try:
+            call.result = call.callback()
+        except Exception as exc:  # pragma: no cover - surfaced to the waiting caller.
+            call.error = exc
+        finally:
+            call.completed.set()
+
+        return True
+
+    def pump_all(self) -> int:
+        """Drain all queued calls from the owning thread."""
+
+        pumped = 0
+        while self.pump_once():
+            pumped += 1
+
+        return pumped
+
+RUNTIME_FILE_NAMES = (
+    RUNTIME_STATUS_FILE,
+    RUNTIME_CAPABILITIES_FILE,
+    RUNTIME_ENDPOINT_FILE,
+)
+
+SYSTEM_PING_METHOD = "system.ping"
+SYSTEM_CAPABILITIES_METHOD = "system.capabilities"
+
+LAUNCH_START_METHOD = "launch.start"
+LAUNCH_STATUS_METHOD = "launch.status"
+LAUNCH_WAIT_METHOD = "launch.wait"
+LAUNCH_STOP_METHOD = "launch.stop"
+
+LAUNCH_METHODS = (
+    LAUNCH_START_METHOD,
+    LAUNCH_STATUS_METHOD,
+    LAUNCH_WAIT_METHOD,
+    LAUNCH_STOP_METHOD,
+)
+
+LAUNCH_REGISTRY_ENTRIES_FIELD = "launches"
+LAUNCH_REGISTRY_ENTRY_FIELDS = (
+    "launch_id",
+    "session_id",
+    "target_path",
+    "args",
+    "cwd",
+    "env",
+    "pid",
+    "process_handle",
+    "status",
+    "started_at",
+    "updated_at",
+    "exit_code",
+    "artifacts",
+)
+LAUNCH_REGISTRY_STATUS_PENDING = "pending"
+LAUNCH_REGISTRY_STATUS_RUNNING = "running"
+LAUNCH_REGISTRY_STATUS_COMPLETED = "completed"
+LAUNCH_REGISTRY_STATUS_STOPPED = "stopped"
+LAUNCH_REGISTRY_STATUS_VALUES = (
+    LAUNCH_REGISTRY_STATUS_PENDING,
+    LAUNCH_REGISTRY_STATUS_RUNNING,
+    LAUNCH_REGISTRY_STATUS_COMPLETED,
+    LAUNCH_REGISTRY_STATUS_STOPPED,
+)
+TERMINAL_LAUNCH_RETENTION_LIMIT = 32
+
+LAUNCH_COMMAND_CONTRACTS = {
+    LAUNCH_START_METHOD: {
+        "payloadFields": ("target_path", "args", "cwd", "env"),
+        "resultFields": ("launch_id", "pid", "status", "started_at", "artifacts"),
+    },
+    LAUNCH_STATUS_METHOD: {
+        "payloadFields": ("launch_id",),
+        "resultFields": ("launch_id", "pid", "status"),
+    },
+    LAUNCH_WAIT_METHOD: {
+        "payloadFields": ("launch_id",),
+        "resultFields": ("launch_id", "pid", "status"),
+    },
+    LAUNCH_STOP_METHOD: {
+        "payloadFields": ("launch_id",),
+        "resultFields": ("launch_id", "pid", "status"),
+    },
+}
+
+MINIMUM_RUNTIME_JSON_FIELDS = {
+    RUNTIME_STATUS_FILE: ("schemaVersion", "state", "mo2Pid"),
+    RUNTIME_CAPABILITIES_FILE: ("schemaVersion", "methods"),
+    RUNTIME_ENDPOINT_FILE: ("schemaVersion", "transport", RUNTIME_ENDPOINT_FIELD),
+}
+
+
+def build_transport_response(
+    request: dict[str, object],
+    *,
+    ok: bool,
+    result: dict[str, object] | None = None,
+    error: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Shape Python transport responses to match broker envelopes."""
+
+    return {
+        "protocol_version": request.get("protocol_version", PROTOCOL_VERSION),
+        "request_id": request.get("request_id"),
+        "session_id": request.get("session_id"),
+        "ok": ok,
+        "result": result,
+        "error": error,
+    }
+
+
+def get_named_pipe_path(pipe_name: str) -> str:
+    """Return a Windows named-pipe path from a configured endpoint value."""
+
+    if pipe_name.startswith(NAMED_PIPE_PREFIX):
+        return pipe_name
+
+    return f"{NAMED_PIPE_PREFIX}{pipe_name}"
+
+
+def get_runtime_pipe_name(process_id: int | None = None) -> str:
+    """Return an instance-specific pipe name for the current MO2 process."""
+
+    if RUNTIME_PIPE_NAME_OVERRIDE:
+        return str(RUNTIME_PIPE_NAME_OVERRIDE)
+
+    resolved_process_id = os.getpid() if process_id is None else int(process_id)
+    return f"{RUNTIME_PIPE_NAME_PREFIX}{resolved_process_id}"
+
+
+def raise_last_windows_error(prefix: str) -> None:
+    """Raise an OSError with the current Windows error state."""
+
+    error_code = ctypes.get_last_error()
+    error_message = ctypes.FormatError(error_code).strip()
+    raise OSError(error_code, f"{prefix}: {error_message}")
+
+
+def create_named_pipe_handle(pipe_path: str):
+    """Create a single duplex named-pipe instance."""
+
+    handle = KERNEL32.CreateNamedPipeW(
+        pipe_path,
+        PIPE_ACCESS_DUPLEX,
+        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+        PIPE_UNLIMITED_INSTANCES,
+        NAMED_PIPE_BUFFER_SIZE,
+        NAMED_PIPE_BUFFER_SIZE,
+        0,
+        None,
+    )
+    if handle == INVALID_HANDLE_VALUE:
+        raise_last_windows_error(f"Failed to create named pipe {pipe_path}")
+
+    return handle
+
+
+def read_named_pipe_message(pipe_handle) -> dict[str, object] | None:
+    """Read one newline-delimited JSON request from a connected pipe."""
+
+    chunks = bytearray()
+    while True:
+        buffer = ctypes.create_string_buffer(NAMED_PIPE_BUFFER_SIZE)
+        bytes_read = ctypes.c_uint32()
+        success = KERNEL32.ReadFile(
+            pipe_handle,
+            buffer,
+            NAMED_PIPE_BUFFER_SIZE,
+            ctypes.byref(bytes_read),
+            None,
+        )
+        if not success:
+            error_code = ctypes.get_last_error()
+            if error_code in (ERROR_BROKEN_PIPE, ERROR_NO_DATA):
+                break
+
+            raise_last_windows_error("Failed to read named-pipe request")
+
+        if bytes_read.value == 0:
+            break
+
+        chunks.extend(buffer.raw[: bytes_read.value])
+        if b"\n" in chunks:
+            break
+
+    if not chunks:
+        return None
+
+    raw_message = chunks.split(b"\n", 1)[0].strip()
+    if not raw_message:
+        return None
+
+    return json.loads(raw_message.decode("utf-8"))
+
+
+def write_named_pipe_message(pipe_handle, message: dict[str, object]) -> None:
+    """Write one newline-delimited JSON response to a connected pipe."""
+
+    encoded_message = (json.dumps(message) + "\n").encode("utf-8")
+    offset = 0
+    while offset < len(encoded_message):
+        chunk = encoded_message[offset:]
+        bytes_written = ctypes.c_uint32()
+        success = KERNEL32.WriteFile(
+            pipe_handle,
+            ctypes.c_char_p(chunk),
+            len(chunk),
+            ctypes.byref(bytes_written),
+            None,
+        )
+        if not success:
+            raise_last_windows_error("Failed to write named-pipe response")
+
+        offset += bytes_written.value
+
+
+def build_invalid_request_response(exc: json.JSONDecodeError) -> dict[str, object]:
+    """Return a transport error envelope for malformed JSON requests."""
+
+    return build_transport_response(
+        {},
+        ok=False,
+        error={
+            "code": "invalid_request",
+            "message": str(exc),
+        },
+    )
+
+
+def import_qt_core_module():
+    """Import a QtCore module compatible with the MO2 Python host."""
+
+    for module_name in ("PyQt6.QtCore", "PyQt5.QtCore"):
+        try:
+            module = __import__(module_name, fromlist=["QCoreApplication", "QTimer"])
+        except ImportError:
+            continue
+
+        if hasattr(module, "QCoreApplication") and hasattr(module, "QTimer"):
+            return module
+
+    raise RuntimeError("Organizer-backed launches require PyQt5/PyQt6 QtCore for main-thread pumping")
+
+
+def import_qt_widgets_module():
+    """Import a QtWidgets module compatible with the MO2 Python host."""
+
+    for module_name in ("PyQt6.QtWidgets", "PyQt5.QtWidgets"):
+        try:
+            module = __import__(module_name, fromlist=["QApplication", "QDialog", "QPushButton"])
+        except ImportError:
+            continue
+
+        if all(hasattr(module, name) for name in ("QApplication", "QDialog", "QPushButton")):
+            return module
+
+    raise RuntimeError("Blocker dialog watcher requires PyQt5/PyQt6 QtWidgets")
+
+
+def extract_dialog_snapshot(dialog):
+    """Return the normalized snapshot used for whitelist matching."""
+
+    qt_widgets = import_qt_widgets_module()
+    buttons = [str(button.text()) for button in dialog.findChildren(qt_widgets.QPushButton)]
+    return {
+        "title": str(dialog.windowTitle() or ""),
+        "text": str(dialog.text() or ""),
+        "buttons": buttons,
+    }
+
+
+def find_button_by_text(dialog, expected_text):
+    """Return the first dialog button with an exact text match."""
+
+    qt_widgets = import_qt_widgets_module()
+    for button in dialog.findChildren(qt_widgets.QPushButton):
+        if str(button.text()) == str(expected_text):
+            return button
+
+    return None
+
+
+def is_dialog_candidate(dialog):
+    """Return True only for visible top-level Qt dialogs."""
+
+    qt_widgets = import_qt_widgets_module()
+    if not isinstance(dialog, qt_widgets.QDialog):
+        return False
+
+    try:
+        if not bool(dialog.isVisible()):
+            return False
+    except Exception:
+        return False
+
+    for attribute_name in ("windowTitle", "text", "findChildren"):
+        try:
+            attribute = getattr(dialog, attribute_name)
+        except Exception:
+            return False
+
+        if not callable(attribute):
+            return False
+
+    return True
+
+
+def build_dialog_fingerprint(snapshot):
+    """Build a stable fingerprint for one dialog appearance."""
+
+    return json.dumps(
+        {
+            "title": str(snapshot.get("title") or ""),
+            "text": str(snapshot.get("text") or ""),
+            "buttons": [str(button) for button in list(snapshot.get("buttons") or [])],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def create_blocker_event(snapshot, *, result: str, source: str, matched_dialog=None):
+    """Build one persisted blocker-event record from a dialog snapshot."""
+
+    event = {
+        "type": str((matched_dialog or {}).get("type") or result),
+        "title": str(snapshot.get("title") or ""),
+        "text": str(snapshot.get("text") or ""),
+        "buttons": [str(button) for button in list(snapshot.get("buttons") or [])],
+        "result": str(result),
+        "source": str(source),
+    }
+    if matched_dialog is not None and matched_dialog.get("type") is not None:
+        event["matchedType"] = str(matched_dialog["type"])
+
+    return event
+
+
+def handle_known_blocker_dialog(dialog, runtime_root=None) -> str:
+    """Click the whitelisted blocker dialog action button once when matched."""
+
+    snapshot = extract_dialog_snapshot(dialog)
+    matched_dialog = match_blocker_dialog(snapshot["title"], snapshot["text"], snapshot["buttons"])
+    if matched_dialog is None:
+        append_blocker_event(
+            runtime_root,
+            create_blocker_event(snapshot, result="ignored", source="candidate-dialog"),
+        )
+        return "ignored"
+
+    expected_button_text = matched_dialog["buttons"][0]
+    button = find_button_by_text(dialog, expected_button_text)
+    if button is None:
+        append_blocker_event(
+            runtime_root,
+            create_blocker_event(
+                snapshot,
+                result="failed",
+                source="matched-dialog",
+                matched_dialog=matched_dialog,
+            ),
+        )
+        return "failed"
+
+    try:
+        button.click()
+    except Exception:
+        append_blocker_event(
+            runtime_root,
+            create_blocker_event(
+                snapshot,
+                result="failed",
+                source="matched-dialog",
+                matched_dialog=matched_dialog,
+            ),
+        )
+        return "failed"
+
+    append_blocker_event(
+        runtime_root,
+        create_blocker_event(
+            snapshot,
+            result="handled",
+            source="matched-dialog",
+            matched_dialog=matched_dialog,
+        ),
+    )
+    return "handled"
+
+
+def scan_for_known_blocker_dialogs(runtime_root=None) -> int:
+    """Scan visible top-level dialogs and handle strict whitelist matches only once per appearance."""
+
+    qt_widgets = import_qt_widgets_module()
+    application = qt_widgets.QApplication.instance()
+    if application is None:
+        return 0
+
+    current_fingerprints = set()
+    handled_count = 0
+    outcome_groups = tuple(_SEEN_BLOCKER_DIALOG_FINGERPRINTS.values())
+    for widget in application.topLevelWidgets():
+        if not is_dialog_candidate(widget):
+            continue
+
+        snapshot = extract_dialog_snapshot(widget)
+        fingerprint = build_dialog_fingerprint(snapshot)
+        current_fingerprints.add(fingerprint)
+        if any(fingerprint in fingerprints for fingerprints in outcome_groups):
+            continue
+
+        outcome = handle_known_blocker_dialog(widget, runtime_root=runtime_root)
+        if outcome == "handled":
+            _SEEN_BLOCKER_DIALOG_FINGERPRINTS["handled"].add(fingerprint)
+            handled_count += 1
+        elif outcome == "failed":
+            _SEEN_BLOCKER_DIALOG_FINGERPRINTS["failed"].add(fingerprint)
+        else:
+            _SEEN_BLOCKER_DIALOG_FINGERPRINTS["ignored"].add(fingerprint)
+
+    for outcome_name, fingerprints in _SEEN_BLOCKER_DIALOG_FINGERPRINTS.items():
+        _SEEN_BLOCKER_DIALOG_FINGERPRINTS[outcome_name] = fingerprints.intersection(current_fingerprints)
+
+    return handled_count
+
+
+def install_blocker_watcher_timer(runtime_root=None, interval_ms=100):
+    """Install a Qt timer that scans for whitelisted blocker dialogs."""
+
+    qt_core = import_qt_core_module()
+    application = qt_core.QCoreApplication.instance()
+    timer = qt_core.QTimer(application) if application is not None else qt_core.QTimer()
+    timer.setInterval(interval_ms)
+    timer.timeout.connect(lambda: scan_for_known_blocker_dialogs(runtime_root=runtime_root))
+    timer.start()
+    return timer
+
+
+def install_main_thread_pump_timer(main_thread_pump: MainThreadCallPump, interval_ms: int = 10):
+    """Install a Qt timer that drains queued calls on the plugin main thread."""
+
+    qt_core = import_qt_core_module()
+    application = qt_core.QCoreApplication.instance()
+    timer = qt_core.QTimer(application) if application is not None else qt_core.QTimer()
+    timer.setInterval(interval_ms)
+    timer.timeout.connect(main_thread_pump.pump_all)
+    timer.start()
+    return timer
+
+
+def serve_named_pipe_requests(pipe_name: str, handlers, stop_event: threading.Event) -> None:
+    """Serve one JSON request per connection on a background thread."""
+
+    pipe_path = get_named_pipe_path(pipe_name)
+    while not stop_event.is_set():
+        pipe_handle = create_named_pipe_handle(pipe_path)
+        client_thread = None
+        try:
+            connected = KERNEL32.ConnectNamedPipe(pipe_handle, None)
+            if not connected:
+                error_code = ctypes.get_last_error()
+                if error_code != ERROR_PIPE_CONNECTED:
+                    raise_last_windows_error(f"Failed to accept named-pipe client for {pipe_path}")
+            client_thread = threading.Thread(
+                target=serve_named_pipe_client,
+                args=(pipe_handle, handlers),
+                name=f"{PLUGIN_NAME}-named-pipe-client",
+                daemon=True,
+            )
+            client_thread.start()
+            pipe_handle = None
+        finally:
+            if pipe_handle is not None:
+                KERNEL32.DisconnectNamedPipe(pipe_handle)
+                KERNEL32.CloseHandle(pipe_handle)
+
+
+def serve_named_pipe_client(pipe_handle, handlers) -> None:
+    """Handle one connected client without blocking the accept loop."""
+
+    try:
+        try:
+            request = read_named_pipe_message(pipe_handle)
+        except json.JSONDecodeError as exc:
+            write_named_pipe_message(pipe_handle, build_invalid_request_response(exc))
+            KERNEL32.FlushFileBuffers(pipe_handle)
+            return
+
+        if request is None:
+            return
+
+        try:
+            response = dispatch_transport_request(request, handlers)
+        except json.JSONDecodeError as exc:
+            response = build_invalid_request_response(exc)
+
+        write_named_pipe_message(pipe_handle, response)
+        KERNEL32.FlushFileBuffers(pipe_handle)
+    finally:
+        KERNEL32.DisconnectNamedPipe(pipe_handle)
+        KERNEL32.CloseHandle(pipe_handle)
+
+
+def handle_system_ping(_request: dict[str, object]) -> dict[str, object]:
+    """Return the minimal plugin-local liveness payload."""
+
+    return {
+        "status": RUNTIME_READY_STATE,
+    }
+
+
+def utc_now_timestamp() -> str:
+    """Return a stable UTC timestamp string for registry entries."""
+
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def get_blocker_events_path(runtime_root: str | Path | None = None) -> Path:
+    """Return the runtime blocker-event log path."""
+
+    root = Path(runtime_root) if runtime_root is not None else get_runtime_root()
+    return root / BLOCKER_EVENTS_FILE
+
+
+def match_blocker_dialog(title, text, buttons):
+    """Return the whitelisted blocker dialog descriptor or None."""
+
+    normalized_title = str(title or "")
+    normalized_text = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    normalized_buttons = tuple(str(button) for button in (buttons or []))
+
+    for candidate in KNOWN_BLOCKER_DIALOGS:
+        if normalized_title != candidate["title"]:
+            continue
+
+        if normalized_buttons != tuple(candidate["buttons"]):
+            continue
+
+        if not normalized_text.startswith(str(candidate["textPrefix"])):
+            continue
+
+        return {
+            "type": candidate["type"],
+            "title": normalized_title,
+            "text": normalized_text,
+            "buttons": list(normalized_buttons),
+        }
+
+    return None
+
+
+def append_blocker_event(runtime_root, event):
+    """Append one blocker event record to the runtime JSONL log."""
+
+    blocker_events_path = get_blocker_events_path(runtime_root)
+    blocker_events_path.parent.mkdir(parents=True, exist_ok=True)
+    with blocker_events_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(dict(event), ensure_ascii=False) + "\n")
+
+    return blocker_events_path
+
+
+def create_launch_registry() -> dict[str, dict[str, dict[str, object]]]:
+    """Create the in-memory launch registry for tracked live processes."""
+
+    return {
+        LAUNCH_REGISTRY_ENTRIES_FIELD: {},
+    }
+
+
+def create_launch_registry_entry(
+    launch_id: str,
+    request: dict[str, object],
+    payload: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Create the minimal launch registry entry shape without live process data."""
+
+    payload = payload or {}
+    timestamp = utc_now_timestamp()
+    return {
+        "launch_id": launch_id,
+        "session_id": request.get("session_id"),
+        "target_path": payload.get("target_path"),
+        "args": list(payload.get("args") or []),
+        "cwd": payload.get("cwd"),
+        "env": dict(payload.get("env") or {}),
+        "pid": None,
+        "process_handle": None,
+        "status": LAUNCH_REGISTRY_STATUS_PENDING,
+        "started_at": None,
+        "updated_at": timestamp,
+        "exit_code": None,
+        "artifacts": {
+            "state_file": None,
+            "backend": None,
+        },
+    }
+
+
+def normalize_launch_start_payload(request: dict[str, object]) -> dict[str, object]:
+    """Accept either direct launch payloads or the broker transport wrapper."""
+
+    payload = dict(request.get("payload") or {})
+    if isinstance(payload.get("transport"), dict):
+        payload = dict(payload["transport"])
+
+    target_path = str(payload.get("target_path") or "").strip()
+    if not target_path:
+        raise ValueError("launch.start requires payload target_path")
+
+    payload["target_path"] = target_path
+    payload["args"] = [str(arg) for arg in list(payload.get("args") or [])]
+    payload["cwd"] = payload.get("cwd")
+    payload["env"] = dict(payload.get("env") or {})
+    return payload
+
+
+def create_launch_id() -> str:
+    """Return a stable launch identifier."""
+
+    return f"launch-{uuid.uuid4().hex}"
+
+
+def build_launch_result(entry: dict[str, object]) -> dict[str, object]:
+    """Project an in-memory launch entry into the transport response shape."""
+
+    result = {
+        "launch_id": entry.get("launch_id"),
+        "pid": entry.get("pid"),
+        "status": entry.get("status"),
+    }
+
+    if entry.get("started_at") is not None:
+        result["started_at"] = entry.get("started_at")
+
+    if entry.get("exit_code") is not None:
+        result["exit_code"] = entry.get("exit_code")
+
+    if entry.get("artifacts") is not None:
+        result["artifacts"] = entry.get("artifacts")
+
+    return result
+
+
+def mark_launch_entry_updated(entry: dict[str, object]) -> dict[str, object]:
+    """Stamp the launch entry update time and return the same entry."""
+
+    entry["updated_at"] = utc_now_timestamp()
+    return entry
+
+
+def mark_launch_entry_completed(entry: dict[str, object], exit_code: int) -> dict[str, object]:
+    """Transition a running launch entry into a completed state."""
+
+    entry["exit_code"] = int(exit_code)
+    entry["process_handle"] = None
+    entry["status"] = LAUNCH_REGISTRY_STATUS_COMPLETED
+    return mark_launch_entry_updated(entry)
+
+
+def mark_launch_entry_stopped(entry: dict[str, object], exit_code: int | None = None) -> dict[str, object]:
+    """Transition a running launch entry into a stopped state."""
+
+    if exit_code is not None:
+        entry["exit_code"] = int(exit_code)
+
+    entry["process_handle"] = None
+    entry["status"] = LAUNCH_REGISTRY_STATUS_STOPPED
+    return mark_launch_entry_updated(entry)
+
+
+def open_process_handle_for_pid(pid: int, desired_access: int):
+    """Open a live process handle for the requested PID or return None."""
+
+    handle = KERNEL32.OpenProcess(desired_access, False, pid)
+    if not handle:
+        return None
+
+    return handle
+
+
+def get_exit_code_from_process_handle(process_handle) -> int | None:
+    """Return the exit code for a process handle, or None if it is still running."""
+
+    exit_code = ctypes.c_uint32()
+    success = KERNEL32.GetExitCodeProcess(process_handle, ctypes.byref(exit_code))
+    if not success:
+        raise_last_windows_error("Failed to query process exit code")
+
+    if exit_code.value == STILL_ACTIVE:
+        return None
+
+    return int(exit_code.value)
+
+
+def get_launch_exit_code(entry: dict[str, object]) -> int | None:
+    """Return the exit code for a tracked launch when it has already exited."""
+
+    process_handle = entry.get("process_handle")
+    if process_handle is not None:
+        exit_code = process_handle.poll()
+        if exit_code is None:
+            return None
+
+        return int(exit_code)
+
+    pid = entry.get("pid")
+    if pid is None:
+        return None
+
+    handle = open_process_handle_for_pid(int(pid), PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE)
+    if handle is None:
+        return None
+
+    try:
+        return get_exit_code_from_process_handle(handle)
+    finally:
+        KERNEL32.CloseHandle(handle)
+
+
+def refresh_launch_entry(entry: dict[str, object]) -> dict[str, object]:
+    """Refresh a launch entry in place using the current process state."""
+
+    if entry.get("status") != LAUNCH_REGISTRY_STATUS_RUNNING:
+        return entry
+
+    exit_code = get_launch_exit_code(entry)
+    if exit_code is None:
+        return entry
+
+    return mark_launch_entry_completed(entry, exit_code)
+
+
+def refresh_launch_entry_threadsafe(entry: dict[str, object], entry_condition: threading.Condition) -> dict[str, object]:
+    """Refresh a launch entry while holding the per-launch coordination lock."""
+
+    with entry_condition:
+        return refresh_launch_entry(entry)
+
+
+def wait_for_pid_exit(pid: int) -> int | None:
+    """Wait for a process PID to exit and return its exit code when observable."""
+
+    handle = open_process_handle_for_pid(int(pid), PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE)
+    if handle is None:
+        return None
+
+    try:
+        wait_result = KERNEL32.WaitForSingleObject(handle, INFINITE)
+        if wait_result not in (WAIT_OBJECT_0, WAIT_TIMEOUT):
+            raise_last_windows_error("Failed while waiting for process exit")
+
+        return get_exit_code_from_process_handle(handle)
+    finally:
+        KERNEL32.CloseHandle(handle)
+
+
+def wait_for_launch_entry(entry: dict[str, object]) -> dict[str, object]:
+    """Block until a tracked launch exits, then update the registry entry."""
+
+    if entry.get("status") != LAUNCH_REGISTRY_STATUS_RUNNING:
+        return entry
+
+    process_handle = entry.get("process_handle")
+    if process_handle is not None:
+        return mark_launch_entry_completed(entry, int(process_handle.wait()))
+
+    pid = entry.get("pid")
+    if pid is None:
+        return entry
+
+    exit_code = wait_for_pid_exit(int(pid))
+    if exit_code is None:
+        return entry
+
+    return mark_launch_entry_completed(entry, exit_code)
+
+
+def wait_for_launch_entry_threadsafe(entry: dict[str, object], entry_condition: threading.Condition) -> dict[str, object]:
+    """Wait for a tracked launch without holding the per-launch lock while blocked."""
+
+    with entry_condition:
+        entry = refresh_launch_entry(entry)
+        if entry.get("status") != LAUNCH_REGISTRY_STATUS_RUNNING:
+            return entry
+
+        process_handle = entry.get("process_handle")
+        pid = entry.get("pid")
+
+    if process_handle is not None:
+        exit_code = int(process_handle.wait())
+    elif pid is None:
+        exit_code = None
+    else:
+        exit_code = wait_for_pid_exit(int(pid))
+
+    with entry_condition:
+        while entry.get("_stop_requested") and entry.get("status") == LAUNCH_REGISTRY_STATUS_RUNNING:
+            entry_condition.wait(timeout=5)
+
+        if entry.get("status") != LAUNCH_REGISTRY_STATUS_RUNNING:
+            return entry
+
+        if exit_code is None:
+            return refresh_launch_entry(entry)
+
+        return mark_launch_entry_completed(entry, exit_code)
+
+
+def stop_launch_entry(entry: dict[str, object]) -> dict[str, object]:
+    """Terminate a tracked process when still running and mark it stopped."""
+
+    entry = refresh_launch_entry(entry)
+    if entry.get("status") != LAUNCH_REGISTRY_STATUS_RUNNING:
+        return entry
+
+    process_handle = entry.get("process_handle")
+    if process_handle is not None:
+        process_handle.terminate()
+        try:
+            exit_code = int(process_handle.wait(timeout=5))
+        except subprocess.TimeoutExpired:
+            process_handle.kill()
+            exit_code = int(process_handle.wait(timeout=5))
+
+        return mark_launch_entry_stopped(entry, exit_code)
+
+    pid = entry.get("pid")
+    if pid is None:
+        return mark_launch_entry_stopped(entry)
+
+    handle = open_process_handle_for_pid(
+        int(pid),
+        PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+    )
+    if handle is None:
+        return mark_launch_entry_stopped(entry)
+
+    try:
+        success = KERNEL32.TerminateProcess(handle, 1)
+        if not success:
+            raise_last_windows_error("Failed to stop tracked launch")
+
+        KERNEL32.WaitForSingleObject(handle, INFINITE)
+        exit_code = get_exit_code_from_process_handle(handle)
+        return mark_launch_entry_stopped(entry, exit_code)
+    finally:
+        KERNEL32.CloseHandle(handle)
+
+
+def stop_launch_entry_threadsafe(entry: dict[str, object], entry_condition: threading.Condition) -> dict[str, object]:
+    """Stop a tracked launch without holding the per-launch lock while blocked."""
+
+    with entry_condition:
+        entry = refresh_launch_entry(entry)
+        if entry.get("status") != LAUNCH_REGISTRY_STATUS_RUNNING:
+            return entry
+
+        entry["_stop_requested"] = True
+        process_handle = entry.get("process_handle")
+        pid = entry.get("pid")
+
+    if process_handle is not None:
+        process_handle.terminate()
+        try:
+            exit_code = int(process_handle.wait(timeout=5))
+        except subprocess.TimeoutExpired:
+            process_handle.kill()
+            exit_code = int(process_handle.wait(timeout=5))
+    elif pid is None:
+        exit_code = None
+    else:
+        handle = open_process_handle_for_pid(
+            int(pid),
+            PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+        )
+        if handle is None:
+            exit_code = None
+        else:
+            try:
+                success = KERNEL32.TerminateProcess(handle, 1)
+                if not success:
+                    raise_last_windows_error("Failed to stop tracked launch")
+
+                KERNEL32.WaitForSingleObject(handle, INFINITE)
+                exit_code = get_exit_code_from_process_handle(handle)
+            finally:
+                KERNEL32.CloseHandle(handle)
+
+    with entry_condition:
+        try:
+            if entry.get("status") != LAUNCH_REGISTRY_STATUS_RUNNING:
+                return entry
+
+            return mark_launch_entry_stopped(entry, exit_code)
+        finally:
+            entry["_stop_requested"] = False
+            entry_condition.notify_all()
+
+
+def get_launch_entry(
+    launch_registry: dict[str, dict[str, dict[str, object]]],
+    launch_id: str,
+) -> dict[str, object]:
+    """Return a tracked launch entry or raise a validation error."""
+
+    if not launch_id:
+        raise ValueError("launch_id is required")
+
+    launches = launch_registry[LAUNCH_REGISTRY_ENTRIES_FIELD]
+    if launch_id not in launches:
+        raise ValueError(f"Unknown launch_id: {launch_id}")
+
+    return launches[launch_id]
+
+
+def prune_terminal_launches(
+    launch_registry: dict[str, dict[str, dict[str, object]]],
+    launch_entry_locks: dict[str, threading.Condition],
+    retention_limit: int = TERMINAL_LAUNCH_RETENTION_LIMIT,
+) -> None:
+    """Retain only the newest bounded set of terminal launch entries and locks."""
+
+    if retention_limit < 0:
+        return
+
+    launches = launch_registry[LAUNCH_REGISTRY_ENTRIES_FIELD]
+    terminal_launch_ids = [
+        launch_id
+        for launch_id, entry in launches.items()
+        if entry.get("status") in (LAUNCH_REGISTRY_STATUS_COMPLETED, LAUNCH_REGISTRY_STATUS_STOPPED)
+    ]
+    excess_count = len(terminal_launch_ids) - retention_limit
+    if excess_count <= 0:
+        return
+
+    for launch_id in terminal_launch_ids[:excess_count]:
+        launches.pop(launch_id, None)
+        launch_entry_locks.pop(launch_id, None)
+
+
+def start_subprocess_launch(payload: dict[str, object]) -> subprocess.Popen:
+    """Start a subprocess-backed launch for harness and fallback use."""
+
+    target_path = str(payload["target_path"])
+    args = [target_path, *payload.get("args", [])]
+    cwd = payload.get("cwd") or None
+    env = os.environ.copy()
+    env.update({str(key): str(value) for key, value in payload.get("env", {}).items()})
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return subprocess.Popen(
+        args,
+        cwd=cwd,
+        env=env,
+        creationflags=creation_flags,
+    )
+
+
+def start_organizer_launch(organizer, payload: dict[str, object]) -> int | None:
+    """Prefer MO2's organizer launch API when it is available."""
+
+    if organizer is None or not hasattr(organizer, "startApplication"):
+        return None
+
+    start_application = getattr(organizer, "startApplication")
+    target_path = str(payload["target_path"])
+    args = list(payload.get("args", []))
+    cwd = str(payload.get("cwd") or "")
+
+    for call_args in (
+        (target_path, args, cwd, ""),
+        (target_path, args, cwd),
+        (target_path, args),
+    ):
+        try:
+            launch_pid = start_application(*call_args)
+        except TypeError:
+            continue
+
+        if launch_pid is None:
+            raise RuntimeError("Organizer launch failed to return a process id")
+
+        return int(launch_pid)
+
+    return None
+
+
+def handle_launch_start(
+    request: dict[str, object],
+    launch_registry: dict[str, dict[str, dict[str, object]]],
+    organizer=None,
+    main_thread_pump: MainThreadCallPump | None = None,
+) -> dict[str, object]:
+    """Start a tracked process and return its launch metadata."""
+
+    payload = normalize_launch_start_payload(request)
+    launch_id = create_launch_id()
+    entry = create_launch_registry_entry(launch_id, request, payload)
+    entry["started_at"] = utc_now_timestamp()
+    entry["status"] = LAUNCH_REGISTRY_STATUS_RUNNING
+    organizer_pid = None
+    if organizer is not None and hasattr(organizer, "startApplication"):
+        if main_thread_pump is None:
+            raise NotImplementedError("Organizer-backed launch.start requires a main-thread pump")
+
+        organizer_pid = main_thread_pump.invoke(lambda: start_organizer_launch(organizer, payload))
+
+    if organizer_pid is not None:
+        entry["pid"] = organizer_pid
+        entry["artifacts"]["backend"] = "organizer"
+    else:
+        process_handle = start_subprocess_launch(payload)
+        entry["process_handle"] = process_handle
+        entry["pid"] = int(process_handle.pid)
+        entry["artifacts"]["backend"] = "subprocess"
+
+    mark_launch_entry_updated(entry)
+    launch_registry[LAUNCH_REGISTRY_ENTRIES_FIELD][launch_id] = entry
+    return build_launch_result(entry)
+
+
+def handle_launch_status(
+    request: dict[str, object],
+    launch_registry: dict[str, dict[str, dict[str, object]]],
+    entry_lock: threading.Condition | None = None,
+) -> dict[str, object]:
+    """Return the current state for a tracked launch."""
+
+    launch_id = str((request.get("payload") or {}).get("launch_id") or "").strip()
+    entry = get_launch_entry(launch_registry, launch_id)
+    if entry_lock is not None:
+        entry = refresh_launch_entry_threadsafe(entry, entry_lock)
+    else:
+        entry = refresh_launch_entry(entry)
+    return build_launch_result(entry)
+
+
+def handle_launch_wait(
+    request: dict[str, object],
+    launch_registry: dict[str, dict[str, dict[str, object]]],
+    entry_lock: threading.Condition | None = None,
+) -> dict[str, object]:
+    """Wait for a tracked launch to finish and return its terminal state."""
+
+    launch_id = str((request.get("payload") or {}).get("launch_id") or "").strip()
+    entry = get_launch_entry(launch_registry, launch_id)
+    if entry_lock is not None:
+        entry = wait_for_launch_entry_threadsafe(entry, entry_lock)
+    else:
+        entry = wait_for_launch_entry(entry)
+    return build_launch_result(entry)
+
+
+def handle_launch_stop(
+    request: dict[str, object],
+    launch_registry: dict[str, dict[str, dict[str, object]]],
+    entry_lock: threading.Condition | None = None,
+) -> dict[str, object]:
+    """Stop a tracked launch and return its updated state."""
+
+    launch_id = str((request.get("payload") or {}).get("launch_id") or "").strip()
+    entry = get_launch_entry(launch_registry, launch_id)
+    if entry_lock is not None:
+        entry = stop_launch_entry_threadsafe(entry, entry_lock)
+    else:
+        entry = stop_launch_entry(entry)
+    return build_launch_result(entry)
+
+
+def build_command_handlers(
+    launch_registry: dict[str, dict[str, dict[str, object]]] | None = None,
+    organizer=None,
+    main_thread_pump: MainThreadCallPump | None = None,
+):
+    """Return the command handler registry for system and launch methods."""
+
+    launch_registry = launch_registry if launch_registry is not None else create_launch_registry()
+    launch_registry_lock = threading.Lock()
+    launch_entry_locks: dict[str, threading.Condition] = {}
+    handlers = {
+        SYSTEM_PING_METHOD: handle_system_ping,
+    }
+
+    def get_launch_entry_and_lock(launch_id: str) -> tuple[dict[str, object], threading.Condition]:
+        with launch_registry_lock:
+            entry = get_launch_entry(launch_registry, launch_id)
+            return entry, launch_entry_locks[launch_id]
+
+    def handle_launch_request(request: dict[str, object], method_name: str) -> dict[str, object]:
+        if method_name == LAUNCH_START_METHOD:
+            with launch_registry_lock:
+                result = handle_launch_start(
+                    request,
+                    launch_registry,
+                    organizer=organizer,
+                    main_thread_pump=main_thread_pump,
+                )
+                launch_entry_locks[result["launch_id"]] = threading.Condition()
+                prune_terminal_launches(launch_registry, launch_entry_locks)
+                return result
+
+        launch_id = str((request.get("payload") or {}).get("launch_id") or "").strip()
+        _entry, entry_lock = get_launch_entry_and_lock(launch_id)
+        if method_name == LAUNCH_STATUS_METHOD:
+            result = handle_launch_status(request, launch_registry, entry_lock=entry_lock)
+        elif method_name == LAUNCH_WAIT_METHOD:
+            result = handle_launch_wait(request, launch_registry, entry_lock=entry_lock)
+        elif method_name == LAUNCH_STOP_METHOD:
+            result = handle_launch_stop(request, launch_registry, entry_lock=entry_lock)
+        else:
+            raise ValueError(f"Unsupported launch method: {method_name}")
+
+        with launch_registry_lock:
+            prune_terminal_launches(launch_registry, launch_entry_locks)
+        return result
+
+    for method_name in LAUNCH_METHODS:
+        handlers[method_name] = lambda request, method_name=method_name: handle_launch_request(request, method_name)
+
+    def handle_system_capabilities(_request: dict[str, object]) -> dict[str, object]:
+        """Return the currently registered command surface."""
+
+        return {
+            "commands": sorted(handlers.keys()),
+        }
+
+    handlers[SYSTEM_CAPABILITIES_METHOD] = handle_system_capabilities
+    return handlers
+
+
+def dispatch_transport_request(request: dict[str, object], handlers) -> dict[str, object]:
+    """Route a single request through the local handler registry."""
+
+    method = request.get("method") or request.get("command")
+    if method is not None and request.get("method") != method:
+        request = dict(request)
+        request["method"] = method
+
+    handler = handlers.get(method)
+    if handler is None:
+        return build_transport_response(
+            request,
+            ok=False,
+            error={
+                "code": "method_not_found",
+                "message": f"Unsupported method: {method}",
+            },
+        )
+
+    try:
+        return build_transport_response(request, ok=True, result=handler(request), error=None)
+    except ValueError as exc:
+        return build_transport_response(
+            request,
+            ok=False,
+            error={
+                "code": "invalid_params",
+                "message": str(exc),
+            },
+        )
+    except OSError as exc:
+        return build_transport_response(
+            request,
+            ok=False,
+            error={
+                "code": "transport_error",
+                "message": str(exc),
+            },
+        )
+    except NotImplementedError as exc:
+        return build_transport_response(
+            request,
+            ok=False,
+            error={
+                "code": "not_implemented",
+                "message": str(exc),
+            },
+        )
+    except Exception as exc:  # pragma: no cover - fail closed for unexpected live errors.
+        return build_transport_response(
+            request,
+            ok=False,
+            error={
+                "code": "internal_error",
+                "message": str(exc),
+            },
+        )
+
+
+def bootstrap_named_pipe_server(runtime_root: str | Path, handlers, pipe_name: str | None = None):
+    """Start a real background named-pipe server and return transport metadata."""
+
+    resolved_pipe_name = get_runtime_pipe_name() if pipe_name is None else str(pipe_name)
+    stop_event = threading.Event()
+    server_thread = threading.Thread(
+        target=serve_named_pipe_requests,
+        args=(resolved_pipe_name, handlers, stop_event),
+        name=f"{PLUGIN_NAME}-named-pipe-server",
+        daemon=True,
+    )
+    server_thread.start()
+
+    _ACTIVE_NAMED_PIPE_TRANSPORTS.append(
+        {
+            "endpoint": resolved_pipe_name,
+            "pipePath": get_named_pipe_path(resolved_pipe_name),
+            "stopEvent": stop_event,
+            "thread": server_thread,
+        }
+    )
+
+    return {
+        "transport": RUNTIME_TRANSPORT,
+        RUNTIME_ENDPOINT_FIELD: resolved_pipe_name,
+        "pipePath": get_named_pipe_path(resolved_pipe_name),
+        "runtimeRoot": str(Path(runtime_root)),
+        "started": True,
+    }
+
+
+def start_transport(
+    runtime_root: str | Path | None = None,
+    organizer=None,
+    main_thread_pump: MainThreadCallPump | None = None,
+):
+    """Start the live named-pipe transport after bootstrap publication."""
+
+    resolved_runtime_root = Path(runtime_root) if runtime_root is not None else get_runtime_root()
+    handlers = build_command_handlers(organizer=organizer, main_thread_pump=main_thread_pump)
+    return bootstrap_named_pipe_server(resolved_runtime_root, handlers, pipe_name=get_runtime_pipe_name())
+
+
+def get_runtime_root(module_path: str | Path | None = None) -> Path:
+    """Return the deployed bootstrap runtime directory."""
+
+    module_file = Path(module_path) if module_path is not None else Path(__file__)
+    return (
+        module_file.resolve().parent
+        / PLUGIN_NAME
+        / BOOTSTRAP_DIRECTORY_NAME
+        / RUNTIME_DIRECTORY_NAME
+    )
+
+
+def write_runtime_json(runtime_file: Path, document: dict[str, object]) -> None:
+    """Atomically replace a runtime JSON document to avoid partial reads."""
+
+    temp_file = runtime_file.with_suffix(runtime_file.suffix + ".tmp")
+    temp_file.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp_file, runtime_file)
+
+
+def publish_runtime_bootstrap(runtime_root: str | Path | None = None) -> Path:
+    """Create the minimal live-bootstrap runtime files under the support directory."""
+
+    root = Path(runtime_root) if runtime_root is not None else get_runtime_root()
+    root.mkdir(parents=True, exist_ok=True)
+    methods = sorted(build_command_handlers().keys())
+
+    runtime_documents = {
+        RUNTIME_STATUS_FILE: {
+            "schemaVersion": RUNTIME_SCHEMA_VERSION,
+            "state": RUNTIME_READY_STATE,
+            "mo2Pid": os.getpid(),
+        },
+        RUNTIME_CAPABILITIES_FILE: {
+            "schemaVersion": RUNTIME_SCHEMA_VERSION,
+            "methods": methods,
+        },
+        RUNTIME_ENDPOINT_FILE: {
+            "schemaVersion": RUNTIME_SCHEMA_VERSION,
+            "transport": RUNTIME_TRANSPORT,
+            RUNTIME_ENDPOINT_FIELD: get_runtime_pipe_name(),
+        },
+    }
+
+    for file_name, document in runtime_documents.items():
+        write_runtime_json(root / file_name, document)
+
+    return root
+
+
+class Mo2AgentControlPlugin(mobase.IPluginTool):
+    """Minimal MO2 plugin that publishes discovery/liveness bootstrap evidence."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._organizer = None
+        self._main_thread_pump = None
+        self._main_thread_timer = None
+        self._blocker_watcher_timer = None
+        self._transport = None
+
+    def init(self, organizer) -> bool:
+        self._organizer = organizer
+        self._main_thread_pump = MainThreadCallPump()
+        self._main_thread_timer = install_main_thread_pump_timer(self._main_thread_pump)
+        runtime_root = publish_runtime_bootstrap()
+        self._blocker_watcher_timer = install_blocker_watcher_timer(runtime_root)
+        self._transport = start_transport(
+            runtime_root,
+            organizer=organizer,
+            main_thread_pump=self._main_thread_pump,
+        )
+        return True
+
+    def name(self):
+        return PLUGIN_NAME
+
+    def author(self):
+        return "Vault-Tec Automated Research Terminal"
+
+    def description(self):
+        return "Publishes file-bootstrap discovery/liveness evidence, not the command transport."
+
+    def version(self):
+        return mobase.VersionInfo(0, 1, 0, 0)
+
+    def settings(self):
+        return []
+
+    def displayName(self):
+        return PLUGIN_NAME
+
+    def tooltip(self):
+        return self.description()
+
+
+def createPlugin() -> Mo2AgentControlPlugin:
+    return Mo2AgentControlPlugin()

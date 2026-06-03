@@ -36,13 +36,13 @@ AGENTS.md
 /tools/xedit-hook-bridge/*.identcache
 /tools/xedit-hook-bridge/*.res
 
-# Codex requires plugins/<name>/ subdirectory layout (its cache-copy step
-# silently drops directory junctions). The local plugins/<name>/ tree is a
-# per-machine install workaround that holds real .codex-plugin/ + .mcp.json
-# files plus junctions to skills/tools/hooks/.opencode for browsing. The
-# absolute paths inside those copies are machine-specific. A v0.2 follow-up
-# will ship a portable Codex-shaped subdirectory; for now it stays local.
-/plugins/
+# /plugins/<name>/ is the materialized end-user marketplace tree required by
+# Codex's marketplace schema (see .agents/plugins/marketplace.json). It is
+# regenerated from source via scripts/build-portable-plugin.ps1 on every
+# release. Tracked, not ignored. The sibling marketplace.json that the build
+# script writes at /plugins/marketplace.json (portable-distribution shape) is
+# NOT our canonical marketplace manifest and stays ignored.
+/plugins/marketplace.json
 
 # BGS KB pack build artifact; source records + manifest.json are committed.
 /knowledge/bgs-kb/packs/*/kb.sqlite

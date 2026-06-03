@@ -1,0 +1,47 @@
+{
+  "builtAt": "2026-06-03T01:44:56.058Z",
+  "displayName": "BGS Modding Core Knowledge",
+  "domains": [
+    "archive-precedence",
+    "debugging",
+    "engine",
+    "file-conflicts",
+    "install-planning",
+    "load-order",
+    "papyrus",
+    "plugin-format",
+    "save-file",
+    "tooling.loot",
+    "tooling.mutagen",
+    "tooling.spriggit",
+    "version-differences",
+    "xedit"
+  ],
+  "engineFamilies": [
+    "creation-engine",
+    "creation-engine-2",
+    "gamebryo"
+  ],
+  "games": [
+    "Fallout3",
+    "Fallout4",
+    "Fallout4VR",
+    "FalloutNV",
+    "SkyrimAE",
+    "SkyrimLE",
+    "SkyrimSE",
+    "SkyrimVR",
+    "Starfield"
+  ],
+  "license": "MIT",
+  "minPluginVersion": "0.2.0",
+  "owner": "bgs-modding-superpowers maintainers",
+  "packId": "bgs-kb-core",
+  "recordCount": 113,
+  "schemaVersion": 1,
+  "sha256": {
+    "kb.sqlite": "3630ead4d2acb754956d11569aa641c4ff9d99b2997bbd67d23a513527bcf9da"
+  },
+  "sourceCommit": "ec9409f7010c6a3e5cecd8f5f36d9f1333259750",
+  "version": "2026.06.02"
+}

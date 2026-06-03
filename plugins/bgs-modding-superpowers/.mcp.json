@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "xedit": {
+      "command": "node",
+      "args": [
+        "./tools/xedit-mcp/dist/index.js"
+      ]
+    },
+    "bgs_kb": {
+      "command": "node",
+      "args": [
+        "./tools/bgs-kb-mcp/dist/index.js"
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Session-start bootstrap for bgs-modding-superpowers.
+# Prints the using-bgs-modding-superpowers SKILL body to stdout;
+# Claude Code / Codex inject it into the session context.
+
+set -euo pipefail
+
+PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BOOTSTRAP="$PLUGIN_ROOT/skills/using-bgs-modding-superpowers/SKILL.md"
+
+if [ -f "$BOOTSTRAP" ]; then
+  cat "$BOOTSTRAP"
+fi
