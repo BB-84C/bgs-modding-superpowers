@@ -98,7 +98,7 @@ describe.skipIf(!integrationEnabled)("KB-2f stdio MCP server smoke", () => {
     expect(initialized.serverInfo.name).toBe("bgs-kb-mcp");
 
     const listed = resultById<{ tools: Array<{ name: string }> }>(messages, 2);
-    expect(listed.tools.map((tool) => tool.name)).toEqual(["bgs_kb_status", "bgs_kb_query", "bgs_kb_get"]);
+    expect(listed.tools.map((tool) => tool.name)).toEqual(["bgs_kb_status", "bgs_kb_query", "bgs_kb_get", "bgs_kb_check_updates", "bgs_kb_install_pack"]);
 
     const status = parseToolBody(resultById<{ content: Array<{ type: string; text: string }> }>(messages, 3));
     expect(status.ok).toBe(true);
