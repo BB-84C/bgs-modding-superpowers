@@ -86,9 +86,9 @@ export interface CliResult {
   combined: string;
 }
 
-export async function runCli(args: string[]): Promise<CliResult> {
+export async function runCli(args: string[], options: { env?: NodeJS.ProcessEnv } = {}): Promise<CliResult> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, ["dist/cli.js", ...args], { cwd: process.cwd() });
+    const child = spawn(process.execPath, ["dist/cli.js", ...args], { cwd: process.cwd(), env: { ...process.env, ...options.env } });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => {

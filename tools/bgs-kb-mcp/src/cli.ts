@@ -15,6 +15,8 @@ import { buildPack, BuildValidationError } from "./build/index.js";
 import { readRecords } from "./build/read-records.js";
 import { formatValidationError } from "./build/validate.js";
 import { validateRecords } from "./build/validate.js";
+import { formatPruneCacheResult, pruneCache } from "./cache/prune-cache.js";
+import { defaultCacheRoot } from "./discovery/resolve-roots.js";
 import { formatInfo } from "./info/format.js";
 import { gatherInfo } from "./info/index.js";
 import { resolve } from "node:path";
@@ -28,6 +30,7 @@ Usage:
   bgs-kb-mcp build <pack-root>       Build kb.sqlite + manifest.json from records/  (KB-1e)
   bgs-kb-mcp validate <pack-root>    Validate all records against schema            (KB-1f)
   bgs-kb-mcp info <pack-root>        Print pack summary                             (KB-1f)
+  bgs-kb-mcp prune-cache [--dry-run] Keep current + previous cached pack versions   (KB-6d)
   bgs-kb-mcp render <pack-root>      Render legacy markdown handbook from records   (KB-5)
 
 Currently implemented: build, validate, info. Other subcommands return exit 2
@@ -116,6 +119,22 @@ if (sub === "info") {
   try {
     const info = await gatherInfo(packRoot);
     process.stdout.write(formatInfo(info));
+    process.exit(0);
+  } catch (error) {
+    console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(2);
+  }
+}
+
+if (sub === "prune-cache") {
+  const extra = args.slice(1).filter((arg) => arg !== "--dry-run");
+  if (extra.length > 0) {
+    console.error(`bgs-kb-mcp prune-cache: unsupported argument(s): ${extra.join(", ")}`);
+    process.exit(2);
+  }
+  try {
+    const result = await pruneCache(defaultCacheRoot(), { dryRun: args.includes("--dry-run") });
+    process.stdout.write(formatPruneCacheResult(result));
     process.exit(0);
   } catch (error) {
     console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
