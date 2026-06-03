@@ -103,8 +103,8 @@ $PACK_IDS = @(
 )
 
 # Verify every pack directory exists
-foreach ($pid in $PACK_IDS) {
-  $packDir = Join-Path $PacksRoot $pid
+foreach ($pkgId in $PACK_IDS) {
+  $packDir = Join-Path $PacksRoot $pkgId
   if (-not (Test-Path -LiteralPath $packDir)) {
     throw "Pack directory missing: $packDir"
   }
@@ -113,12 +113,12 @@ foreach ($pid in $PACK_IDS) {
 # Stage 1: rebuild each pack -------------------------------------------------
 if (-not $SkipBuild) {
   Write-Host "[build-kb-release] === STAGE 1: rebuild each pack ==="
-  foreach ($pid in $PACK_IDS) {
-    $packDir = Join-Path $PacksRoot $pid
-    Write-Host "[build-kb-release] building $pid ..."
+  foreach ($pkgId in $PACK_IDS) {
+    $packDir = Join-Path $PacksRoot $pkgId
+    Write-Host "[build-kb-release] building $pkgId ..."
     & node $CliPath build $packDir
     if ($LASTEXITCODE -ne 0) {
-      throw "Pack build failed for $pid (exit $LASTEXITCODE). If EBUSY on kb.sqlite, run this script in a fresh shell."
+      throw "Pack build failed for $pkgId (exit $LASTEXITCODE). If EBUSY on kb.sqlite, run this script in a fresh shell."
     }
   }
 } else {
@@ -150,22 +150,22 @@ Write-Host "[build-kb-release] release tag: $ReleaseTag"
 
 $indexEntries = New-Object System.Collections.Generic.List[object]
 
-foreach ($pid in $PACK_IDS) {
-  $packDir = Join-Path $PacksRoot $pid
+foreach ($pkgId in $PACK_IDS) {
+  $packDir = Join-Path $PacksRoot $pkgId
   $manifestPath = Join-Path $packDir "manifest.json"
   $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 
-  $assetName = "$pid-$($manifest.version).zip"
+  $assetName = "$pkgId-$($manifest.version).zip"
   $assetPath = Join-Path $OutputDir $assetName
 
-  Write-Host "[build-kb-release] zipping $pid -> $assetName"
+  Write-Host "[build-kb-release] zipping $pkgId -> $assetName"
 
   # Compress-Archive zips the contents into a path-rooted at $packDir.
   # We want the zip's root to contain `<packDir-basename>/...` so consumers
   # can extract directly and end up with a single top-level pack directory.
   $tmpStage = Join-Path $env:TEMP "kb-release-stage-$([guid]::NewGuid().ToString('n'))"
   New-Item -ItemType Directory -Path $tmpStage -Force | Out-Null
-  $tmpPackParent = Join-Path $tmpStage $pid
+  $tmpPackParent = Join-Path $tmpStage $pkgId
   Copy-Item -LiteralPath $packDir -Destination $tmpPackParent -Recurse -Force
   Compress-Archive -Path "$tmpPackParent" -DestinationPath $assetPath -Force
   Remove-Item -LiteralPath $tmpStage -Recurse -Force
@@ -215,8 +215,8 @@ Write-Host "[build-kb-release]   index      : $indexPath"
 
 # Build the gh command --------------------------------------------------------
 $assetArgs = @($indexPath)
-foreach ($pid in $PACK_IDS) {
-  $entry = $indexEntries | Where-Object { $_["packId"] -in @($pid, "bgs-kb-$pid") } | Select-Object -First 1
+foreach ($pkgId in $PACK_IDS) {
+  $entry = $indexEntries | Where-Object { $_["packId"] -in @($pkgId, "bgs-kb-$pkgId") } | Select-Object -First 1
   if ($entry) {
     $assetName = "$($entry["packId"])-$($entry["version"]).zip"
     if ($entry["packId"] -eq "bgs-kb-core") {
