@@ -1,5 +1,5 @@
 {
-  "name": "bgs-modding-superpowers-dev",
+  "name": "bgs-modding-superpowers",
   "interface": {
     "displayName": "BGS Modding Superpowers"
   },
@@ -8,7 +8,7 @@
       "name": "bgs-modding-superpowers",
       "source": {
         "source": "local",
-        "path": "./plugins/bgs-modding-superpowers"
+        "path": "./"
       },
       "policy": {
         "installation": "AVAILABLE",
