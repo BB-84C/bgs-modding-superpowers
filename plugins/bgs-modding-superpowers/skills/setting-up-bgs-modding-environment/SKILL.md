@@ -98,30 +98,61 @@ Ask which target games the modpack should support. Use the exact game codes
 when talking to KB tools where possible: `SkyrimLE`, `SkyrimSE`, `SkyrimAE`,
 `SkyrimVR`, `Fallout4`, `Fallout4VR`, `Fallout3`, `FalloutNV`, `Starfield`.
 
-The bundled core pack is already installed in the plugin tree. No action is
-needed for `bgs-kb-core`; it should appear in `bgs_kb_status` even before MO2 or
-xEdit are configured.
+The bundled `bgs-kb-core` pack is materialized inside the plugin tree at
+`plugins/bgs-modding-superpowers/knowledge/bgs-kb/packs/core/`. No action is
+needed for it; it appears in `bgs_kb_status` even before MO2 or xEdit are
+configured.
 
-For per-game packs, when KB-4+ publishes them as GitHub Release artifacts:
+Per-game packs (`bgs-kb-skyrim`, `bgs-kb-fallout4`, `bgs-kb-fallout3-fnv`,
+`bgs-kb-starfield`) are published as GitHub Release artifacts on the
+`BB-84C/bgs-modding-superpowers` repo. The KB MCP wraps the entire fetch +
+sha256 verify + cache install in two tools — do **not** download zips by hand:
 
-1. Surface the pack IDs that match the selected games.
-2. Ask for explicit user consent before downloading any Release artifact.
-3. Download only from the `bgs-modding-superpowers` GitHub Releases page.
-4. Verify the published sha256 before install.
-5. Install into `%LOCALAPPDATA%/bgs-modding-superpowers/kb/packs/` using the
-   pack's versioned cache layout.
-6. If the selected per-game packs are not published yet, say so and continue
-   with the bundled core pack; do not invent a download URL.
+1. Map the chosen games to pack IDs:
+   - `SkyrimLE` / `SkyrimSE` / `SkyrimAE` / `SkyrimVR` -> `bgs-kb-skyrim`
+   - `Fallout4` / `Fallout4VR` -> `bgs-kb-fallout4`
+   - `Fallout3` / `FalloutNV` -> `bgs-kb-fallout3-fnv`
+   - `Starfield` -> `bgs-kb-starfield`
+
+2. List what is available from the live release manifest:
+   ```
+   bgs_kb_check_updates({})
+   ```
+   This reads the published `manifest-index.json` and returns the latest
+   `{ packId, version, sha256, url, breakingChange }` for every official pack.
+   Surface the per-game-pack rows that match the chosen games before doing
+   anything else.
+
+3. Get **explicit** user consent before installing each pack ("yes, install
+   `bgs-kb-skyrim`"). Pack install mutates `%LOCALAPPDATA%/bgs-modding-superpowers/kb/packs/<packId>/<version>/`.
+
+4. For each consented pack:
+   ```
+   bgs_kb_install_pack({ packId: "bgs-kb-skyrim", version: "<from check_updates>", dryRun: true })
+   ```
+   Verify the dry-run reports the expected version + sha256, then re-run
+   without `dryRun` to actually install. The MCP downloads from the official
+   release URL, verifies sha256, and lays the pack out in the versioned cache.
+
+5. If `bgs_kb_check_updates` returns an empty or partial list for a game the
+   user wanted (network failure, release not yet published), say so and
+   continue with the bundled core pack. Do not improvise a download URL or
+   `iwr` into the cache by hand.
 
 Smoke test after selection / install:
 
 ```text
+bgs_kb_status({})
 bgs_kb_query({ query: "plugins", games: ["<chosen-game>"], maxResults: 3 })
 ```
 
-Success criterion: at least one hit. If a specific per-game pack was installed,
-also check `bgs_kb_status({})` and verify its `packId` appears. If only the core
-pack is available, a core-pack hit is enough for first-run.
+Success criterion: `bgs_kb_status` lists every pack that was just installed
+plus `bgs-kb-core`, and `bgs_kb_query` returns at least one hit. If only the
+core pack is available, a core-pack hit is enough for first-run.
+
+For routine update / prune / version-pinning work after first-run, route to
+`maintaining-modding-environments` — it documents the full ongoing-care flow
+on top of the same two MCP tools.
 
 ### Step 4 - Install the MO2 control plane (Python + broker)
 
