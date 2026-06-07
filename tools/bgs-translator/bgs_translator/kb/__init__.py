@@ -1,5 +1,7 @@
 """Read-only bgs-kb integration package."""
 
-# TODO(Chunk-G): Register KB exports as implementations land.
+from bgs_translator.kb.glossary import GlossaryComposer, GlossarySubset
+from bgs_translator.kb.models import GlossaryEntry, ResolvedTerm
+from bgs_translator.kb.reader import KBGlossaryReader
 
-__all__ = []
+__all__ = ["GlossaryComposer", "GlossaryEntry", "GlossarySubset", "KBGlossaryReader", "ResolvedTerm"]
