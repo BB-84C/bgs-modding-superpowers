@@ -182,3 +182,198 @@ def test_amber_scrollbar_set_then_redraw_round_trip() -> None:
         assert end >= start
     finally:
         root.destroy()
+
+
+# ---------------------------------------------------------------------
+# Polish pass 3 — strip native chrome, custom titlebar + checkbox
+# ---------------------------------------------------------------------
+
+
+def test_translator_app_strips_native_chrome_on_windows() -> None:
+    """``wm_overrideredirect(True)`` must be active on win32/linux."""
+
+    _need_tk_runtime()
+    import sys
+
+    from bgs_translator.gui.app import TranslatorApp
+
+    app = TranslatorApp()
+    try:
+        if sys.platform in ("win32", "linux"):
+            assert app.chrome_stripped is True, (
+                "TranslatorApp must call overrideredirect(True) on win32 + linux"
+            )
+            assert bool(app.overrideredirect()) is True
+            assert app.titlebar is not None, (
+                "AmberTitlebar must be mounted when native chrome is stripped"
+            )
+        else:
+            # macOS: chrome left intact deliberately.
+            assert app.chrome_stripped is False
+            assert app.titlebar is None
+    finally:
+        app.destroy()
+
+
+def test_amber_titlebar_has_min_max_close_buttons() -> None:
+    _need_tk_runtime()
+    import sys
+
+    from bgs_translator.gui.app import TranslatorApp
+
+    if sys.platform not in ("win32", "linux"):
+        import pytest
+
+        pytest.skip("Custom titlebar is Windows/Linux-first")
+
+    app = TranslatorApp()
+    try:
+        titlebar = app.titlebar
+        assert titlebar is not None
+        controls = titlebar.controls
+        assert set(controls.keys()) == {"min", "max", "close"}
+        # Each control widget should render a non-empty caption.
+        for kind, widget in controls.items():
+            text = str(widget.cget("text")).strip()
+            assert text, f"{kind!r} titlebar button has no glyph"
+    finally:
+        app.destroy()
+
+
+def test_amber_titlebar_drag_handler_moves_root() -> None:
+    """Synthesizing the drag bindings should update the root geometry."""
+
+    _need_tk_runtime()
+    import sys
+    import tkinter as tk
+
+    from bgs_translator.gui.app import TranslatorApp
+
+    if sys.platform not in ("win32", "linux"):
+        import pytest
+
+        pytest.skip("Custom titlebar is Windows/Linux-first")
+
+    app = TranslatorApp()
+    try:
+        app.update_idletasks()
+        titlebar = app.titlebar
+        assert titlebar is not None
+        start_x = app.winfo_x()
+        start_y = app.winfo_y()
+
+        # Fabricate press + motion events. We cannot use event_generate
+        # for x_root / y_root reliably across platforms, so we drive
+        # the handlers directly.
+        press = tk.Event()
+        press.x_root = start_x + 50
+        press.y_root = start_y + 5
+        titlebar._on_drag_start(press)
+
+        motion = tk.Event()
+        motion.x_root = start_x + 200
+        motion.y_root = start_y + 150
+        titlebar._on_drag_motion(motion)
+        app.update_idletasks()
+
+        # Geometry should reflect the delta: new origin == event_root - anchor.
+        new_x = app.winfo_x()
+        new_y = app.winfo_y()
+        assert new_x != start_x or new_y != start_y, (
+            "Drag handler did not move the root window"
+        )
+
+        titlebar._on_drag_end(tk.Event())
+    finally:
+        app.destroy()
+
+
+def test_amber_checkbox_toggles_value() -> None:
+    _need_tk_runtime()
+    import tkinter as tk
+
+    from bgs_translator.gui.widgets import AmberCheckbox
+
+    root = tk.Tk()
+    try:
+        cb = AmberCheckbox(root, text="Always preview", initial=False)
+        cb.pack()
+        cb.update_idletasks()
+        assert cb.value is False
+        cb.value = True
+        assert cb.value is True
+        # Setter is idempotent.
+        cb.value = True
+        assert cb.value is True
+    finally:
+        root.destroy()
+
+
+def test_amber_checkbox_emits_virtual_event_on_click() -> None:
+    _need_tk_runtime()
+    import tkinter as tk
+
+    from bgs_translator.gui.widgets import AmberCheckbox
+
+    root = tk.Tk()
+    try:
+        cb = AmberCheckbox(root, text="Always preview", initial=False)
+        cb.pack()
+        cb.update_idletasks()
+        toggled: list[bool] = []
+        cb.bind("<<CheckboxToggled>>", lambda _e: toggled.append(cb.value))
+        cb._on_click(tk.Event())
+        # ``update_idletasks`` only drains idle work; virtual events
+        # queued with ``when="tail"`` need the full event-loop pump.
+        cb.update()
+        assert toggled == [True]
+        cb._on_click(tk.Event())
+        cb.update()
+        assert toggled == [True, False]
+    finally:
+        root.destroy()
+
+
+def test_project_tab_uses_amber_checkbox() -> None:
+    """The Project tab's preview toggle must be the new AmberCheckbox."""
+
+    _need_tk_runtime()
+    import tkinter as tk
+
+    from bgs_translator.gui.tabs import ProjectTab
+    from bgs_translator.gui.themes import AMBER_THEME, apply_theme
+    from bgs_translator.gui.widgets import AmberCheckbox
+
+    root = tk.Tk()
+    try:
+        apply_theme(root, AMBER_THEME, "Consolas", 11)
+        tab = ProjectTab(root)
+        tab.pack()
+        tab.update_idletasks()
+        # The tab should hold a reference to the new widget.
+        assert isinstance(tab._preview_checkbox, AmberCheckbox)
+        # And the old ttk.Checkbutton attribute (_preview_var) must be gone.
+        assert not hasattr(tab, "_preview_var")
+    finally:
+        root.destroy()
+
+
+def test_app_outer_frame_paints_accent_border() -> None:
+    """The outer frame around the workspace must render the accent colour."""
+
+    _need_tk_runtime()
+    from bgs_translator.gui.app import TranslatorApp
+    from bgs_translator.gui.themes import AMBER_THEME
+
+    app = TranslatorApp()
+    try:
+        app.update_idletasks()
+        outer_bg = str(app._outer.cget("background")).lower()
+        assert outer_bg == AMBER_THEME.accent.lower(), (
+            f"Outer accent border expected {AMBER_THEME.accent!r}, got {outer_bg!r}"
+        )
+        # The workspace inside should be the regular background.
+        workspace_bg = str(app._workspace.cget("background")).lower()
+        assert workspace_bg == AMBER_THEME.background.lower()
+    finally:
+        app.destroy()

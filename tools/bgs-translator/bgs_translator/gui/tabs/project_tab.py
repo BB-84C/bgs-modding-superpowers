@@ -22,6 +22,7 @@ from typing import Any, Final, Literal
 from bgs_translator.config import paths
 from bgs_translator.core.memory import open_memory_db
 from bgs_translator.gui.i18n import gettext as _
+from bgs_translator.gui.widgets.amber_checkbox import AmberCheckbox
 from bgs_translator.gui.widgets.amber_scrollbar import AmberScrollbar
 
 log = logging.getLogger(__name__)
@@ -163,13 +164,16 @@ class ProjectTab(ttk.Frame):
         counts_frame.columnconfigure(0, weight=1)
 
         # Toggle row ----------------------------------------------------
-        self._preview_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
+        # Polish pass 3: custom canvas checkbox replaces ttk.Checkbutton
+        # because the native indicator paints a white square on Windows
+        # even after the polish-pass-2 layout overrides.
+        self._preview_checkbox = AmberCheckbox(
             self,
             text=_("Always preview system prompt before batch dispatch"),
-            variable=self._preview_var,
+            initial=False,
             command=self._on_preview_toggled,
-        ).grid(row=3, column=0, sticky="w", pady=(0, 6))
+        )
+        self._preview_checkbox.grid(row=3, column=0, sticky="w", pady=(0, 6))
 
         # Action buttons -----------------------------------------------
         actions = ttk.Frame(self)
@@ -256,7 +260,7 @@ class ProjectTab(ttk.Frame):
 
     def _on_preview_toggled(self) -> None:
         # TODO(Chunk-L.2): wire to settings.behavior.prompt_preview_required.
-        log.info("Prompt preview toggle = %s", self._preview_var.get())
+        log.info("Prompt preview toggle = %s", self._preview_checkbox.value)
 
     def _on_rescan(self) -> None:
         # TODO(Chunk-L.2): invoke 'xtl project rescan'.

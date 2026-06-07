@@ -410,6 +410,15 @@ def apply_theme(root: tk.Misc, theme: ThemeConfig, font_family: str, font_size: 
     )
 
     # ------------------------------------------------------------------
+    # Titlebar styles (registered late so theme switches refresh them).
+    # ------------------------------------------------------------------
+    # Imported here to avoid a top-level circular dependency between
+    # the themes package and the widgets package.
+    from bgs_translator.gui.widgets.amber_titlebar import install_titlebar_styles
+
+    install_titlebar_styles(root, theme, base_font)
+
+    # ------------------------------------------------------------------
     # Root background.
     # ------------------------------------------------------------------
     try:

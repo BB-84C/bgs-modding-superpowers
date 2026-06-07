@@ -11,12 +11,14 @@ may build a ``TranslatorApp`` and ``destroy`` it without ever invoking
 
 from __future__ import annotations
 
+import ctypes
 import logging
+import sys
 import tkinter as tk
 import tomllib
 from tkinter import font as tkfont
 from tkinter import ttk
-from typing import Final
+from typing import Any, Final
 
 from bgs_translator.config import paths
 from bgs_translator.config.profiles import ProfilesConfig, load_profiles
@@ -35,6 +37,7 @@ from bgs_translator.gui.tabs import (
 )
 from bgs_translator.gui.themes import apply_theme, get_theme, list_themes
 from bgs_translator.gui.widgets import AmberScrollbar, StatusBar
+from bgs_translator.gui.widgets.amber_titlebar import AmberTitlebar
 from bgs_translator.gui.win_chrome import apply_titlebar_tint
 
 log = logging.getLogger(__name__)
@@ -142,19 +145,31 @@ class TranslatorApp(tk.Tk):
         self._theme_config = get_theme(resolved_theme)
         apply_theme(self, self._theme_config, self._font_family, _FONT_SIZE)
 
-        # Tint the Windows titlebar to match the active theme. On
-        # Windows 11 22000+ this paints the caption / border / text in
-        # the theme palette; on Win10 1809+ it only sets dark-mode but
-        # that's still enough to drop the white caption. Non-Windows is
-        # a silent no-op.
-        # TODO(Chunk-L.3): if a future user prefers a fully custom
-        # titlebar, swap this for ``self.overrideredirect(True)`` plus
-        # a hand-drawn caption widget. The current approach keeps
-        # native min/max/close affordances and feels lighter.
+        # Strip native chrome on Windows (iter3). overrideredirect=True
+        # removes the OS-drawn titlebar, min/max/close buttons, and
+        # window frame entirely; the custom AmberTitlebar takes over.
+        # Linux is best-effort (works on most WMs, no shadow). macOS is
+        # excluded because overrideredirect drops the rounded corners
+        # and shadow; on those hosts the iter2 DWM tint path is the
+        # closest we can get without rewriting the chrome entirely.
+        self._chrome_stripped = sys.platform in ("win32", "linux")
+        if self._chrome_stripped:
+            self.withdraw()
+            try:
+                self.overrideredirect(True)
+            except tk.TclError as exc:
+                log.debug("overrideredirect rejected by Tk: %s", exc)
+                self._chrome_stripped = False
+
+        # Iter2 DWM tint remains useful as a fallback when chrome was
+        # not stripped (non-Windows) — apply unconditionally; it
+        # silently no-ops on platforms where it does not apply.
         self._titlebar_tint = apply_titlebar_tint(self, self._theme_config)
 
         # Track amber scrollbars so theme switches can refresh them.
         self._amber_scrollbars: list[AmberScrollbar] = []
+        # Track amber checkboxes for the same reason.
+        self._amber_checkboxes: list[Any] = []
 
         # Close handler -------------------------------------------------
         self._close_handler = CloseHandler(self, on_force_close=self._on_force_close)
@@ -164,28 +179,80 @@ class TranslatorApp(tk.Tk):
         self._populate_nav()
         self._start_pulse()
 
+        # Re-show the window. When chrome was stripped we also flip the
+        # extended-style bits so the window keeps a taskbar entry —
+        # otherwise overrideredirect makes the window a tool window
+        # that Windows omits from the taskbar.
+        if self._chrome_stripped:
+            self._restore_taskbar_visibility()
+            self.deiconify()
+            try:
+                self.lift()
+            except tk.TclError:
+                pass
+
     # ------------------------------------------------------------------
     # Layout
     # ------------------------------------------------------------------
     def _build_layout(self) -> None:
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
+        # Outer 1px amber-accent border. When chrome is stripped this
+        # gives the window a visible CRT-style edge instead of bleeding
+        # into the desktop. When chrome is intact it acts as a thin
+        # inset that matches the theme.
+        outer_pad = 1 if self._chrome_stripped else 0
+        self._outer = tk.Frame(
+            self,
+            background=self._theme_config.accent,
+            padx=outer_pad,
+            pady=outer_pad,
+            borderwidth=0,
+            highlightthickness=0,
+            relief="flat",
+        )
+        self._outer.pack(fill="both", expand=True)
+
+        # Inner workspace — every other widget lives here so the outer
+        # accent stays visible as a clean 1px ring.
+        self._workspace = tk.Frame(
+            self._outer,
+            background=self._theme_config.background,
+            borderwidth=0,
+            highlightthickness=0,
+            relief="flat",
+        )
+        self._workspace.pack(fill="both", expand=True)
+        self._workspace.columnconfigure(0, weight=1)
+
+        next_row = 0
+        # Custom titlebar (only when native chrome was stripped).
+        self._titlebar: AmberTitlebar | None = None
+        if self._chrome_stripped:
+            self._titlebar = AmberTitlebar(
+                self._workspace,
+                self,
+                self._theme_config,
+                on_close=self._on_titlebar_close,
+            )
+            self._titlebar.grid(row=next_row, column=0, sticky="ew")
+            next_row += 1
 
         # Status bar.
         self._status_bar = StatusBar(
-            self,
+            self._workspace,
             languages=list(_LANGUAGES),
             themes=list_themes(),
             on_language_change=self._on_language_change,
             on_theme_change=self._on_theme_change,
         )
-        self._status_bar.grid(row=0, column=0, sticky="ew")
+        self._status_bar.grid(row=next_row, column=0, sticky="ew")
         self._status_bar.set_language(self._translator.language)
         self._status_bar.set_theme(self._current_theme)
+        next_row += 1
 
-        # Main paned (nav | content).
-        self._paned = ttk.PanedWindow(self, orient="horizontal")
-        self._paned.grid(row=1, column=0, sticky="nsew", padx=4, pady=(2, 4))
+        # Main paned (nav | content) takes the remaining space.
+        self._workspace.rowconfigure(next_row, weight=1)
+        self._paned = ttk.PanedWindow(self._workspace, orient="horizontal")
+        self._paned.grid(row=next_row, column=0, sticky="nsew", padx=4, pady=(2, 4))
 
         nav_frame = ttk.Frame(self._paned, padding=(4, 4))
         self._paned.add(nav_frame, weight=0)
@@ -362,17 +429,68 @@ class TranslatorApp(tk.Tk):
 
         self._amber_scrollbars.append(scrollbar)
 
+    def register_amber_checkbox(self, checkbox: Any) -> None:
+        """Register a tab-owned checkbox so theme switches re-tint it."""
+
+        self._amber_checkboxes.append(checkbox)
+
+    def _on_titlebar_close(self) -> None:
+        """Route the custom titlebar close click through the close handler."""
+
+        self._close_handler.request_close()
+
     def _on_theme_change(self, theme: str) -> None:
         self._current_theme = theme
         self._theme_config = get_theme(theme)
         apply_theme(self, self._theme_config, self._font_family, _FONT_SIZE)
         self._titlebar_tint = apply_titlebar_tint(self, self._theme_config)
+        if self._titlebar is not None:
+            try:
+                self._titlebar.apply_theme(self._theme_config)
+            except tk.TclError:
+                pass
+        # Repaint outer border + workspace to the new accent / bg.
+        try:
+            self._outer.configure(background=self._theme_config.accent)
+            self._workspace.configure(background=self._theme_config.background)
+        except tk.TclError:
+            pass
         for scrollbar in self._amber_scrollbars:
             try:
                 scrollbar.apply_theme(theme)
             except tk.TclError:
                 continue
+        for checkbox in self._amber_checkboxes:
+            try:
+                checkbox.apply_theme(theme)
+            except tk.TclError:
+                continue
         log.info("Switched theme to %s", theme)
+
+    def _restore_taskbar_visibility(self) -> None:
+        """Re-enable the Windows taskbar entry after overrideredirect.
+
+        ``overrideredirect(True)`` flips the window into a tool-window
+        style that Windows hides from the taskbar. Adding the
+        ``WS_EX_APPWINDOW`` bit (and removing ``WS_EX_TOOLWINDOW``)
+        puts the entry back.
+        """
+
+        if sys.platform != "win32":
+            return
+        try:
+            self.update_idletasks()
+            user32: Any = ctypes.windll.user32
+            child = int(self.winfo_id())
+            hwnd = int(user32.GetAncestor(child, 2)) or child
+            GWL_EXSTYLE = -20
+            WS_EX_TOOLWINDOW = 0x00000080
+            WS_EX_APPWINDOW = 0x00040000
+            current = int(user32.GetWindowLongW(hwnd, GWL_EXSTYLE))
+            new_style = (current & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
+        except (OSError, AttributeError, tk.TclError) as exc:
+            log.debug("Could not restore taskbar visibility: %s", exc)
 
     def _on_force_close(self) -> None:
         self._stop_pulse()
@@ -397,6 +515,18 @@ class TranslatorApp(tk.Tk):
         """Return the DWM attribute acceptance map from the last apply."""
 
         return dict(self._titlebar_tint)
+
+    @property
+    def chrome_stripped(self) -> bool:
+        """Whether ``overrideredirect(True)`` was accepted on this host."""
+
+        return self._chrome_stripped
+
+    @property
+    def titlebar(self) -> AmberTitlebar | None:
+        """The custom titlebar widget, or ``None`` when chrome is intact."""
+
+        return self._titlebar
 
 
 def launch(theme: str | None = None, language: str | None = None) -> None:
