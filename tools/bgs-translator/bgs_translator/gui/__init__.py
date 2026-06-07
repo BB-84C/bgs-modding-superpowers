@@ -1,5 +1,7 @@
 """Tk control-panel package for translator monitoring and configuration."""
 
-# TODO(Chunk-L): Register GUI exports as implementations land.
+from __future__ import annotations
 
-__all__ = []
+from bgs_translator.gui.app import TranslatorApp, launch
+
+__all__ = ["TranslatorApp", "launch"]

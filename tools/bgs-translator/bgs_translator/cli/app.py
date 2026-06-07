@@ -15,6 +15,7 @@ from bgs_translator.cli.batch import batch_app
 from bgs_translator.cli.config import config_app
 from bgs_translator.cli.edit import edit_app
 from bgs_translator.cli.envelopes import success
+from bgs_translator.cli.gui_launcher import launch_gui
 from bgs_translator.cli.inspect import inspect_app
 from bgs_translator.cli.profile import profile_app
 from bgs_translator.cli.project import project_app
@@ -28,6 +29,7 @@ app.add_typer(inspect_app, name="inspect")
 app.add_typer(profile_app, name="profile")
 app.add_typer(edit_app, name="edit")
 app.add_typer(validate_app, name="validate")
+app.command("gui")(launch_gui)
 
 
 @app.callback()
@@ -47,7 +49,7 @@ def _capabilities() -> dict[str, Any]:
             "openai-compat": False,
         },
         "kb": False,
-        "gui": False,
+        "gui": True,
     }
 
 

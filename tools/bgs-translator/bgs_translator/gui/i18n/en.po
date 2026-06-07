@@ -9,3 +9,117 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+
+msgid "Project"
+msgstr "Project"
+
+msgid "Profile"
+msgstr "Profile"
+
+msgid "Cost"
+msgstr "Cost"
+
+msgid "Language"
+msgstr "Language"
+
+msgid "Theme"
+msgstr "Theme"
+
+msgid "GUI alive"
+msgstr "GUI alive"
+
+msgid "Projects"
+msgstr "Projects"
+
+msgid "Profiles"
+msgstr "Profiles"
+
+msgid "Glossary"
+msgstr "Glossary"
+
+msgid "Logs"
+msgstr "Logs"
+
+msgid "Entries"
+msgstr "Entries"
+
+msgid "Batches"
+msgstr "Batches"
+
+msgid "Prompt"
+msgstr "Prompt"
+
+msgid "Rescan plugin"
+msgstr "Rescan plugin"
+
+msgid "Export SST"
+msgstr "Export SST"
+
+msgid "Open exports folder"
+msgstr "Open exports folder"
+
+msgid "Project settings"
+msgstr "Project settings"
+
+msgid "Always preview system prompt before batch dispatch"
+msgstr "Always preview system prompt before batch dispatch"
+
+msgid "Add new profile"
+msgstr "Add new profile"
+
+msgid "Delete"
+msgstr "Delete"
+
+msgid "Edit"
+msgstr "Edit"
+
+msgid "Save"
+msgstr "Save"
+
+msgid "Cancel"
+msgstr "Cancel"
+
+msgid "Coming soon"
+msgstr "Coming soon"
+
+msgid "Live"
+msgstr "Live"
+
+msgid "Filter"
+msgstr "Filter"
+
+msgid "Level"
+msgstr "Level"
+
+msgid "Source"
+msgstr "Source"
+
+msgid "Confirm close"
+msgstr "Confirm close"
+
+msgid "Are you sure you want to close? Unsaved work may be lost."
+msgstr "Are you sure you want to close? Unsaved work may be lost."
+
+msgid "Signature"
+msgstr "Signature"
+
+msgid "Total"
+msgstr "Total"
+
+msgid "Translated"
+msgstr "Translated"
+
+msgid "Partial"
+msgstr "Partial"
+
+msgid "Locked"
+msgstr "Locked"
+
+msgid "Orphan"
+msgstr "Orphan"
+
+msgid "No project selected"
+msgstr "No project selected"
+
+msgid "Configure API keys via the .env file under profiles/"
+msgstr "Configure API keys via the .env file under profiles/"
