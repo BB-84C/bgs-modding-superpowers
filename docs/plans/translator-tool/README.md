@@ -47,11 +47,14 @@ These rules bind every decision in this PRD. If a decision in this PRD conflicts
 
 If documents disagree:
 
-1. This PRD (these 15 files)
-2. Code (when implementation begins)
-3. Earlier conversation transcripts (clarification only, not authority)
+1. `AMENDMENTS.md` (verification-spike + execution-time corrections; wins over original PRD)
+2. This PRD (the 15 original files)
+3. Code (when implementation begins)
+4. Earlier conversation transcripts (clarification only, not authority)
 
-A contradiction inside the PRD itself is a bug — file an issue, mark it load-bearing until reconciled.
+A contradiction inside the PRD itself is a bug — file an issue, mark it load-bearing until reconciled. Discoveries during施工 land in `AMENDMENTS.md` first; promoted to the original PRD when a chunk closes.
+
+See also: `docs/spikes/spike-findings.md` for the raw Chunk A verification results.
 
 ## Update protocol
 
