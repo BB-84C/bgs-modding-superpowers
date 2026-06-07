@@ -1,6 +1,4 @@
-"""Typer root application and Chunk B version command for bgs-translator."""
-
-# TODO(Chunk-B): Expand CLI registration as later command chunks land.
+"""Typer root application and version command for bgs-translator."""
 
 from __future__ import annotations
 
@@ -38,17 +36,17 @@ def _root() -> None:
 
 
 def _capabilities() -> dict[str, Any]:
-    """Return the v0.1.0-dev skeleton capability matrix."""
+    """Return the release-candidate capability matrix."""
     return {
-        "parser": {"tes3": False, "tes4_family": False},
-        "output": {"sst": False, "eet_xml": False},
+        "parser": {"tes3": True, "tes4_family": True},
+        "output": {"sst": True, "eet_xml": True},
         "providers": {
-            "openai": False,
-            "anthropic": False,
-            "gemini": False,
-            "openai-compat": False,
+            "openai": True,
+            "anthropic": True,
+            "gemini": True,
+            "openai-compat": True,
         },
-        "kb": False,
+        "kb": True,
         "gui": True,
     }
 
@@ -60,7 +58,7 @@ def version(
         typer.Option("--json/--no-json", help="Emit the standard JSON envelope."),
     ] = True,
 ) -> None:
-    """Print the translator version and skeleton capability matrix."""
+    """Print the translator version and capability matrix."""
     envelope = success(
         {
             "version": __version__,

@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 def test_package_imports() -> None:
     import bgs_translator
 
-    assert bgs_translator.__version__ == "0.1.0-dev"
+    assert bgs_translator.__version__ == "0.9.0-rc1"
 
 
 def test_version_command_envelope() -> None:
@@ -22,11 +22,23 @@ def test_version_command_envelope() -> None:
     envelope = json.loads(result.stdout)
     assert envelope["ok"] is True
     assert envelope["error"] is None
-    assert envelope["data"]["version"] == "0.1.0-dev"
+    assert envelope["data"]["version"] == "0.9.0-rc1"
     assert "python" in envelope["data"]
     assert envelope["data"]["capabilities"]["parser"] == {
-        "tes3": False,
-        "tes4_family": False,
+        "tes3": True,
+        "tes4_family": True,
+    }
+    assert envelope["data"]["capabilities"] == {
+        "parser": {"tes3": True, "tes4_family": True},
+        "output": {"sst": True, "eet_xml": True},
+        "providers": {
+            "openai": True,
+            "anthropic": True,
+            "gemini": True,
+            "openai-compat": True,
+        },
+        "kb": True,
+        "gui": True,
     }
 
 
