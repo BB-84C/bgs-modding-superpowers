@@ -28,6 +28,7 @@ FORM_VERSION_RANGES: dict[str, tuple[int, int]] = {
     "Fallout4": (131, 131),
     "Fallout76": (131, 250),
     "Starfield": (552, 576),
+    "Morrowind": (0, 0),
 }
 LIST_INDEX_BY_SIG: dict[str, int] = {
     "DESC": 1,
@@ -320,6 +321,7 @@ def _schema_slug(game: str) -> str:
         "Fallout4": "fo4",
         "Fallout76": "fo76",
         "Starfield": "starfield",
+        "Morrowind": "morrowind",
     }
     return slug_map.get(game, game.lower())
 

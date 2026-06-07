@@ -1,0 +1,271 @@
+game: Morrowind
+form_version_range:
+- 0
+- 0
+parser_version: 1.0.0
+schema_version: morrowind-1.0.0
+source_notes: >-
+  scripts/extract_cptranslate.py found only BOOK:TEXT in wbDefinitionsTES3.pas because
+  many TES3 translatable fields are reused through shorthand declarations without
+  cpTranslate flags. This manifest keeps the extracted BOOK:TEXT field and adds a
+  hand-curated seed from Chunk E / PRD section 2.3 for ESP-ESM Translator XML output.
+records:
+  ACTI:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ALCH:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  APPA:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ARMO:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  BODY:
+  - subrecord_sig: BNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: bodypart male name
+  - subrecord_sig: CNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: bodypart female name
+  BOOK:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DESC
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: TEXT
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: extracted cpTranslate field
+  BSGN:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DESC
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CELL:
+  - subrecord_sig: NAME
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: cell name / location
+  CLAS:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DESC
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CLOT:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CONT:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CREA:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  DIAL:
+  - subrecord_sig: NAME
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: topic text
+  DOOR:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ENCH:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FACT:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: RNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: faction ranks
+  GMST:
+  - subrecord_sig: STRV
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: string-valued game setting
+  INFO:
+  - subrecord_sig: INAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: response id chain
+  - subrecord_sig: PNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: previous response id chain
+  - subrecord_sig: NNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: next response id chain
+  - subrecord_sig: NAME
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: dialog response text
+  - subrecord_sig: BNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: result text
+  INGR:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LIGH:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LOCK:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MGEF:
+  - subrecord_sig: DESC
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: magic effect description
+  MISC:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  NPC_:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PROB:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  RACE:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DESC
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  REGN:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  REPA:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SCRI:
+  - subrecord_sig: SCTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: script text
+  SKIL:
+  - subrecord_sig: DESC
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SNDG:
+  - subrecord_sig: NAME
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: sound generator label
+  SPEL:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  STAT:
+  - subrecord_sig: NAME
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: static id fallback
+  WEAP:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''

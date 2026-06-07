@@ -8,6 +8,7 @@ from .fnv import FNVSchema
 from .fo3 import FO3Schema
 from .fo4 import FO4Schema
 from .fo76 import FO76Schema
+from .morrowind import MorrowindSchema
 from .oblivion import OblivionSchema
 from .skyrim_le import SkyrimLESchema
 from .skyrim_se import SkyrimSESchema
@@ -21,6 +22,7 @@ _SKYRIM_SE = SkyrimSESchema()
 _FO4 = FO4Schema()
 _FO76 = FO76Schema()
 _STARFIELD = StarfieldSchema()
+_MORROWIND = MorrowindSchema()
 
 SCHEMAS_BY_GAME: dict[str, GameSchema] = {
     "Oblivion": _OBLIVION,
@@ -34,6 +36,7 @@ SCHEMAS_BY_GAME: dict[str, GameSchema] = {
     "Fallout4VR": _FO4,
     "Fallout76": _FO76,
     "Starfield": _STARFIELD,
+    "Morrowind": _MORROWIND,
 }
 
 
@@ -49,6 +52,7 @@ __all__ = [
     "FO3Schema",
     "FO4Schema",
     "FO76Schema",
+    "MorrowindSchema",
     "OblivionSchema",
     "SkyrimLESchema",
     "SkyrimSESchema",

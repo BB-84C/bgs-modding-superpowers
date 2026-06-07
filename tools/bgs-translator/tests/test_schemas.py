@@ -15,6 +15,7 @@ SCHEMA_EXPECTATIONS = [
     ("Fallout4", (131, 131), "fo4"),
     ("Fallout76", (131, 250), "fo76"),
     ("Starfield", (552, 576), "starfield"),
+    ("Morrowind", (0, 0), "morrowind"),
 ]
 
 
@@ -33,7 +34,7 @@ def test_yaml_backed_schemas_expose_weap_fields() -> None:
 def test_schema_registry_aliases() -> None:
     from bgs_translator.parsers.schemas import SCHEMAS_BY_GAME
 
-    assert len(SCHEMAS_BY_GAME) == 11
+    assert len(SCHEMAS_BY_GAME) == 12
     assert SCHEMAS_BY_GAME["SkyrimAE"] is SCHEMAS_BY_GAME["SkyrimSE"]
     assert SCHEMAS_BY_GAME["SkyrimVR"] is SCHEMAS_BY_GAME["SkyrimSE"]
     assert SCHEMAS_BY_GAME["Fallout4VR"] is SCHEMAS_BY_GAME["Fallout4"]

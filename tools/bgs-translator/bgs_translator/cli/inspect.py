@@ -1,12 +1,14 @@
 """Inspection CLI commands for parsed plugin translation units."""
 
+# ruff: noqa: UP045
+
 from __future__ import annotations
 
 import json
 import sqlite3
 from collections import Counter
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any, Optional
 
 import typer
 
@@ -25,12 +27,20 @@ from bgs_translator.parsers.schemas import get_schema_for_game
 from bgs_translator.parsers.tes4_family import TES4FamilyWalker, TES4Header
 
 inspect_app = typer.Typer(no_args_is_help=True)
+PLUGIN_ARGUMENT = typer.Argument(...)
+PROJECT_ARGUMENT = typer.Argument(...)
+PROJECT_NAME_ARGUMENT = typer.Argument(..., help="Project name")
+ROW_ID_ARGUMENT = typer.Argument(...)
+GAME_OPTION = typer.Option(None, "--game")
+SIG_OPTION = typer.Option(None, "--sig")
+FIELD_OPTION = typer.Option(None, "--field")
+LIMIT_OPTION = typer.Option(50)
 
 
 @inspect_app.command("plugin")
 def inspect_plugin(
-    plugin: Annotated[Path, typer.Argument()],
-    game: Annotated[str | None, typer.Option("--game")] = None,
+    plugin: Path = PLUGIN_ARGUMENT,
+    game: Optional[str] = GAME_OPTION,
 ) -> None:
     """Walk plugin without project state; return header info and signature distribution."""
 
@@ -57,7 +67,7 @@ def inspect_plugin(
 
 
 @inspect_app.command("signatures")
-def inspect_signatures(project: Annotated[str, typer.Argument(help="Project name")]) -> None:
+def inspect_signatures(project: str = PROJECT_NAME_ARGUMENT) -> None:
     """For an existing project, return signature counts from memory.sqlite."""
 
     conn = _open_project(project)
@@ -66,10 +76,10 @@ def inspect_signatures(project: Annotated[str, typer.Argument(help="Project name
 
 @inspect_app.command("entries")
 def inspect_entries(
-    project: Annotated[str, typer.Argument()],
-    sig: Annotated[str | None, typer.Option("--sig")] = None,
-    field: Annotated[str | None, typer.Option("--field")] = None,
-    limit: Annotated[int, typer.Option()] = 50,
+    project: str = PROJECT_ARGUMENT,
+    sig: Optional[str] = SIG_OPTION,
+    field: Optional[str] = FIELD_OPTION,
+    limit: int = LIMIT_OPTION,
 ) -> None:
     """Filterable entry listing."""
 
@@ -83,7 +93,7 @@ def inspect_entries(
 
 @inspect_app.command("entry")
 def inspect_entry(
-    project: Annotated[str, typer.Argument()], row_id: Annotated[str, typer.Argument()]
+    project: str = PROJECT_ARGUMENT, row_id: str = ROW_ID_ARGUMENT
 ) -> None:
     """Return a single entry by row_id."""
 
@@ -95,7 +105,7 @@ def inspect_entry(
 
 
 @inspect_app.command("orphans")
-def inspect_orphans(project: Annotated[str, typer.Argument()]) -> None:
+def inspect_orphans(project: str = PROJECT_ARGUMENT) -> None:
     """Entries with status='orphan'."""
 
     conn = _open_project(project)

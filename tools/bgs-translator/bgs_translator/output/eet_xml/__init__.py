@@ -1,5 +1,6 @@
 """ESP-ESM Translator XML output package for Morrowind dictionaries."""
 
-# TODO(Chunk-E): Register EET XML exports as implementations land.
+from .reader import EETXMLEntry, read_eet_xml
+from .writer import write_eet_xml
 
-__all__ = []
+__all__ = ["EETXMLEntry", "read_eet_xml", "write_eet_xml"]

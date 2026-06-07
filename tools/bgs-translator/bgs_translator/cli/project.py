@@ -1,5 +1,7 @@
 """Project lifecycle CLI commands for translator projects."""
 
+# ruff: noqa: UP045
+
 from __future__ import annotations
 
 import hashlib
@@ -8,7 +10,7 @@ import pickle
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any, Optional
 
 import tomli_w
 import typer
@@ -23,15 +25,20 @@ from bgs_translator.parsers.schemas import get_schema_for_game
 from bgs_translator.parsers.tes4_family import TES4FamilyWalker, TES4Header, TranslationUnit
 
 project_app = typer.Typer(no_args_is_help=True)
+NAME_ARGUMENT = typer.Argument(..., help="Project name (slug)")
+PLUGIN_OPTION = typer.Option(..., "--plugin", "-p", help="Source plugin path")
+GAME_OPTION = typer.Option(None, "--game", "-g", help="Game name")
+TARGET_LANG_OPTION = typer.Option("zh-cn", "--target-lang", "-t")
+SOURCE_LANG_OPTION = typer.Option("en", "--source-lang", "-s")
 
 
 @project_app.command("init")
 def init_project(
-    name: Annotated[str, typer.Argument(help="Project name (slug)")],
-    plugin: Annotated[Path, typer.Option("--plugin", "-p", help="Source plugin path")],
-    game: Annotated[str | None, typer.Option("--game", "-g", help="Game name")] = None,
-    target_lang: Annotated[str, typer.Option("--target-lang", "-t")] = "zh-cn",
-    source_lang: Annotated[str, typer.Option("--source-lang", "-s")] = "en",
+    name: str = NAME_ARGUMENT,
+    plugin: Path = PLUGIN_OPTION,
+    game: Optional[str] = GAME_OPTION,
+    target_lang: str = TARGET_LANG_OPTION,
+    source_lang: str = SOURCE_LANG_OPTION,
 ) -> None:
     """Create a new translation project: walk plugin, extract units, seed memory.sqlite."""
 

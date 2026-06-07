@@ -11,6 +11,7 @@ from typing import ClassVar, Protocol
 
 from bgs_translator.parsers.encoding import DEFAULT_ENCODING_CHAINS, decode_with_chain
 from bgs_translator.parsers.strings_io import StringsFile, find_strings_files, read_strings_file
+from bgs_translator.parsers.tes3 import TES3Subrecord, TES3Walker
 from bgs_translator.parsers.tes4_family import Record, Subrecord, TES4FamilyWalker, TranslationUnit
 
 
@@ -120,6 +121,40 @@ def extract_translation_units(
                 )
 
 
+def extract_tes3_translation_units(
+    plugin_path: Path,
+    schema: GameSchema,
+) -> Iterator[TranslationUnit]:
+    """Walk a Morrowind plugin via ``TES3Walker`` and yield inline translation units."""
+
+    encoding_chain = DEFAULT_ENCODING_CHAINS.get(schema.name, DEFAULT_ENCODING_CHAINS["Morrowind"])
+    walker = TES3Walker(plugin_path, encoding_chain=encoding_chain)
+    for record in walker.walk():
+        if record.sig == "TES3" or record.is_deleted:
+            continue
+        fields = schema.get_translatable_subrecords(record.sig)
+        if not fields:
+            continue
+        for subrecord in record.subrecords:
+            for field in fields:
+                if subrecord.sig != field.subrecord_sig:
+                    continue
+                source = _extract_tes3_source(subrecord, encoding_chain)
+                if source is None or source == "":
+                    continue
+                yield TranslationUnit(
+                    plugin=plugin_path.name,
+                    formid=0,
+                    formid_sanitized=0,
+                    edid=record.identity,
+                    signature=record.sig,
+                    field=field.subrecord_sig,
+                    source=source,
+                    list_index=0,
+                    strid=0,
+                )
+
+
 def _load_strings_files(plugin_path: Path, encoding_chain: list[str]) -> dict[str, StringsFile]:
     loaded: dict[str, StringsFile] = {}
     for list_kind, path in find_strings_files(plugin_path).items():
@@ -158,6 +193,13 @@ def _extract_source(
         return None, 0
 
 
+def _extract_tes3_source(subrecord: TES3Subrecord, encoding_chain: list[str]) -> str | None:
+    try:
+        return _decode_inline(subrecord.data.rstrip(b"\x00"), encoding_chain)
+    except UnicodeDecodeError:
+        return None
+
+
 def _decode_inline(data: bytes, encoding_chain: list[str]) -> str:
     raw = data.split(b"\x00", 1)[0]
     text, _encoding = decode_with_chain(raw, encoding_chain)
@@ -169,5 +211,6 @@ __all__ = [
     "GameSchema",
     "TranslatableField",
     "UniversalFallbackSchema",
+    "extract_tes3_translation_units",
     "extract_translation_units",
 ]
