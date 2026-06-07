@@ -84,19 +84,21 @@ Writer pseudocode in `03-sst-output.md` §6 must be rewritten to follow this ord
 
 Fixed-size per entry = 31 bytes. No padding, no separator.
 
-### 2.4 rEspPointerLite struct internal layout (EMPIRICAL — Pascal declaration not yet found)
+### 2.4 rEspPointerLite struct internal layout (RESOLVED — Pascal typedef found by Chunk F beta candidate)
 
-24 bytes total, decoded by triangulation against entries in `srb_showreadbooks_en_zhhans.sst`:
+Found in `TESVT_typedef.pas` line 68 (URL: https://raw.githubusercontent.com/MGuffin/xTranslator/main/TESVT_typedef.pas). 24 bytes total. Layout matches PRD §1.3 exactly (PRD was correct; my earlier "8 leading unknown bytes" hypothesis is wrong):
 
-| Struct offset | Width | Content |
-|---|---|---|
-| 0–7 | 8 bytes | unknown (record-pointer / flags / index — values like `00 00 00 00 00 08 00 02` observed) |
-| 8–11 | 4 bytes | record signature ASCII (e.g., "PERK", "TES4") |
-| 12–15 | 4 bytes | subrecord type ASCII (e.g., "EPF2", "CNAM") |
-| 16–19 | 4 bytes | FormID UInt32 LE |
-| 20–23 | 4 bytes | rHash UInt32 LE (string hash of EditorID; observed identical across two PERK entries sharing edid) |
+| Struct offset | Width | Field | Pascal name |
+|---|---|---|---|
+| 0–3 | 4 bytes | strId | `strID: integer` |
+| 4–7 | 4 bytes | formID (raw, includes master high byte) | `formID: cardinal` |
+| 8–11 | 4 bytes | record signature ASCII | `rName: array[0..3] of AnsiChar` |
+| 12–15 | 4 bytes | subrecord type ASCII | `fName: array[0..3] of AnsiChar` |
+| 16–17 | 2 bytes | index UInt16 LE | `index: word` |
+| 18–19 | 2 bytes | indexMax UInt16 LE | `indexMax: word` |
+| 20–23 | 4 bytes | rHash UInt32 LE | `rHash: cardinal` |
 
-**Chunk F owner action**: continue Pascal-source hunting for `rEspPointerLite` declaration (likely in `TESVT_Typedef.pas`, not yet located in repo root listing) before final implementation. If unobtainable, fit the 8 leading bytes empirically by generating xTranslator's own output for known inputs and diffing.
+Confirms PRD §1.3 layout. My earlier 8-byte-unknown hypothesis was wrong because I had misidentified entry boundaries by 2 bytes — actual entry starts at file offset 0x95 (not 0x97) in `srb_showreadbooks_en_zhhans.sst`, with colabLabel count at 0x91–0x94 (not 0x93–0x96).
 
 ### 2.5 sParams width: 1 byte (CONFIRMED)
 
@@ -104,19 +106,27 @@ Pascal `sStrParams` is a Set type with 6 observed elements (`pending`, `translat
 
 PRD §1.1 "1 byte or 4 bytes" hedge → resolved to **1 byte**. The `{$MINENUMSIZE}` directive only affects enums, not sets.
 
-### 2.6 stringHash algorithm: TBD
+### 2.6 stringHash algorithm: RESOLVED — FNV-1a 32-bit
 
-Function body not yet located in fetched units (`TESVT_SSTFunc.pas`, `TESVT_Const.pas`, `TESVT_FastSearch.pas`, `TESVT_Utils.pas`, `TESVT_EspStruct.pas` all checked). Likely candidates remaining: `TESVT_Codepage.pas`, `TESVT_Streams.pas`, `TESVT_TranslateFunc.pas`, or an unlisted `TESVT_Typedef.pas`.
+Found in `TESVT_Const.pas` line ~2452 (by Chunk F beta candidate). Algorithm is **FNV-1a 32-bit over Delphi `byte(WideChar)` = low byte of each code unit**:
 
-**Chunk F owner action** — pick whichever is cheaper:
-- (a) Continue searching the Pascal source for `function stringHash(`. Reference: https://github.com/MGuffin/xTranslator
-- (b) Empirical fit: pick a known EditorID, find corresponding SST entry, read rHash bytes at struct offset 20–23, test candidate algorithms (FNV-1a, CRC32, djb2, BKDR, Pascal `THashBobJenkins`, Adler32) against observed rHash. Iterate until match.
+```pascal
+function StringHash(const str: String): cardinal;
+const
+  FNV_offset_basis = $811C9DC5;  // 2166136261
+  FNV_prime        = $01000193;  //   16777619
+begin
+  Result := FNV_offset_basis;
+  for i := 1 to length(str) do
+    Result := (Result xor byte(str[i])) * FNV_prime;
+end;
+```
 
-### 2.7 sanitize_formid behavior: TBD
+For ASCII EditorIDs and the `[xxxxxxxx]` no-EditorID fallback, low-byte-of-WideChar equals iterating ASCII bytes. Bit-exact verified by Chunk F real-fixture test: `stringHash('[00000000]') == 0xEF7C96E5` matches the TES4:CNAM entry's rHash byte-for-byte.
 
-`TESVT_Const.pas` references `bApplySstOldMasterFix: boolean = true; // Normalize FormiD in dictionaries for record without Edidname (typically: INFO:NAM1)`. The actual function lives in a non-fetched unit. Likely behavior: `formid AND $00FFFFFF` (strip master-index high byte), but conditional on EditorID absence.
+### 2.7 sanitize_formid behavior: RESOLVED — `formid AND $00FFFFFF`
 
-**Chunk F owner action**: same as 2.6 — search Pascal source OR empirically test against an SST entry whose FormID has master-index ≥ 0x01.
+Confirmed via TESVT_typedef.pas line 471-472 by Chunk F beta candidate: the rHash normalization branch for records without EditorID uses `stringHash(format('[%.8x]', [sanitizeFormID(data.formID)]))`. Combined with Chunk F's byte-exact verification of `stringHash('[00000000]') == 0xEF7C96E5` against the TES4:CNAM entry (formid 0), confirms the formula.
 
 ### 2.8 No entry-count field (CONFIRMED)
 
