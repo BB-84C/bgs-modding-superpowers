@@ -11,9 +11,11 @@ from typing import Annotated, Any
 import typer
 
 from bgs_translator import __version__
+from bgs_translator.cli.config import config_app
 from bgs_translator.cli.envelopes import success
 
 app = typer.Typer(no_args_is_help=True)
+app.add_typer(config_app, name="config")
 
 
 @app.callback()
