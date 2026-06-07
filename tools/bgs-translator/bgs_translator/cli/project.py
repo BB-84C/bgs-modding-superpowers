@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import pickle
+import sqlite3
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,34 @@ from bgs_translator.parsers.extractor import GameSchema, extract_translation_uni
 from bgs_translator.parsers.form_versions import detect_game_from_form_version
 from bgs_translator.parsers.schemas import get_schema_for_game
 from bgs_translator.parsers.tes4_family import TES4FamilyWalker, TES4Header, TranslationUnit
+from bgs_translator.sst.hash import compute_rhash
+from bgs_translator.sst.writer import SSTUnit, write_sst
+
+# Starfield 9-fill lang slugs per PRD §3.2
+STARFIELD_FILL_LANGS = [
+    "english",
+    "french",
+    "german",
+    "italian",
+    "spanish",
+    "polish",
+    "brazilianportuguese",
+    "japanese",
+]
+
+# Target lang code → xTranslator filename slug (PRD §2 table)
+LANG_SLUG = {
+    "en": "english",
+    "fr": "french",
+    "de": "german",
+    "it": "italian",
+    "es": "spanish",
+    "pl": "polish",
+    "ru": "russian",
+    "cs": "czech",
+    "ja": "japanese",
+    "zh-cn": "chinese",
+}
 
 project_app = typer.Typer(no_args_is_help=True)
 NAME_ARGUMENT = typer.Argument(..., help="Project name (slug)")
@@ -169,6 +198,167 @@ def _write_project_toml(
         "cost": {"cap_usd": 10.0, "spent_usd_session": 0.0, "spent_usd_total": 0.0},
     }
     (project_root / "project.toml").write_text(tomli_w.dumps(project_data), encoding="utf-8")
+
+
+@project_app.command("export")
+def export_project(
+    name: str = NAME_ARGUMENT,
+    fmt: str = typer.Option("sst", "--format", "-f", help="Export format: sst or eet_xml"),
+    no_starfield_fill: bool = typer.Option(
+        False, "--no-starfield-dummy-fill", help="Disable Starfield 9-fill"
+    ),
+) -> None:
+    """Export project translations to SST (TES4-family) or ESP-ESM XML (Morrowind)."""
+    project_root = paths.project_root(name)
+    if not (project_root / "project.toml").exists():
+        _emit_failure("project_not_found", f"No project at {project_root}", {"name": name})
+    try:
+        proj_meta = _read_project_toml(project_root)
+        plugin_basename = Path(proj_meta["source_plugin_path"]).stem
+        game = proj_meta["game"]
+        source_lang = proj_meta["source_lang"]
+        target_lang = proj_meta["target_lang"]
+        starfield_fill = (
+            game == "Starfield"
+            and proj_meta.get("starfield_dummy_fill", True)
+            and not no_starfield_fill
+        )
+
+        exports_dir = project_root / "exports"
+        exports_dir.mkdir(parents=True, exist_ok=True)
+
+        if fmt == "sst":
+            conn = open_memory_db(project_root)
+            units = _read_units_from_memory(conn)
+            sst_units = [_unit_row_to_sst_unit(row) for row in units]
+            masters = _detect_masters_from_units(units)
+
+            outputs = _emit_sst_outputs(
+                exports_dir,
+                plugin_basename,
+                source_lang,
+                target_lang,
+                sst_units,
+                masters,
+                starfield_fill=starfield_fill,
+            )
+            conn.close()
+            _emit_success(
+                {
+                    "project": name,
+                    "format": "sst",
+                    "files_emitted": outputs,
+                    "starfield_dummy_fill_applied": starfield_fill,
+                    "entry_count": len(sst_units),
+                }
+            )
+        else:
+            _emit_failure(
+                "unsupported_format",
+                f"Format '{fmt}' not yet supported by CLI export; use sst for now.",
+                {"requested": fmt},
+            )
+    except FileNotFoundError as exc:
+        _emit_failure("project_corrupted", str(exc), {"name": name})
+        raise typer.Exit(1) from exc
+
+
+def _read_project_toml(project_root: Path) -> dict[str, Any]:
+    import tomllib
+
+    with (project_root / "project.toml").open("rb") as fh:
+        data = tomllib.load(fh)
+    proj: dict[str, Any] = data.get("project", {})
+    proj["starfield_dummy_fill"] = data.get("settings", {}).get(
+        "starfield_dummy_fill", proj.get("game") == "Starfield"
+    )
+    return proj
+
+
+def _read_units_from_memory(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    conn.row_factory = sqlite3.Row
+    cur = conn.execute(
+        "SELECT plugin, formid, formid_sanitized, edid, signature, field, "
+        "index_n, index_max, source, list_index, strid, rhash, sparams, "
+        "dest, status FROM units WHERE source IS NOT NULL"
+    )
+    return list(cur.fetchall())
+
+
+def _unit_row_to_sst_unit(row: sqlite3.Row) -> SSTUnit:
+    edid = row["edid"]
+    rhash = row["rhash"] or compute_rhash(edid, row["formid"])
+    return SSTUnit(
+        list_index=row["list_index"],
+        strid=row["strid"] or 0,
+        formid=row["formid"],
+        signature=row["signature"],
+        field=row["field"],
+        index=row["index_n"] or 0,
+        index_max=row["index_max"] or 0,
+        rhash=rhash,
+        colab_id=0,
+        s_params=row["sparams"] or 0,
+        source=row["source"] or "",
+        dest=row["dest"] or row["source"] or "",
+    )
+
+
+def _detect_masters_from_units(units: list[sqlite3.Row]) -> list[str]:
+    seen: set[str] = set()
+    masters: list[str] = []
+    for row in units:
+        plugin_name = row["plugin"]
+        if plugin_name and plugin_name not in seen:
+            seen.add(plugin_name)
+            masters.append(plugin_name)
+    return masters
+
+
+def _emit_sst_outputs(
+    exports_dir: Path,
+    plugin_basename: str,
+    source_lang: str,
+    target_lang: str,
+    units: list[SSTUnit],
+    masters: list[str],
+    *,
+    starfield_fill: bool,
+) -> list[str]:
+    """Emit 1 real SST + (Starfield only) 8 dummy-fill SSTs per PRD §3.2."""
+    written: list[str] = []
+    src_slug = LANG_SLUG.get(source_lang, source_lang)
+    tgt_slug = LANG_SLUG.get(target_lang, target_lang)
+
+    real_path = exports_dir / f"{plugin_basename}_{src_slug}_{tgt_slug}.sst"
+    write_sst(real_path, units, masters)
+    written.append(str(real_path))
+
+    if starfield_fill:
+        dummy_units = [
+            SSTUnit(
+                list_index=u.list_index,
+                strid=u.strid,
+                formid=u.formid,
+                signature=u.signature,
+                field=u.field,
+                index=u.index,
+                index_max=u.index_max,
+                rhash=u.rhash,
+                colab_id=u.colab_id,
+                s_params=u.s_params,
+                source=u.source,
+                dest=u.source,  # dummy: dest = source verbatim
+            )
+            for u in units
+        ]
+        for lang in STARFIELD_FILL_LANGS:
+            if lang == tgt_slug:
+                continue
+            dummy_path = exports_dir / f"{plugin_basename}_{src_slug}_{lang}.sst"
+            write_sst(dummy_path, dummy_units, masters)
+            written.append(str(dummy_path))
+    return written
 
 
 def _emit_success(data: dict[str, Any]) -> None:
