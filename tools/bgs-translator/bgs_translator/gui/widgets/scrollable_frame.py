@@ -1,7 +1,7 @@
 """A simple vertically scrollable frame.
 
 Wrap any content inside ``ScrollableFrame.interior`` and the canvas
-will provide a vertical scrollbar when the content overflows.
+will provide a vertical amber scrollbar when the content overflows.
 """
 
 from __future__ import annotations
@@ -9,14 +9,21 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
+from bgs_translator.gui.widgets.amber_scrollbar import AmberScrollbar
+
 
 class ScrollableFrame(ttk.Frame):
-    """ttk.Frame holding a Canvas + vertical scrollbar + inner frame."""
+    """ttk.Frame holding a Canvas + amber scrollbar + inner frame."""
 
-    def __init__(self, master: tk.Misc) -> None:
+    def __init__(self, master: tk.Misc, *, theme_name: str = "amber") -> None:
         super().__init__(master)
         self._canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
-        self._scroll = ttk.Scrollbar(self, orient="vertical", command=self._canvas.yview)
+        self._scroll = AmberScrollbar(
+            self,
+            orient="vertical",
+            command=self._canvas.yview,
+            theme_name=theme_name,
+        )
         self._canvas.configure(yscrollcommand=self._scroll.set)
 
         self.interior = ttk.Frame(self._canvas)

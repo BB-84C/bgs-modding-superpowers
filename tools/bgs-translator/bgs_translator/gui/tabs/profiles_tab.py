@@ -14,6 +14,7 @@ from tkinter import messagebox, ttk
 
 from bgs_translator.config.profiles import ProfilesConfig, ProviderProfile, load_profiles
 from bgs_translator.gui.i18n import gettext as _
+from bgs_translator.gui.widgets.amber_scrollbar import AmberScrollbar
 from bgs_translator.gui.widgets.secret_input import SecretInput
 
 log = logging.getLogger(__name__)
@@ -51,9 +52,10 @@ class ProfilesTab(ttk.Frame):
             highlightthickness=0,
         )
         self._listbox.grid(row=0, column=0, sticky="nsew")
-        list_scroll = ttk.Scrollbar(left, orient="vertical", command=self._listbox.yview)
+        list_scroll = AmberScrollbar(left, orient="vertical", command=self._listbox.yview)
         self._listbox.configure(yscrollcommand=list_scroll.set)
         list_scroll.grid(row=0, column=1, sticky="ns")
+        self._list_scroll = list_scroll
         self._listbox.bind("<<ListboxSelect>>", self._on_select)
 
         left_actions = ttk.Frame(left, padding=(0, 6))

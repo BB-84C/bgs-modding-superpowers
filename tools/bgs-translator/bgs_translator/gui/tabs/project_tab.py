@@ -22,6 +22,7 @@ from typing import Any, Final, Literal
 from bgs_translator.config import paths
 from bgs_translator.core.memory import open_memory_db
 from bgs_translator.gui.i18n import gettext as _
+from bgs_translator.gui.widgets.amber_scrollbar import AmberScrollbar
 
 log = logging.getLogger(__name__)
 
@@ -151,10 +152,13 @@ class ProjectTab(ttk.Frame):
             self._tree.heading(col_id, text=heading)
             anchor: Literal["w", "e"] = "w" if col_id == "signature" else "e"
             self._tree.column(col_id, width=width, anchor=anchor, stretch=True)
-        tree_scroll = ttk.Scrollbar(counts_frame, orient="vertical", command=self._tree.yview)
+        tree_scroll = AmberScrollbar(
+            counts_frame, orient="vertical", command=self._tree.yview
+        )
         self._tree.configure(yscrollcommand=tree_scroll.set)
         self._tree.grid(row=0, column=0, sticky="nsew")
         tree_scroll.grid(row=0, column=1, sticky="ns")
+        self._tree_scroll = tree_scroll
         counts_frame.rowconfigure(0, weight=1)
         counts_frame.columnconfigure(0, weight=1)
 

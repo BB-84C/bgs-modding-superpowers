@@ -61,12 +61,16 @@ class StatusBar(ttk.Frame):
                                               self._lang_changed)))
         cells.append(("theme", self._combo("Theme", self._theme_var, themes,
                                            self._theme_changed)))
-        cells.append(("pulse", self._labelled("GUI alive", self._pulse_var, style="Accent.TLabel")))
+        cells.append(
+            ("pulse", self._labelled("GUI alive", self._pulse_var, style="StatusAccent.TLabel"))
+        )
 
         for index, (_, widget) in enumerate(cells):
             widget.grid(row=0, column=index * 2, padx=(0, 4), sticky="w")
             if index < len(cells) - 1:
-                sep = ttk.Label(self, text=_SEP_CHAR, style="Dim.TLabel")
+                # Status.TLabel matches the surrounding surface so the
+                # separator does not paint a darker block under it.
+                sep = ttk.Label(self, text=_SEP_CHAR, style="Status.TLabel")
                 sep.grid(row=0, column=index * 2 + 1, padx=(0, 4), sticky="w")
 
         self.columnconfigure(len(cells) * 2 - 1, weight=1)
@@ -81,7 +85,9 @@ class StatusBar(ttk.Frame):
         from bgs_translator.gui.i18n import gettext as _
 
         wrap = ttk.Frame(self, style="Surface.TFrame")
-        ttk.Label(wrap, text=f"{_(caption)}:", style="Dim.TLabel").pack(side="left", padx=(0, 4))
+        ttk.Label(wrap, text=f"{_(caption)}:", style="StatusDim.TLabel").pack(
+            side="left", padx=(0, 4)
+        )
         ttk.Label(wrap, textvariable=var, style=style).pack(side="left")
         return wrap
 
@@ -95,7 +101,9 @@ class StatusBar(ttk.Frame):
         from bgs_translator.gui.i18n import gettext as _
 
         wrap = ttk.Frame(self, style="Surface.TFrame")
-        ttk.Label(wrap, text=f"{_(caption)}:", style="Dim.TLabel").pack(side="left", padx=(0, 4))
+        ttk.Label(wrap, text=f"{_(caption)}:", style="StatusDim.TLabel").pack(
+            side="left", padx=(0, 4)
+        )
         combo = ttk.Combobox(
             wrap,
             textvariable=var,

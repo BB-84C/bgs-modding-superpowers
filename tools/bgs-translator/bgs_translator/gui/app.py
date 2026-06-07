@@ -34,7 +34,8 @@ from bgs_translator.gui.tabs import (
     PromptTab,
 )
 from bgs_translator.gui.themes import apply_theme, get_theme, list_themes
-from bgs_translator.gui.widgets import StatusBar
+from bgs_translator.gui.widgets import AmberScrollbar, StatusBar
+from bgs_translator.gui.win_chrome import apply_titlebar_tint
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +43,11 @@ _DEFAULT_WIDTH: Final[int] = 1440
 _DEFAULT_HEIGHT: Final[int] = 900
 _MIN_WIDTH: Final[int] = 1024
 _MIN_HEIGHT: Final[int] = 600
-_NAV_TREE_WIDTH: Final[int] = 240
+# Polish pass 2: nudged up so 'Logs' and 'Glossary' nav nodes are not
+# truncated by the Treeview default column width.
+_NAV_TREE_WIDTH: Final[int] = 260
+_NAV_TREE_COLUMN_WIDTH: Final[int] = 220
+_NAV_TREE_COLUMN_MIN_WIDTH: Final[int] = 180
 
 _FONT_PRIORITY: Final[tuple[str, ...]] = (
     "Cascadia Mono",
@@ -134,7 +139,22 @@ class TranslatorApp(tk.Tk):
 
         # Theme ---------------------------------------------------------
         self._current_theme = resolved_theme
-        apply_theme(self, get_theme(resolved_theme), self._font_family, _FONT_SIZE)
+        self._theme_config = get_theme(resolved_theme)
+        apply_theme(self, self._theme_config, self._font_family, _FONT_SIZE)
+
+        # Tint the Windows titlebar to match the active theme. On
+        # Windows 11 22000+ this paints the caption / border / text in
+        # the theme palette; on Win10 1809+ it only sets dark-mode but
+        # that's still enough to drop the white caption. Non-Windows is
+        # a silent no-op.
+        # TODO(Chunk-L.3): if a future user prefers a fully custom
+        # titlebar, swap this for ``self.overrideredirect(True)`` plus
+        # a hand-drawn caption widget. The current approach keeps
+        # native min/max/close affordances and feels lighter.
+        self._titlebar_tint = apply_titlebar_tint(self, self._theme_config)
+
+        # Track amber scrollbars so theme switches can refresh them.
+        self._amber_scrollbars: list[AmberScrollbar] = []
 
         # Close handler -------------------------------------------------
         self._close_handler = CloseHandler(self, on_force_close=self._on_force_close)
@@ -173,7 +193,21 @@ class TranslatorApp(tk.Tk):
         nav_frame.columnconfigure(0, weight=1)
 
         self._nav_tree = ttk.Treeview(nav_frame, show="tree", selectmode="browse")
-        nav_scroll = ttk.Scrollbar(nav_frame, orient="vertical", command=self._nav_tree.yview)
+        # Polish pass 2: widen the implicit '#0' column so descenders in
+        # 'Logs', 'Glossary', and 'Profiles' do not get clipped.
+        self._nav_tree.column(
+            "#0",
+            width=_NAV_TREE_COLUMN_WIDTH,
+            minwidth=_NAV_TREE_COLUMN_MIN_WIDTH,
+            stretch=True,
+        )
+        nav_scroll = AmberScrollbar(
+            nav_frame,
+            orient="vertical",
+            command=self._nav_tree.yview,
+            theme_name=self._current_theme,
+        )
+        self._amber_scrollbars.append(nav_scroll)
         self._nav_tree.configure(yscrollcommand=nav_scroll.set)
         self._nav_tree.grid(row=0, column=0, sticky="nsew")
         nav_scroll.grid(row=0, column=1, sticky="ns")
@@ -323,9 +357,21 @@ class TranslatorApp(tk.Tk):
             self._notebook.tab(index, text=self._translator.gettext(caption))  # type: ignore[no-untyped-call]
         log.info("Switched language to %s", language)
 
+    def register_amber_scrollbar(self, scrollbar: AmberScrollbar) -> None:
+        """Register a tab-owned scrollbar so theme switches re-tint it."""
+
+        self._amber_scrollbars.append(scrollbar)
+
     def _on_theme_change(self, theme: str) -> None:
         self._current_theme = theme
-        apply_theme(self, get_theme(theme), self._font_family, _FONT_SIZE)
+        self._theme_config = get_theme(theme)
+        apply_theme(self, self._theme_config, self._font_family, _FONT_SIZE)
+        self._titlebar_tint = apply_titlebar_tint(self, self._theme_config)
+        for scrollbar in self._amber_scrollbars:
+            try:
+                scrollbar.apply_theme(theme)
+            except tk.TclError:
+                continue
         log.info("Switched theme to %s", theme)
 
     def _on_force_close(self) -> None:
@@ -345,6 +391,12 @@ class TranslatorApp(tk.Tk):
     @property
     def notebook(self) -> ttk.Notebook:
         return self._notebook
+
+    @property
+    def titlebar_tint(self) -> dict[str, bool]:
+        """Return the DWM attribute acceptance map from the last apply."""
+
+        return dict(self._titlebar_tint)
 
 
 def launch(theme: str | None = None, language: str | None = None) -> None:

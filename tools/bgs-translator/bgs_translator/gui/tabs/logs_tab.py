@@ -17,6 +17,7 @@ from typing import Final
 
 from bgs_translator.config import paths
 from bgs_translator.gui.i18n import gettext as _
+from bgs_translator.gui.widgets.amber_scrollbar import AmberScrollbar
 
 log = logging.getLogger(__name__)
 
@@ -84,11 +85,17 @@ class LogsTab(ttk.Frame):
             state="disabled",
         )
         self._text.grid(row=0, column=0, sticky="nsew")
-        y_scroll = ttk.Scrollbar(viewer_frame, orient="vertical", command=self._text.yview)
-        x_scroll = ttk.Scrollbar(viewer_frame, orient="horizontal", command=self._text.xview)
+        y_scroll = AmberScrollbar(
+            viewer_frame, orient="vertical", command=self._text.yview
+        )
+        x_scroll = AmberScrollbar(
+            viewer_frame, orient="horizontal", command=self._text.xview
+        )
         self._text.configure(yscrollcommand=y_scroll.set, xscrollcommand=x_scroll.set)
         y_scroll.grid(row=0, column=1, sticky="ns")
         x_scroll.grid(row=1, column=0, sticky="ew")
+        self._y_scroll = y_scroll
+        self._x_scroll = x_scroll
 
         # Color tags.
         self._text.tag_configure("log-error", foreground="#ff5544")
