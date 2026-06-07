@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from bgs_translator.parsers.tes4_family import TranslationUnit
 
@@ -147,4 +148,106 @@ def get_unit_counts_by_signature(conn: sqlite3.Connection) -> dict[str, int]:
     return {str(signature): int(count) for signature, count in rows}
 
 
-__all__ = ["get_unit_counts_by_signature", "insert_units", "open_memory_db"]
+def list_units(
+    conn: sqlite3.Connection,
+    *,
+    sig: str | None = None,
+    field: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return units with optional filters."""
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    if sig is not None:
+        clauses.append("signature = ?")
+        params.append(sig.upper())
+    if field is not None:
+        clauses.append("field = ?")
+        params.append(field.upper())
+    if status is not None:
+        clauses.append("status = ?")
+        params.append(status)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"""
+        SELECT row_id, plugin, formid, formid_sanitized, edid, signature, field,
+               index_n, index_max, source, list_index, strid, dest, status, updated_at
+        FROM units
+        {where}
+        ORDER BY signature, field, formid, index_n
+        LIMIT ?
+        """,
+        [*params, limit],
+    ).fetchall()
+    return [_row_to_dict(row) for row in rows]
+
+
+def count_units(
+    conn: sqlite3.Connection,
+    *,
+    sig: str | None = None,
+    field: str | None = None,
+    status: str | None = None,
+) -> int:
+    """Count units with optional filters."""
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    if sig is not None:
+        clauses.append("signature = ?")
+        params.append(sig.upper())
+    if field is not None:
+        clauses.append("field = ?")
+        params.append(field.upper())
+    if status is not None:
+        clauses.append("status = ?")
+        params.append(status)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return int(conn.execute(f"SELECT COUNT(*) FROM units {where}", params).fetchone()[0])
+
+
+def get_unit_by_row_id(conn: sqlite3.Connection, row_id: str) -> dict[str, Any] | None:
+    """Return one unit by stable row id."""
+
+    row = conn.execute(
+        """
+        SELECT row_id, plugin, formid, formid_sanitized, edid, signature, field,
+               index_n, index_max, source, list_index, strid, dest, status, updated_at
+        FROM units
+        WHERE row_id = ?
+        """,
+        (row_id,),
+    ).fetchone()
+    return None if row is None else _row_to_dict(row)
+
+
+def _row_to_dict(row: sqlite3.Row | tuple[Any, ...]) -> dict[str, Any]:
+    return {
+        "row_id": row[0],
+        "plugin": row[1],
+        "formid": f"0x{int(row[2]):08X}",
+        "formid_sanitized": f"0x{int(row[3]):06X}",
+        "edid": row[4],
+        "signature": row[5],
+        "field": row[6],
+        "index": row[7],
+        "index_max": row[8],
+        "source": row[9],
+        "list_index": row[10],
+        "strid": row[11],
+        "dest": row[12],
+        "status": row[13],
+        "updated_at": row[14],
+    }
+
+
+__all__ = [
+    "count_units",
+    "get_unit_by_row_id",
+    "get_unit_counts_by_signature",
+    "insert_units",
+    "list_units",
+    "open_memory_db",
+]

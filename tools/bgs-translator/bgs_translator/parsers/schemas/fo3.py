@@ -1,5 +1,15 @@
 """Fallout 3 parser schema ownership."""
 
-# TODO(Chunk-D): Fallout 3 schema implementation.
+from __future__ import annotations
 
-__all__ = []
+from ._base import YAMLBackedSchema
+
+
+class FO3Schema(YAMLBackedSchema):
+    """YAML-backed Fallout 3 schema."""
+
+    def __init__(self) -> None:
+        super().__init__("Fallout3", "fo3")
+
+
+__all__ = ["FO3Schema"]

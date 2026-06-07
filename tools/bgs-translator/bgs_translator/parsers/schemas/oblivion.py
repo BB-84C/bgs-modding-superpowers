@@ -1,5 +1,15 @@
 """Oblivion parser schema ownership."""
 
-# TODO(Chunk-D): Oblivion schema implementation.
+from __future__ import annotations
 
-__all__ = []
+from ._base import YAMLBackedSchema
+
+
+class OblivionSchema(YAMLBackedSchema):
+    """YAML-backed Oblivion schema."""
+
+    def __init__(self) -> None:
+        super().__init__("Oblivion", "oblivion")
+
+
+__all__ = ["OblivionSchema"]

@@ -1,5 +1,15 @@
-"""Fallout 4 and Fallout 4 VR parser schema ownership."""
+"""Fallout 4 / Fallout 4 VR parser schema ownership."""
 
-# TODO(Chunk-D): Fallout 4 schema implementation.
+from __future__ import annotations
 
-__all__ = []
+from ._base import YAMLBackedSchema
+
+
+class FO4Schema(YAMLBackedSchema):
+    """YAML-backed Fallout 4 schema."""
+
+    def __init__(self) -> None:
+        super().__init__("Fallout4", "fo4")
+
+
+__all__ = ["FO4Schema"]

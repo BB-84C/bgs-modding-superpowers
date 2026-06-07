@@ -1,5 +1,15 @@
 """Fallout: New Vegas parser schema ownership."""
 
-# TODO(Chunk-D): Fallout: New Vegas schema implementation.
+from __future__ import annotations
 
-__all__ = []
+from ._base import YAMLBackedSchema
+
+
+class FNVSchema(YAMLBackedSchema):
+    """YAML-backed Fallout: New Vegas schema."""
+
+    def __init__(self) -> None:
+        super().__init__("FalloutNV", "fnv")
+
+
+__all__ = ["FNVSchema"]
