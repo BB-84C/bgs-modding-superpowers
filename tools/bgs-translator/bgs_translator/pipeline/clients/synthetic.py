@@ -27,5 +27,8 @@ class SyntheticLLMClient:
             via="synthetic",
         )
 
+    async def aclose(self) -> None:
+        """Synthetic client has no resources to close."""
+
 
 __all__ = ["SyntheticLLMClient"]
