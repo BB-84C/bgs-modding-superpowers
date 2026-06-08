@@ -110,15 +110,15 @@ class ProjectTab(ttk.Frame):
         self._meta_frame.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         self._meta_vars: dict[str, tk.StringVar] = {}
         rows = [
-            ("Project", "project_name"),
-            ("Source", "source_lang"),
-            ("Target", "target_lang"),
-            ("Game", "game"),
-            ("Created", "created_at"),
-            ("Plugin", "plugin_path"),
-            ("Plugin SHA", "plugin_sha_short"),
-            ("Active profile", "active_profile"),
-            ("Cost cap", "cost_cap"),
+            (_("Project"), "project_name"),
+            (_("Source"), "source_lang"),
+            (_("Target"), "target_lang"),
+            (_("Game"), "game"),
+            (_("Created"), "created_at"),
+            (_("Plugin"), "plugin_path"),
+            (_("Plugin SHA"), "plugin_sha_short"),
+            (_("Active profile"), "active_profile"),
+            (_("Cost cap"), "cost_cap"),
         ]
         for index, (caption, key) in enumerate(rows):
             ttk.Label(self._meta_frame, text=f"{caption}:", style="Dim.TLabel").grid(
@@ -167,8 +167,9 @@ class ProjectTab(ttk.Frame):
         # raised/lowered explicitly in load_project / clear.
         self._empty_state = EmptyStatePanel(
             counts_frame,
-            caption="[ NO PROJECT LOADED ]",
-            sub_line="Select a project from the nav tree",
+            caption=_("[ NO PROJECT LOADED ]"),
+            source_caption="[ NO PROJECT LOADED ]",
+            sub_line=_("Select a project from the nav tree"),
         )
         self._empty_state.grid(row=0, column=0, columnspan=2, sticky="nsew")
         self._empty_state.lift()
@@ -306,7 +307,7 @@ class ProjectTab(ttk.Frame):
         except (subprocess.SubprocessError, OSError) as exc:
             messagebox.showerror(
                 title=_("Export SST"),
-                message=f"Failed to launch xtl project export: {exc}",
+                message=_("Failed to launch xtl project export: {stderr}").format(stderr=exc),
                 parent=self,
             )
             return

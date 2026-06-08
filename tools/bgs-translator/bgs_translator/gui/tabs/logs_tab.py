@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import subprocess
+import sys
 import tkinter as tk
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tkinter import ttk
 from typing import Final
@@ -40,8 +43,9 @@ class LogsTab(ttk.Frame):
     def __init__(self, master: tk.Misc) -> None:
         super().__init__(master, padding=(12, 10))
         self._live = tk.BooleanVar(value=True)
-        self._level_filter = tk.StringVar(value="all")
-        self._source_filter = tk.StringVar(value="all")
+        self._level_filter = tk.StringVar(value=_("all"))
+        self._source_filter = tk.StringVar(value=_("all"))
+        self.day_var = tk.StringVar(value=datetime.now(UTC).strftime("%Y-%m-%d"))
         self._after_id: str | None = None
 
         ttk.Label(self, text=_("Logs"), style="Phosphor.TLabel").grid(
@@ -51,11 +55,19 @@ class LogsTab(ttk.Frame):
         # Filter row ----------------------------------------------------
         controls = ttk.Frame(self)
         controls.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        ttk.Label(controls, text=f"{_('Day')}:", style="Dim.TLabel").pack(side="left")
+        ttk.Combobox(
+            controls,
+            textvariable=self.day_var,
+            values=_last_seven_days(),
+            width=12,
+            state="readonly",
+        ).pack(side="left", padx=(4, 12))
         ttk.Label(controls, text=f"{_('Level')}:", style="Dim.TLabel").pack(side="left")
         ttk.Combobox(
             controls,
             textvariable=self._level_filter,
-            values=["all", "error", "warn", "info", "debug"],
+            values=[_("all"), _("error"), _("warn"), _("info"), _("debug")],
             width=8,
             state="readonly",
         ).pack(side="left", padx=(4, 12))
@@ -63,12 +75,14 @@ class LogsTab(ttk.Frame):
         ttk.Combobox(
             controls,
             textvariable=self._source_filter,
-            values=["all", "batch", "glossary", "sst-write", "profile-probe", "validator"],
+            values=[_("all"), _("batch"), _("glossary"), _("sst-write"), _("profile-probe"), _("validator")],
             width=14,
             state="readonly",
         ).pack(side="left", padx=(4, 12))
-        ttk.Checkbutton(controls, text=_("Live"), variable=self._live).pack(side="left")
+        self.pause_button = ttk.Button(controls, text=_("Pause tail"), command=self.toggle_tail)
+        self.pause_button.pack(side="left")
         ttk.Button(controls, text=_("Filter"), command=self._refresh).pack(side="left", padx=(12, 0))
+        ttk.Button(controls, text=_("Open logs folder"), command=self.open_logs_folder).pack(side="left", padx=(8, 0))
 
         # Viewer --------------------------------------------------------
         viewer_frame = ttk.Frame(self)
@@ -102,8 +116,9 @@ class LogsTab(ttk.Frame):
         # Text widget for when today's log is missing/empty.
         self._empty_state = EmptyStatePanel(
             viewer_frame,
-            caption="[ NO LOGS RECORDED ]",
-            sub_line="Today's JSONL is empty",
+            caption=_("[ NO LOGS RECORDED ]"),
+            source_caption="[ NO LOGS RECORDED ]",
+            sub_line=_("Today's JSONL is empty"),
         )
         self._empty_state.grid(row=0, column=0, columnspan=2, sticky="nsew")
         self._empty_state.lift()
@@ -129,8 +144,20 @@ class LogsTab(ttk.Frame):
 
     # Internals --------------------------------------------------------
     def _log_path_for_today(self) -> Path:
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
-        return paths.logs_root() / f"{today}.log"
+        return self._log_path_for_day(self.day_var.get())
+
+    def _log_path_for_day(self, day: str) -> Path:
+        return paths.logs_root() / f"{day}.log"
+
+    def refresh(self) -> None:
+        self._refresh()
+
+    def toggle_tail(self) -> None:
+        self._live.set(not self._live.get())
+        self.pause_button.configure(text=_("Pause tail") if self._live.get() else _("Resume tail"))
+
+    def open_logs_folder(self) -> None:
+        self._open_path_in_explorer(paths.logs_root())
 
     def _refresh(self) -> None:
         log_path = self._log_path_for_today()
@@ -156,8 +183,8 @@ class LogsTab(ttk.Frame):
         self._after_id = self.after(_REFRESH_INTERVAL_MS, self._schedule_refresh)
 
     def _render(self, lines: list[str]) -> None:
-        level_filter = self._level_filter.get()
-        source_filter = self._source_filter.get()
+        level_filter = _localized_filter_to_raw(self._level_filter.get(), ["all", "error", "warn", "info", "debug"])
+        source_filter = _localized_filter_to_raw(self._source_filter.get(), ["all", "batch", "glossary", "sst-write", "profile-probe", "validator"])
 
         # Toggle empty-state visibility based on whether there is any
         # content to show after filtering.
@@ -183,6 +210,21 @@ class LogsTab(ttk.Frame):
         self._text.see("end")
         self._text.configure(state="disabled")
 
+    def text_content(self) -> str:
+        return str(self._text.get("1.0", "end"))
+
+    @staticmethod
+    def _open_path_in_explorer(path: Path) -> None:
+        try:
+            if sys.platform == "win32":
+                os.startfile(str(path))
+            elif sys.platform == "darwin":
+                subprocess.run(["open", str(path)], check=False)
+            else:
+                subprocess.run(["xdg-open", str(path)], check=False)
+        except OSError as exc:
+            log.warning("Could not open %s: %s", path, exc)
+
 
 def _parse_jsonl_line(line: str) -> tuple[str, str, str, str]:
     """Best-effort parse of a JSONL log line into (ts, level, source, message)."""
@@ -201,6 +243,18 @@ def _parse_jsonl_line(line: str) -> tuple[str, str, str, str]:
     src = str(obj.get("source") or obj.get("src") or "-")
     message = str(obj.get("msg") or obj.get("message") or "")
     return (ts, level, src, message)
+
+
+def _last_seven_days() -> list[str]:
+    today = datetime.now(UTC).date()
+    return [(today - timedelta(days=offset)).isoformat() for offset in range(7)]
+
+
+def _localized_filter_to_raw(value: str, raw_values: list[str]) -> str:
+    for raw in raw_values:
+        if value == _(raw):
+            return raw
+    return value
 
 
 __all__ = ["LogsTab"]

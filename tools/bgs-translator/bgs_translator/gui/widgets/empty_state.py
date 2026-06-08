@@ -16,6 +16,7 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Final
 
+from bgs_translator.gui.i18n import gettext as _
 from bgs_translator.gui.themes import get_theme
 
 _BOX_TEMPLATE: Final[str] = (
@@ -27,10 +28,6 @@ _BOX_TEMPLATE: Final[str] = (
     "|                                        |\n"
     "+========================================+"
 )
-
-_DEFAULT_CAPTION: Final[str] = "[ NO DATA LOADED ]"
-_DEFAULT_SUB: Final[str] = "VAULT-TEC INDUSTRIES"
-
 
 def _render_box(caption: str, sub_line: str) -> str:
     """Build the centered ASCII box for the empty state."""
@@ -52,8 +49,9 @@ class EmptyStatePanel(ttk.Frame):
         self,
         master: tk.Misc,
         *,
-        caption: str = _DEFAULT_CAPTION,
-        sub_line: str = _DEFAULT_SUB,
+        caption: str | None = None,
+        sub_line: str | None = None,
+        source_caption: str | None = None,
         theme_name: str = "amber",
         font_family: str = "Consolas",
         font_size: int = 11,
@@ -61,10 +59,13 @@ class EmptyStatePanel(ttk.Frame):
         super().__init__(master, style="TFrame")
         theme = get_theme(theme_name)
         self._theme_name = theme_name
+        resolved_caption = caption or _("[ NO DATA LOADED ]")
+        resolved_sub_line = sub_line or _("VAULT-TEC INDUSTRIES")
 
-        self._var = tk.StringVar(value=_render_box(caption, sub_line))
-        self._caption = caption
-        self._sub_line = sub_line
+        self._var = tk.StringVar(value=_render_box(resolved_caption, resolved_sub_line))
+        self._caption = resolved_caption
+        self._source_caption = source_caption or resolved_caption
+        self._sub_line = resolved_sub_line
 
         self._label = tk.Label(
             self,
@@ -87,6 +88,7 @@ class EmptyStatePanel(ttk.Frame):
         """Update the empty-state caption + optional sub-line."""
 
         self._caption = caption
+        self._source_caption = caption
         if sub_line is not None:
             self._sub_line = sub_line
         self._var.set(_render_box(self._caption, self._sub_line))
@@ -100,7 +102,7 @@ class EmptyStatePanel(ttk.Frame):
 
     @property
     def caption(self) -> str:
-        return self._caption
+        return self._source_caption
 
 
 __all__ = ["EmptyStatePanel"]

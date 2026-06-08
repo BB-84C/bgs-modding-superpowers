@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
+import subprocess
 import tomllib
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 
 import tomli_w
@@ -103,6 +106,40 @@ def save_profiles(cfg: ProfilesConfig) -> None:
     profile_path.write_text(tomli_w.dumps(_to_toml_dict(cfg)), encoding="utf-8")
 
 
+def write_env_var(env_path: Path, var_name: str, value: str) -> None:
+    """Write or update ``var_name=value`` in a dotenv file.
+
+    Existing variables and comments are preserved. The target file is created
+    with owner-only permissions where the platform exposes a reliable control:
+    POSIX ``0600`` and a best-effort Windows ACL restriction via ``icacls``.
+    API key values are deliberately never logged.
+    """
+
+    if _ENV_NAME_RE.fullmatch(var_name) is None:
+        raise ValueError("var_name must match ^[A-Z][A-Z0-9_]+$")
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    rendered = f"{var_name}={_dotenv_quote(value)}"
+    updated = False
+    new_lines: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            new_lines.append(line)
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key == var_name:
+            if not updated:
+                new_lines.append(rendered)
+                updated = True
+            continue
+        new_lines.append(line)
+    if not updated:
+        new_lines.append(rendered)
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    _restrict_env_file_permissions(env_path)
+
+
 def get_active_profile(cfg: ProfilesConfig) -> ProviderProfile:
     """Return the active profile or raise when none is selected."""
 
@@ -131,6 +168,37 @@ def resolve_api_key(profile: ProviderProfile) -> str:
     if not key:
         raise ProfileMissingKeyError(profile.name, profile.api_key_env)
     return str(key)
+
+
+def _dotenv_quote(value: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9_@%+=:,./~\-]+", value):
+        return value
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _restrict_env_file_permissions(env_path: Path) -> None:
+    if os.name != "nt":
+        env_path.chmod(0o600)
+        return
+    try:
+        env_path.chmod(0o600)
+    except OSError:
+        pass
+    username = os.environ.get("USERNAME")
+    if not username:
+        return
+    # Best effort: protect the key store for normal NTFS paths without failing
+    # tests or portable filesystems that do not expose Windows ACLs.
+    try:
+        subprocess.run(
+            ["icacls", str(env_path), "/inheritance:r", "/grant:r", f"{username}:(R,W)"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return
 
 
 def _is_allowed_base_url(value: str) -> bool:
@@ -194,4 +262,5 @@ __all__ = [
     "load_profiles",
     "resolve_api_key",
     "save_profiles",
+    "write_env_var",
 ]

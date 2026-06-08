@@ -9,6 +9,8 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
+from bgs_translator.gui.i18n import gettext as _
+
 
 class SecretInput(ttk.Frame):
     """An Entry with a sibling Show/Hide button."""
@@ -36,7 +38,7 @@ class SecretInput(ttk.Frame):
 
         self._toggle = ttk.Button(
             self,
-            text="Show",
+            text=_("Show"),
             width=6,
             command=self._toggle_visibility,
         )
@@ -45,7 +47,7 @@ class SecretInput(ttk.Frame):
     def _toggle_visibility(self) -> None:
         self._shown = not self._shown
         self._entry.configure(show="" if self._shown else self._MASK_CHAR)
-        self._toggle.configure(text="Hide" if self._shown else "Show")
+        self._toggle.configure(text=_("Hide") if self._shown else _("Show"))
 
     def get(self) -> str:
         return self._var.get()
