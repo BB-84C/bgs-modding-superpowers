@@ -159,8 +159,12 @@ class SetApiKeyDialog(tk.Toplevel):
     """Modal dialog that writes the selected profile's API key to .env."""
 
     def __init__(self, master: tk.Misc, *, profile: ProviderProfile, on_saved: Callable[[], None] | None = None) -> None:
+        if not profile.api_key_env.strip():
+            raise ValueError(
+                f"Profile {profile.name!r} has no api_key_env. Set api_key_env first via xtl profile edit."
+            )
         super().__init__(master)
-        self.title(_("Set API key for {name}").format(name=profile.name))
+        self.title(f"Set API key for `{profile.name}` → env var `{profile.api_key_env}`")
         self.transient(master.winfo_toplevel())
         self.grab_set()
         self._profile = profile
@@ -169,7 +173,9 @@ class SetApiKeyDialog(tk.Toplevel):
 
         body = ttk.Frame(self, padding=(14, 12))
         body.grid(row=0, column=0, sticky="nsew")
-        ttk.Label(body, text=f"{_('Env var')}: {profile.api_key_env}", style="Dim.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        ttk.Label(body, text=f"{_('Env var')}:", style="Dim.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 8))
+        self.env_var_value = ttk.Label(body, text=profile.api_key_env, style="Dim.TLabel", state="disabled")
+        self.env_var_value.grid(row=0, column=1, sticky="w", pady=(0, 8))
         ttk.Label(body, text=f"{_('Key')}:", style="Dim.TLabel").grid(row=1, column=0, sticky="w", padx=(0, 8))
         self.secret = SecretInput(body, width=42)
         self.secret.grid(row=1, column=1, sticky="ew")
@@ -377,6 +383,16 @@ class ProfilesTab(ttk.Frame):
     def _on_set_key(self) -> None:
         profile = self._selected_profile()
         if profile is not None:
+            if not profile.api_key_env.strip():
+                messagebox.showerror(
+                    title=_("API key env missing"),
+                    message=_(
+                        "Profile {name} has no api_key_env. Set api_key_env on the profile first "
+                        "via xtl profile edit."
+                    ).format(name=profile.name),
+                    parent=self,
+                )
+                return
             SetApiKeyDialog(self, profile=profile)
 
 
