@@ -1,0 +1,1 @@
+"""GUI smoke-test namespace."""

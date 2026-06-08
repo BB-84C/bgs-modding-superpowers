@@ -43,7 +43,7 @@ def test_glossary_tab_loads_fixture_pack_and_filters(
         tab.refresh()
         rows = tab.visible_entries()
         assert [entry.source for entry in rows] == ["Whiterun"]
-        assert not tab.add_button.winfo_ismapped()
+        assert str(tab.add_button.cget("state")) == "disabled"
     finally:
         root.destroy()
 

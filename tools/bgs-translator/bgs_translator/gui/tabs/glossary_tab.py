@@ -24,6 +24,11 @@ _SCOPE_LABELS: dict[str, str] = {
     "do_not_translate": "DNT",
 }
 _WRITABLE_SCOPES = {"player", "do_not_translate"}
+_AI_LAYER_EMPTY_MESSAGE = _(
+    "Use an AI agent to build/extend this layer — see project docs.\n"
+    "Manual [Add] is disabled for vanilla/mod scopes."
+)
+_MANUAL_LAYER_EMPTY_MESSAGE = _("No entries yet. Click [Add] to create one.")
 _CATEGORIES = ("", "character", "faction", "place", "item", "spell", "lore_term", "ui_label", "brand")
 _CONFIDENCES = ("canonical", "preferred", "candidate")
 
@@ -215,6 +220,7 @@ class GlossaryTab(ttk.Frame):
         self.delete_button.pack(side="left")
 
         self.search_var.trace_add("write", lambda *_: self.refresh())
+        self.scope_var.trace_add("write", lambda *_: self.refresh())
         self.refresh()
 
     def refresh(self) -> None:
@@ -228,6 +234,7 @@ class GlossaryTab(ttk.Frame):
         if self._visible_entries:
             self._empty_state.lower()
         else:
+            self._empty_state.set_caption(self._empty_message_for_scope())
             self._empty_state.lift()
         self._update_action_visibility()
 
@@ -256,12 +263,21 @@ class GlossaryTab(ttk.Frame):
 
     def _update_action_visibility(self) -> None:
         writable = self.scope_var.get() in _WRITABLE_SCOPES
-        for button in (self.add_button, self.edit_button, self.delete_button):
+        if not self.add_button.winfo_ismapped():
+            self.add_button.pack(side="left", padx=(0, 6))
+        self.add_button.configure(state="normal" if writable else "disabled")
+        for button in (self.edit_button, self.delete_button):
             if writable:
-                button.pack(side="left", padx=(0, 6))
+                if not button.winfo_ismapped():
+                    button.pack(side="left", padx=(0, 6))
             else:
                 button.pack_forget()
         self.update_idletasks()
+
+    def _empty_message_for_scope(self) -> str:
+        if self.scope_var.get() in _WRITABLE_SCOPES:
+            return _MANUAL_LAYER_EMPTY_MESSAGE
+        return _AI_LAYER_EMPTY_MESSAGE
 
     def _on_add(self) -> None:
         GlossaryEntryDialog(self, scope=self.scope_var.get(), kb_root=self._kb_root, user_packs_root=self._user_packs_root, on_saved=self.refresh)
