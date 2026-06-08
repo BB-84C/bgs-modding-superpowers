@@ -12,9 +12,11 @@ from pathlib import Path
 from tkinter import ttk
 from typing import Any, Literal, cast
 
+from bgs_translator.config.settings import load_settings, update_setting
 from bgs_translator.core.event_queue import EventQueueBridge, GuiEvent, get_bridge
 from bgs_translator.gui.i18n import gettext as _
 from bgs_translator.gui.themes import get_theme
+from bgs_translator.gui.widgets.amber_checkbox import AmberCheckbox
 from bgs_translator.gui.widgets.amber_scrollbar import AmberScrollbar
 from bgs_translator.gui.widgets.empty_state import EmptyStatePanel
 from bgs_translator.pipeline.prompt import load_template, render_prompt
@@ -113,6 +115,9 @@ class PromptTab(ttk.Frame):
             self._unsubscribe()
             self._event_bridge = bridge
             self._unsubscribe = self._event_bridge.subscribe(self._on_gui_event)
+        register_checkbox = getattr(app, "register_amber_checkbox", None)
+        if callable(register_checkbox):
+            register_checkbox(self._preview_required_checkbox)
 
     def destroy(self) -> None:
         try:
@@ -201,6 +206,15 @@ class PromptTab(ttk.Frame):
                 sticky="w",
                 padx=(6, 0),
             )
+
+        self._preview_required_checkbox = AmberCheckbox(
+            top,
+            text=_("Require prompt preview approval before dispatch"),
+            initial=self._load_preview_required_setting(),
+            command=self._on_preview_required_toggled,
+            theme_name=self._theme_name,
+        )
+        self._preview_required_checkbox.grid(row=1, column=0, columnspan=7, sticky="w", pady=(8, 0))
 
     def _build_editor_with_linenos(self) -> None:
         self._editor_frame = ttk.Frame(self, style="Surface.TFrame")
@@ -345,6 +359,18 @@ class PromptTab(ttk.Frame):
 
     def _on_editable_toggled(self) -> None:
         self._editor.configure(state="normal" if self._editable.get() else "disabled")
+
+    def _load_preview_required_setting(self) -> bool:
+        try:
+            return bool(load_settings().behavior.prompt_preview_required)
+        except OSError:
+            return False
+
+    def _on_preview_required_toggled(self) -> None:
+        try:
+            update_setting("behavior.prompt_preview_required", self._preview_required_checkbox.value)
+        except (OSError, KeyError, ValueError):
+            self._preview_required_checkbox.value = self._load_preview_required_setting()
 
     def _on_editor_yscroll(self, scrollbar: AmberScrollbar) -> Callable[[float | str, float | str], None]:
         def _scroll(first: float | str, last: float | str) -> None:
