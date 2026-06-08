@@ -49,6 +49,7 @@ class LLMResponse:
     request_id: str | None = None
     raw_response_path: Path | None = None
     raw_response: Any | None = None
+    empty_completion: bool = False
     via: Literal[
         "responses", "messages", "generate_content", "chat_completions", "synthetic"
     ] = "synthetic"

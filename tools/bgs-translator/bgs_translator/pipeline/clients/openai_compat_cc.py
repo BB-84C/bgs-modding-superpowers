@@ -5,11 +5,14 @@ from __future__ import annotations
 import importlib
 import inspect
 import json
+import logging
 from typing import Any
 
 from bgs_translator.config.profiles import ProviderProfile, resolve_api_key
 from bgs_translator.pipeline.batcher import Batch
 from bgs_translator.pipeline.clients.base import BatchTranslationOutput, LLMResponse, TokenUsage
+
+log = logging.getLogger(__name__)
 
 
 class OpenAICompatChatCompletionsClient:
@@ -40,8 +43,19 @@ class OpenAICompatChatCompletionsClient:
         if self.profile.require_parameters:
             kwargs["extra_body"] = {"provider": {"require_parameters": True}}
         response = await _maybe_await(self.client.chat.completions.create(**kwargs))
-        content = getattr(response.choices[0].message, "content", "{}")
-        output = BatchTranslationOutput.model_validate(json.loads(str(content)))
+        request_id = _as_optional_str(getattr(response, "id", None))
+        content = getattr(response.choices[0].message, "content", "")
+        content_text = "" if content is None else str(content)
+        empty_completion = not content_text.strip()
+        if empty_completion:
+            log.warning(
+                "Empty chat-completions content for batch_id=%s request_id=%s",
+                batch.batch_id,
+                request_id,
+            )
+            output = BatchTranslationOutput(items={})
+        else:
+            output = BatchTranslationOutput.model_validate(json.loads(content_text))
         usage = _usage_from_response(response)
         cost_usd = _openrouter_cost_usd(response) if _is_openrouter(self.profile.base_url) else None
         return LLMResponse(
@@ -49,8 +63,9 @@ class OpenAICompatChatCompletionsClient:
             usage=usage,
             cost_usd=cost_usd,
             cost_exact=cost_usd is not None,
-            request_id=_as_optional_str(getattr(response, "id", None)),
+            request_id=request_id,
             raw_response=_raw_response_json(response),
+            empty_completion=empty_completion,
             via="chat_completions",
         )
 
