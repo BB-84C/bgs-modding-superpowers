@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import UTC, datetime
@@ -14,13 +15,22 @@ import tomli_w
 
 from bgs_translator.config import paths
 from bgs_translator.config.pricing import estimate_cost
-from bgs_translator.core.memory import update_unit_translation
+from bgs_translator.core import event_queue as gui_event_queue
+from bgs_translator.core.memory import (
+    insert_batch,
+    insert_run,
+    update_batch,
+    update_run,
+    update_unit_translation,
+)
 from bgs_translator.observability.cost_tracker import CostTracker
 from bgs_translator.observability.rate_tracker import RateTracker
 from bgs_translator.pipeline.batcher import Batch, BatchPlan, estimate_tokens
 from bgs_translator.pipeline.clients.base import LLMClient, LLMResponse
 from bgs_translator.pipeline.mask import unmask_dest
 from bgs_translator.pipeline.validator import ValidationFailure, validate_item
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -70,6 +80,10 @@ class _BatchOutcome:
     retried: int = 0
     manual_review: int = 0
     cancelled: int = 0
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    cost_usd: float | None = None
+    cost_exact: bool = False
     failures: list[ValidationFailure] = field(default_factory=list)
     translated_units: list[TranslatedUnit] = field(default_factory=list)
 
@@ -104,6 +118,26 @@ class BatchRunner:
         self._prepare_run_dir(run_dir)
         memory_path = paths.project_root(self.plan.project) / "memory" / "memory.sqlite"
         memory_conn = sqlite3.connect(memory_path) if memory_path.exists() else None
+        started_at = datetime.now(UTC).isoformat()
+        if memory_conn is not None:
+            insert_run(
+                memory_conn,
+                run_id,
+                self.plan.plan_id,
+                started_at,
+                len(self.plan.batches),
+                project=self.plan.project,
+            )
+        self._emit_gui_event(
+            "run.start",
+            run_id=run_id,
+            payload={
+                "run_id": run_id,
+                "plan_id": self.plan.plan_id,
+                "batches_total": len(self.plan.batches),
+                "item_count_total": self.plan.total_items,
+            },
+        )
         try:
             semaphore = asyncio.Semaphore(max(1, self.rate_tracker.profile.max_concurrency))
             outcomes = await asyncio.gather(
@@ -114,6 +148,32 @@ class BatchRunner:
                     for batch in self.plan.batches
                 )
             )
+        except Exception:
+            finished_at = datetime.now(UTC).isoformat()
+            if memory_conn is not None:
+                update_run(
+                    memory_conn,
+                    run_id,
+                    status="failed",
+                    finished_at=finished_at,
+                    cost_total_usd=self.cost_tracker.estimated_total(),
+                    cost_exact=self.cost_tracker.cost_exact,
+                    succeeded=0,
+                    retried=0,
+                    manual_review=0,
+                    cancelled=0,
+                )
+            self._emit_gui_event(
+                "run.failed",
+                run_id=run_id,
+                payload={
+                    "run_id": run_id,
+                    "plan_id": self.plan.plan_id,
+                    "cost_total_usd": self.cost_tracker.estimated_total(),
+                    "cost_exact": self.cost_tracker.cost_exact,
+                },
+            )
+            raise
         finally:
             if memory_conn is not None:
                 memory_conn.close()
@@ -126,6 +186,41 @@ class BatchRunner:
             cancelled=sum(outcome.cancelled for outcome in outcomes),
             cost_usd=self.cost_tracker.estimated_total(),
             cost_exact=self.cost_tracker.cost_exact,
+        )
+        run_status = "failed" if result.manual_review or result.cancelled else "complete"
+        finished_at = datetime.now(UTC).isoformat()
+        memory_conn = sqlite3.connect(memory_path) if memory_path.exists() else None
+        try:
+            if memory_conn is not None:
+                update_run(
+                    memory_conn,
+                    run_id,
+                    status=run_status,
+                    finished_at=finished_at,
+                    cost_total_usd=result.cost_usd,
+                    cost_exact=result.cost_exact,
+                    succeeded=result.succeeded,
+                    retried=result.retried,
+                    manual_review=result.manual_review,
+                    cancelled=result.cancelled,
+                )
+        finally:
+            if memory_conn is not None:
+                memory_conn.close()
+        self._emit_gui_event(
+            "run.complete" if run_status == "complete" else "run.failed",
+            run_id=run_id,
+            payload={
+                "run_id": run_id,
+                "plan_id": self.plan.plan_id,
+                "total_items": result.total_items,
+                "succeeded": result.succeeded,
+                "retried": result.retried,
+                "manual_review": result.manual_review,
+                "cancelled": result.cancelled,
+                "cost_total_usd": result.cost_usd,
+                "cost_exact": result.cost_exact,
+            },
         )
         self._write_json(
             run_dir / "results.json",
@@ -160,19 +255,117 @@ class BatchRunner:
                 await self._emit(event_queue, run_id, batch.batch_id, "cancelled")
                 return _BatchOutcome(cancelled=len(batch.items))
             await self._emit(event_queue, run_id, batch.batch_id, "start")
+            started_at = datetime.now(UTC).isoformat()
+            if memory_conn is not None:
+                insert_batch(
+                    memory_conn,
+                    batch.batch_id,
+                    run_id,
+                    started_at,
+                    len(batch.items),
+                    plan_id=self.plan.plan_id,
+                    profile_snapshot_json=self._profile_snapshot_json(),
+                )
+            self._emit_gui_event(
+                "batch.start",
+                run_id=run_id,
+                batch_id=batch.batch_id,
+                payload={
+                    "batch_id": batch.batch_id,
+                    "run_id": run_id,
+                    "item_count": len(batch.items),
+                    "total": len(batch.items),
+                    "profile": self.rate_tracker.profile.name,
+                    "model": self.rate_tracker.profile.model,
+                },
+            )
             est_tokens = estimate_tokens(self._system_prompt(batch)) + estimate_tokens(
                 "\n".join(item.source_masked for item in batch.items)
             )
             await self.rate_tracker.acquire(est_tokens)
             if self.cost_tracker.would_exceed_cap(self._batch_estimated_cost()):
                 await self._emit(event_queue, run_id, batch.batch_id, "cancelled", {"reason": "cost_cap"})
+                finished_at = datetime.now(UTC).isoformat()
+                if memory_conn is not None:
+                    update_batch(
+                        memory_conn,
+                        batch.batch_id,
+                        status="cancelled",
+                        finished_at=finished_at,
+                        tokens_in=None,
+                        tokens_out=None,
+                        cost_usd=None,
+                    )
+                self._emit_gui_event(
+                    "batch.failed",
+                    run_id=run_id,
+                    batch_id=batch.batch_id,
+                    payload={"batch_id": batch.batch_id, "run_id": run_id, "reason": "cost_cap"},
+                )
                 return _BatchOutcome(cancelled=len(batch.items))
             outcome = await self._attempt_batch(run_dir, batch, cancel_event, memory_conn)
+            for items_done in range(1, outcome.succeeded + 1):
+                self._emit_gui_event(
+                    "batch.progress",
+                    run_id=run_id,
+                    batch_id=batch.batch_id,
+                    payload={
+                        "batch_id": batch.batch_id,
+                        "items_done": items_done,
+                        "items_total": len(batch.items),
+                        "done": items_done,
+                        "total": len(batch.items),
+                    },
+                )
+            batch_status = self._batch_status(outcome)
+            finished_at = datetime.now(UTC).isoformat()
+            if memory_conn is not None:
+                update_batch(
+                    memory_conn,
+                    batch.batch_id,
+                    status=batch_status,
+                    finished_at=finished_at,
+                    tokens_in=outcome.tokens_in,
+                    tokens_out=outcome.tokens_out,
+                    cost_usd=outcome.cost_usd,
+                    cost_exact=outcome.cost_exact,
+                )
+            self._emit_gui_event(
+                "batch.complete" if batch_status == "complete" else "batch.failed",
+                run_id=run_id,
+                batch_id=batch.batch_id,
+                payload={
+                    "batch_id": batch.batch_id,
+                    "run_id": run_id,
+                    "status": batch_status,
+                    "item_count": len(batch.items),
+                    "done": outcome.succeeded,
+                    "total": len(batch.items),
+                    "tokens_in": outcome.tokens_in,
+                    "tokens_out": outcome.tokens_out,
+                    "cost_usd": outcome.cost_usd,
+                    "cost": outcome.cost_usd,
+                    "cost_exact": outcome.cost_exact,
+                    "retry_count": outcome.retried,
+                },
+            )
+            self._emit_gui_event(
+                "cost.update",
+                run_id=run_id,
+                batch_id=batch.batch_id,
+                payload={
+                    "run_id": run_id,
+                    "batch_id": batch.batch_id,
+                    "cost_total_usd": self.cost_tracker.estimated_total(),
+                    "cost": self.cost_tracker.estimated_total(),
+                    "cost_exact": self.cost_tracker.cost_exact,
+                },
+            )
             await self._emit(
                 event_queue,
                 run_id,
                 batch.batch_id,
-                "cancelled" if outcome.cancelled else "complete",
+                "cancelled" if outcome.cancelled else ("failed" if batch_status == "failed" else "complete"),
                 asdict(outcome) | {"failures": [failure.model_dump() for failure in outcome.failures]},
             )
             return outcome
@@ -201,6 +394,10 @@ class BatchRunner:
         return _BatchOutcome(
             manual_review=len(batch.items),
             retried=self.max_retries,
+            tokens_in=response.usage.input_tokens,
+            tokens_out=response.usage.output_tokens,
+            cost_usd=self._batch_cost_usd(response),
+            cost_exact=response.cost_exact,
             failures=failures,
         )
 
@@ -265,12 +462,20 @@ class BatchRunner:
             return _BatchOutcome(
                 manual_review=len(persist_failures),
                 retried=attempt,
+                tokens_in=response.usage.input_tokens,
+                tokens_out=response.usage.output_tokens,
+                cost_usd=self._batch_cost_usd(response),
+                cost_exact=response.cost_exact,
                 failures=failures + persist_failures,
                 translated_units=translated_units,
             )
         return _BatchOutcome(
             succeeded=len(translated_units),
             retried=attempt,
+            tokens_in=response.usage.input_tokens,
+            tokens_out=response.usage.output_tokens,
+            cost_usd=self._batch_cost_usd(response),
+            cost_exact=response.cost_exact,
             failures=failures,
             translated_units=translated_units,
         )
@@ -336,6 +541,38 @@ class BatchRunner:
             return 0.0
         return self.plan.est_cost_usd / len(self.plan.batches)
 
+    def _batch_cost_usd(self, response: LLMResponse) -> float | None:
+        if response.cost_usd is not None:
+            return response.cost_usd
+        return estimate_cost(
+            self.cost_tracker.pricing,
+            self.cost_tracker.profile.sdk_kind,
+            self.cost_tracker.profile.model,
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+            response.usage.cached_tokens,
+        )
+
+    def _batch_status(self, outcome: _BatchOutcome) -> str:
+        if outcome.cancelled:
+            return "cancelled"
+        if outcome.manual_review or outcome.failures:
+            return "failed"
+        return "complete"
+
+    def _profile_snapshot_json(self) -> str:
+        profile = self.rate_tracker.profile
+        return json.dumps(
+            {
+                "name": profile.name,
+                "profile": profile.name,
+                "sdk_kind": profile.sdk_kind,
+                "model": profile.model,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
     def _system_prompt(self, batch: Batch) -> str:
         if batch.parent_context_summary:
             return f"{self.plan.sample_system_prompt}\n\n{batch.parent_context_summary}"
@@ -360,6 +597,26 @@ class BatchRunner:
                 detail=detail or {},
             )
         )
+
+    def _emit_gui_event(
+        self,
+        kind: gui_event_queue.GuiEventKind,
+        *,
+        run_id: str | None = None,
+        batch_id: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            gui_event_queue.get_bridge().emit(
+                gui_event_queue.GuiEvent(
+                    kind=kind,
+                    run_id=run_id,
+                    batch_id=batch_id,
+                    payload=payload or {},
+                )
+            )
+        except Exception as exc:  # pragma: no cover - defensive GUI bridge isolation
+            log.warning("GUI event emission failed for %s: %s", kind, exc)
 
     @staticmethod
     def _write_json(path: Path, payload: Any) -> None:

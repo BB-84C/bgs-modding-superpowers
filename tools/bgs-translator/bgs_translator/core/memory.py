@@ -186,6 +186,119 @@ def update_unit_translation(
     conn.commit()
 
 
+def insert_run(
+    conn: sqlite3.Connection,
+    run_id: str,
+    plan_id: str,
+    started_at: str,
+    batches_total: int,
+    status: str = "running",
+    *,
+    project: str = "",
+) -> None:
+    """Insert or replace one run lifecycle row."""
+
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO runs (
+            run_id, project, plan_id, started_at, completed_at, status,
+            batches_total, cost_total_usd, cost_exact
+        ) VALUES (?, ?, ?, ?, NULL, ?, ?, NULL, NULL)
+        """,
+        (run_id, project, plan_id, started_at, status, batches_total),
+    )
+    conn.commit()
+
+
+def update_run(
+    conn: sqlite3.Connection,
+    run_id: str,
+    *,
+    status: str,
+    finished_at: str | None,
+    cost_total_usd: float | None,
+    cost_exact: bool,
+    succeeded: int,
+    retried: int,
+    manual_review: int,
+    cancelled: int,
+) -> None:
+    """Update one run lifecycle row.
+
+    Summary counts are accepted to keep the runner call-site explicit. The
+    current PRD schema stores those counts in run sidecar artifacts rather than
+    in the ``runs`` table, so only table-backed columns are updated here.
+    """
+
+    del succeeded, retried, manual_review, cancelled
+    cursor = conn.execute(
+        """
+        UPDATE runs SET
+            completed_at = ?, status = ?, cost_total_usd = ?, cost_exact = ?
+        WHERE run_id = ?
+        """,
+        (finished_at, status, cost_total_usd, 1 if cost_exact else 0, run_id),
+    )
+    if cursor.rowcount != 1:
+        conn.rollback()
+        raise ValueError(f"No memory.sqlite run row updated for run_id={run_id!r}")
+    conn.commit()
+
+
+def insert_batch(
+    conn: sqlite3.Connection,
+    batch_id: str,
+    run_id: str,
+    started_at: str,
+    item_count: int,
+    status: str = "running",
+    *,
+    plan_id: str = "",
+    profile_snapshot_json: str = "{}",
+) -> None:
+    """Insert or replace one batch lifecycle row."""
+
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO batches (
+            batch_id, run_id, plan_id, profile_snapshot_json, item_count,
+            started_at, completed_at, status, tokens_in, tokens_out, cost_usd,
+            cost_exact, retry_count, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, NULL, NULL, 0, NULL)
+        """,
+        (batch_id, run_id, plan_id, profile_snapshot_json, item_count, started_at, status),
+    )
+    conn.commit()
+
+
+def update_batch(
+    conn: sqlite3.Connection,
+    batch_id: str,
+    *,
+    status: str,
+    finished_at: str | None,
+    tokens_in: int | None,
+    tokens_out: int | None,
+    cost_usd: float | None,
+    cost_exact: bool = False,
+) -> None:
+    """Update one batch lifecycle row."""
+
+    cursor = conn.execute(
+        """
+        UPDATE batches SET
+            completed_at = ?, status = ?, tokens_in = ?, tokens_out = ?,
+            cost_usd = ?, cost_exact = ?
+        WHERE batch_id = ?
+        """,
+        (finished_at, status, tokens_in, tokens_out, cost_usd, 1 if cost_exact else 0, batch_id),
+    )
+    if cursor.rowcount != 1:
+        conn.rollback()
+        raise ValueError(f"No memory.sqlite batch row updated for batch_id={batch_id!r}")
+    conn.commit()
+
+
 def get_unit_counts_by_signature(conn: sqlite3.Connection) -> dict[str, int]:
     """Return diagnostic unit counts grouped by record signature."""
 
@@ -403,11 +516,15 @@ __all__ = [
     "count_units",
     "get_unit_by_row_id",
     "get_unit_counts_by_signature",
+    "insert_batch",
+    "insert_run",
     "insert_units",
     "list_recent_runs",
     "list_units",
     "open_memory_db",
     "select_batches_for_run",
     "select_units_filtered",
+    "update_batch",
+    "update_run",
     "update_unit_translation",
 ]

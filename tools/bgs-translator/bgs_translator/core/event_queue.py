@@ -15,6 +15,9 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 GuiEventKind = Literal[
+    "run.start",
+    "run.complete",
+    "run.failed",
     "batch.start",
     "batch.progress",
     "batch.complete",
