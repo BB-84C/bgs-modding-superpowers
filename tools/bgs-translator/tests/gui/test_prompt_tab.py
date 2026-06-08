@@ -48,3 +48,40 @@ def test_prompt_preview_required_checkbox_present_and_persists(
         assert load_settings().behavior.prompt_preview_required is True
     finally:
         root.destroy()
+
+
+def test_prompt_side_panel_hidden_without_selected_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, tab = _make_prompt_tab(tmp_path, monkeypatch)
+    try:
+        assert tab._side_panel.winfo_manager() == ""
+    finally:
+        root.destroy()
+
+
+def test_prompt_side_panels_render_only_non_empty_batch_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, tab = _make_prompt_tab(tmp_path, monkeypatch)
+    try:
+        tab._batch_prompt_by_id["b1"] = "Prompt"
+        tab._batch_payload_by_id["b1"] = {
+            "glossary_subset": [{"source": "Constellation", "target": "群星组织"}],
+            "dnt_terms": ["%PLAYER%"],
+        }
+
+        tab.render_prompt_for_batch("b1")
+
+        assert tab._glossary_panel.winfo_manager() == "grid"
+        assert tab._dnt_panel.winfo_manager() == "grid"
+        assert "Constellation → 群星组织" in tab._glossary_text.get("1.0", "end-1c")
+        assert "%PLAYER%" in tab._dnt_text.get("1.0", "end-1c")
+
+        tab._batch_prompt_by_id["b2"] = "Prompt"
+        tab._batch_payload_by_id["b2"] = {}
+        tab.render_prompt_for_batch("b2")
+
+        assert tab._side_panel.winfo_manager() == ""
+    finally:
+        root.destroy()

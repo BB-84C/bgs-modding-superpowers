@@ -270,17 +270,23 @@ class PromptTab(ttk.Frame):
         self._editor.tag_configure("placeholder", foreground=self._theme.accent)
 
     def _build_side_panel(self) -> None:
-        side = ttk.Frame(self)
-        side.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
-        side.columnconfigure(0, weight=1)
-        side.columnconfigure(1, weight=1)
+        self._side_panel = ttk.Frame(self)
+        self._side_panel.columnconfigure(0, weight=1)
+        self._side_panel.columnconfigure(1, weight=1)
 
-        ttk.Label(side, text=_("Glossary subset"), style="Header.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(side, text=_("DNT list"), style="Header.TLabel").grid(row=0, column=1, sticky="w", padx=(12, 0))
-        self._glossary_text = self._make_readonly_side_text(side)
-        self._dnt_text = self._make_readonly_side_text(side)
+        self._glossary_panel = ttk.Frame(self._side_panel)
+        self._glossary_panel.columnconfigure(0, weight=1)
+        self._dnt_panel = ttk.Frame(self._side_panel)
+        self._dnt_panel.columnconfigure(0, weight=1)
+
+        ttk.Label(self._glossary_panel, text=_("Glossary subset"), style="Header.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(self._dnt_panel, text=_("DNT list"), style="Header.TLabel").grid(row=0, column=0, sticky="w")
+        self._glossary_text = self._make_readonly_side_text(self._glossary_panel)
+        self._dnt_text = self._make_readonly_side_text(self._dnt_panel)
         self._glossary_text.grid(row=1, column=0, sticky="nsew", pady=(3, 0))
-        self._dnt_text.grid(row=1, column=1, sticky="nsew", padx=(12, 0), pady=(3, 0))
+        self._dnt_text.grid(row=1, column=0, sticky="nsew", pady=(3, 0))
+        self._side_panel.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
+        self._hide_side_panel()
 
     def _build_action_row(self) -> None:
         self._action_row = ttk.Frame(self)
@@ -420,9 +426,30 @@ class PromptTab(ttk.Frame):
 
     def _render_side_panel(self, payload: dict[str, Any]) -> None:
         glossary_lines = [_format_glossary_entry(item) for item in _as_list(payload.get("glossary_subset"))]
-        dnt_lines = [f"- {item}" for item in _as_list(payload.get("do_not_translate")) if str(item)]
+        dnt_value = payload.get("dnt_terms", payload.get("do_not_translate"))
+        dnt_lines = [f"- {item}" for item in _as_list(dnt_value) if str(item)]
         self._set_text(self._glossary_text, "\n".join(line for line in glossary_lines if line))
         self._set_text(self._dnt_text, "\n".join(dnt_lines))
+
+        has_glossary = any(glossary_lines)
+        has_dnt = bool(dnt_lines)
+        if not has_glossary and not has_dnt:
+            self._hide_side_panel()
+            return
+        self._side_panel.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
+        if has_glossary:
+            self._glossary_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        else:
+            self._glossary_panel.grid_remove()
+        if has_dnt:
+            self._dnt_panel.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        else:
+            self._dnt_panel.grid_remove()
+
+    def _hide_side_panel(self) -> None:
+        self._glossary_panel.grid_remove()
+        self._dnt_panel.grid_remove()
+        self._side_panel.grid_remove()
 
     def _set_text(self, widget: tk.Text, body: str) -> None:
         widget.configure(state="normal")
@@ -477,6 +504,7 @@ class PromptTab(ttk.Frame):
         self._empty_state.place(relx=0.5, rely=0.5, anchor="center", relwidth=1.0, relheight=1.0)
         self._set_text(self._glossary_text, "")
         self._set_text(self._dnt_text, "")
+        self._hide_side_panel()
         self._hide_action_row()
 
     def _show_action_row(self) -> None:
