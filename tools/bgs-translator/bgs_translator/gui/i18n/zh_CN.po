@@ -14,7 +14,7 @@ msgid "Project"
 msgstr "项目"
 
 msgid "Profile"
-msgstr "Profile"
+msgstr "档案"
 
 msgid "Cost"
 msgstr "费用"
@@ -32,7 +32,7 @@ msgid "Projects"
 msgstr "项目集"
 
 msgid "Profiles"
-msgstr "Profile 列表"
+msgstr "大语言模型提供商档案列表"
 
 msgid "Glossary"
 msgstr "术语表"
@@ -65,7 +65,7 @@ msgid "Always preview system prompt before batch dispatch"
 msgstr "派发批次前始终预览系统提示词"
 
 msgid "Add new profile"
-msgstr "新建 Profile"
+msgstr "新建提供商档案"
 
 msgid "Delete"
 msgstr "删除"
@@ -182,7 +182,7 @@ msgid "Plugin SHA"
 msgstr "插件 SHA"
 
 msgid "Active profile"
-msgstr "当前 Profile"
+msgstr "当前提供商档案"
 
 msgid "[ NO PROJECT LOADED ]"
 msgstr "[ NO PROJECT LOADED ]"
@@ -260,10 +260,10 @@ msgid " (active)"
 msgstr "（当前）"
 
 msgid "Delete profile {name}?"
-msgstr "删除 Profile {name}？"
+msgstr "删除提供商档案 {name}？"
 
 msgid "This removes the profile from profiles.toml. The API key value in .env is NOT deleted."
-msgstr "这会从 profiles.toml 删除该 Profile。.env 中的 API key 值不会删除。"
+msgstr "这会从 profiles.toml 删除该提供商档案。.env 中的 API key 值不会删除。"
 
 msgid "Probe result for {name}: running..."
 msgstr "{name} 探测结果：运行中..."
@@ -287,10 +287,10 @@ msgid "no"
 msgstr "否"
 
 msgid "Add new provider profile"
-msgstr "新增供应商 Profile"
+msgstr "新增提供商档案"
 
 msgid "Edit provider profile"
-msgstr "编辑供应商 Profile"
+msgstr "编辑提供商档案"
 
 msgid "Show"
 msgstr "显示"
@@ -329,7 +329,7 @@ msgid "sst-write"
 msgstr "SST 写入"
 
 msgid "profile-probe"
-msgstr "Profile 探测"
+msgstr "提供商档案探测"
 
 msgid "validator"
 msgstr "验证器"
