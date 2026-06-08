@@ -16,13 +16,15 @@ import logging
 import sys
 import tkinter as tk
 import tomllib
+from collections.abc import Callable
 from tkinter import font as tkfont
 from tkinter import ttk
 from typing import Any, Final
 
 from bgs_translator.config import paths
 from bgs_translator.config.profiles import ProfilesConfig, load_profiles
-from bgs_translator.config.settings import Settings, load_settings
+from bgs_translator.config.settings import Settings, load_settings, update_setting
+from bgs_translator.core.event_queue import GuiEvent, get_bridge
 from bgs_translator.gui.close_handler import CloseHandler
 from bgs_translator.gui.dpi import apply_tk_scaling, enable_windows_dpi_awareness
 from bgs_translator.gui.i18n import Translator, set_default_language
@@ -38,6 +40,7 @@ from bgs_translator.gui.tabs import (
 from bgs_translator.gui.themes import apply_theme, get_theme, list_themes
 from bgs_translator.gui.widgets import AmberScrollbar, StatusBar
 from bgs_translator.gui.widgets.amber_titlebar import AmberTitlebar
+from bgs_translator.gui.widgets.resize_handles import ResizeHandles
 from bgs_translator.gui.win_chrome import apply_titlebar_tint
 
 log = logging.getLogger(__name__)
@@ -170,14 +173,28 @@ class TranslatorApp(tk.Tk):
         self._amber_scrollbars: list[AmberScrollbar] = []
         # Track amber checkboxes for the same reason.
         self._amber_checkboxes: list[Any] = []
+        self._resize_handles: ResizeHandles | None = None
+        self._bridge = get_bridge()
+        self._drain_after_id: str | None = None
+        self._settings_after_id: str | None = None
+        self._nav_visible = True
+        self._nav_width = _NAV_TREE_WIDTH
+        self._escape_bind_id: str | None = None
 
         # Close handler -------------------------------------------------
-        self._close_handler = CloseHandler(self, on_force_close=self._on_force_close)
+        self._close_handler = CloseHandler(
+            self,
+            on_force_close=self._on_force_close,
+            get_active_project=self._current_project_name,
+        )
 
         # Build UI ------------------------------------------------------
         self._build_layout()
         self._populate_nav()
+        self._bind_keyboard_shortcuts()
+        self.bind("<Configure>", self._on_configure, add="+")
         self._start_pulse()
+        self._schedule_drain()
 
         # Re-show the window. When chrome was stripped we also flip the
         # extended-style bits so the window keeps a taskbar entry —
@@ -210,6 +227,12 @@ class TranslatorApp(tk.Tk):
             relief="flat",
         )
         self._outer.pack(fill="both", expand=True)
+        if self._chrome_stripped:
+            self._resize_handles = ResizeHandles(
+                root=self,
+                outer_frame=self._outer,
+                theme=self._theme_config,
+            )
 
         # Inner workspace — every other widget lives here so the outer
         # accent stays visible as a clean 1px ring.
@@ -254,12 +277,12 @@ class TranslatorApp(tk.Tk):
         self._paned = ttk.PanedWindow(self._workspace, orient="horizontal")
         self._paned.grid(row=next_row, column=0, sticky="nsew", padx=4, pady=(2, 4))
 
-        nav_frame = ttk.Frame(self._paned, padding=(4, 4))
-        self._paned.add(nav_frame, weight=0)
-        nav_frame.rowconfigure(0, weight=1)
-        nav_frame.columnconfigure(0, weight=1)
+        self._nav_frame = ttk.Frame(self._paned, padding=(4, 4))
+        self._paned.add(self._nav_frame, weight=0)
+        self._nav_frame.rowconfigure(0, weight=1)
+        self._nav_frame.columnconfigure(0, weight=1)
 
-        self._nav_tree = ttk.Treeview(nav_frame, show="tree", selectmode="browse")
+        self._nav_tree = ttk.Treeview(self._nav_frame, show="tree", selectmode="browse")
         # Polish pass 2: widen the implicit '#0' column so descenders in
         # 'Logs', 'Glossary', and 'Profiles' do not get clipped.
         self._nav_tree.column(
@@ -269,7 +292,7 @@ class TranslatorApp(tk.Tk):
             stretch=True,
         )
         nav_scroll = AmberScrollbar(
-            nav_frame,
+            self._nav_frame,
             orient="vertical",
             command=self._nav_tree.yview,
             theme_name=self._current_theme,
@@ -300,6 +323,67 @@ class TranslatorApp(tk.Tk):
             self._paned.sashpos(0, _NAV_TREE_WIDTH)  # type: ignore[no-untyped-call]
         except tk.TclError:
             pass
+
+    def _bind_keyboard_shortcuts(self) -> None:
+        def tab_handler(tab_index: int) -> Callable[[tk.Event[tk.Misc]], str]:
+            return lambda _event: self._select_tab_by_index(tab_index)
+
+        for index in range(len(_TAB_ORDER)):
+            self.bind(
+                f"<Control-Key-{index + 1}>",
+                tab_handler(index),
+                add="+",
+            )
+        self.bind("<Control-Key-b>", lambda _event: self._toggle_nav_pane(), add="+")
+        self.bind("<Control-Key-B>", lambda _event: self._toggle_nav_pane(), add="+")
+        self.bind("<Control-Key-r>", lambda _event: self._refresh_current_project_status(), add="+")
+        self.bind("<Control-Key-R>", lambda _event: self._refresh_current_project_status(), add="+")
+        self.bind("<Alt-F4>", lambda _event: self._close_handler.request_close(), add="+")
+        self._escape_bind_id = self.bind_all(
+            "<Escape>",
+            lambda _event: self._close_topmost_modal(),
+            add="+",
+        )
+
+    def _select_tab_by_index(self, index: int) -> str:
+        if 0 <= index < len(_TAB_ORDER):
+            self._notebook.select(index)  # type: ignore[no-untyped-call]
+        return "break"
+
+    def _toggle_nav_pane(self) -> str:
+        if self._nav_visible:
+            try:
+                self._nav_width = int(self._paned.sashpos(0))  # type: ignore[no-untyped-call]
+            except tk.TclError:
+                self._nav_width = _NAV_TREE_WIDTH
+            self._paned.forget(self._nav_frame)
+            self._nav_visible = False
+            return "break"
+        self._paned.insert(0, self._nav_frame, weight=0)
+        self._nav_visible = True
+        try:
+            self._paned.sashpos(0, max(_NAV_TREE_COLUMN_MIN_WIDTH, self._nav_width))  # type: ignore[no-untyped-call]
+        except tk.TclError:
+            pass
+        return "break"
+
+    def _refresh_current_project_status(self) -> str:
+        project = self._current_project_name()
+        if project:
+            self._project_tab.load_project(project)
+            self._refresh_cost_from_project(project)
+        return "break"
+
+    def _close_topmost_modal(self) -> str:
+        grabbed = self.grab_current()  # type: ignore[no-untyped-call]
+        if isinstance(grabbed, tk.Toplevel) and grabbed.winfo_exists():
+            grabbed.destroy()
+            return "break"
+        for child in reversed(self.winfo_children()):
+            if isinstance(child, tk.Toplevel) and child.winfo_exists():
+                child.destroy()
+                return "break"
+        return "break"
 
     def _build_tab(self, key: str) -> ttk.Frame:
         if key == "project":
@@ -361,6 +445,18 @@ class TranslatorApp(tk.Tk):
         self._status_bar.pulse()
         self._pulse_after_id = self.after(400, self._schedule_pulse)
 
+    def _schedule_drain(self) -> None:
+        events = self._bridge.drain()
+        for event in events:
+            self._dispatch_event(event)
+        try:
+            self._drain_after_id = self.after(50, self._schedule_drain)
+        except tk.TclError:
+            self._drain_after_id = None
+
+    def _dispatch_event(self, event: GuiEvent) -> None:
+        log.debug("GUI event received: %s", event.kind)
+
     def _stop_pulse(self) -> None:
         if self._pulse_after_id is not None:
             try:
@@ -368,6 +464,14 @@ class TranslatorApp(tk.Tk):
             except (tk.TclError, ValueError):
                 pass
             self._pulse_after_id = None
+
+    def _stop_drain(self) -> None:
+        if self._drain_after_id is not None:
+            try:
+                self.after_cancel(self._drain_after_id)
+            except (tk.TclError, ValueError):
+                pass
+            self._drain_after_id = None
 
     # ------------------------------------------------------------------
     # Event handlers
@@ -413,9 +517,38 @@ class TranslatorApp(tk.Tk):
         except (TypeError, ValueError):
             pass
 
+    def _on_configure(self, event: tk.Event[tk.Misc]) -> None:
+        if event.widget is not self:
+            return
+        width = int(event.width)
+        height = int(event.height)
+        if width < _MIN_WIDTH or height < _MIN_HEIGHT:
+            return
+        if self._settings_after_id is not None:
+            try:
+                self.after_cancel(self._settings_after_id)
+            except (tk.TclError, ValueError):
+                pass
+        self._settings_after_id = self.after(
+            200,
+            lambda: self._persist_window_dimensions(width, height),
+        )
+
+    def _persist_window_dimensions(self, width: int, height: int) -> None:
+        self._settings_after_id = None
+        try:
+            self._settings = update_setting("ui.window_width", width)
+            self._settings = update_setting("ui.window_height", height)
+        except (OSError, KeyError, ValueError) as exc:
+            log.warning("Could not persist window dimensions: %s", exc)
+
     def _on_language_change(self, language: str) -> None:
         self._translator.set_language(language)
         set_default_language(language)
+        try:
+            self._settings = update_setting("ui.language", language)
+        except (OSError, KeyError, ValueError) as exc:
+            log.warning("Could not persist UI language %s: %s", language, exc)
         # TODO(Chunk-L.2): a full hot reload would tear down and rebuild
         # every cached caption; for MVP we update the visible tab captions
         # plus the status-bar pulse cell and let the rest catch up on
@@ -449,6 +582,8 @@ class TranslatorApp(tk.Tk):
                 self._titlebar.apply_theme(self._theme_config)
             except tk.TclError:
                 pass
+        if self._resize_handles is not None:
+            self._resize_handles.apply_theme(self._theme_config)
         # Repaint outer border + workspace to the new accent / bg.
         try:
             self._outer.configure(background=self._theme_config.accent)
@@ -465,6 +600,10 @@ class TranslatorApp(tk.Tk):
                 checkbox.apply_theme(theme)
             except tk.TclError:
                 continue
+        try:
+            self._settings = update_setting("ui.theme", theme)
+        except (OSError, KeyError, ValueError) as exc:
+            log.warning("Could not persist UI theme %s: %s", theme, exc)
         log.info("Switched theme to %s", theme)
 
     def _restore_taskbar_visibility(self) -> None:
@@ -494,8 +633,29 @@ class TranslatorApp(tk.Tk):
 
     def _on_force_close(self) -> None:
         self._stop_pulse()
+        self._stop_drain()
+        if self._settings_after_id is not None:
+            try:
+                self.after_cancel(self._settings_after_id)
+            except (tk.TclError, ValueError):
+                pass
+            self._settings_after_id = None
         # TODO(Chunk-L.2): cancel in-flight asyncio tasks here when the
         # background runner is wired up.
+
+    def _current_project_name(self) -> str | None:
+        project_name = getattr(self._project_tab, "_project_name", None)
+        return project_name if isinstance(project_name, str) else None
+
+    def destroy(self) -> None:
+        self._on_force_close()
+        if self._escape_bind_id is not None:
+            try:
+                self.unbind_all("<Escape>")
+            except tk.TclError:
+                pass
+            self._escape_bind_id = None
+        super().destroy()
 
     # Public lifecycle helpers ----------------------------------------
     @property

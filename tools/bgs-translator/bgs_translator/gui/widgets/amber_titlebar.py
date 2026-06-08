@@ -10,9 +10,14 @@ theme styles apply directly. Click-and-drag on the title row moves the
 window; double-click on the title row toggles maximize against the
 work area (taskbar-aware on Windows).
 
-The custom titlebar is Windows-first per AMENDMENTS. On non-Windows
-the host root keeps native chrome and this widget is simply not
-constructed — see ``gui/app.py``.
+Maximize/restore is dispatched through Win32 ``WM_SYSCOMMAND`` on Windows
+(``SC_MAXIMIZE`` / ``SC_RESTORE``) so the OS keeps taskbar-preview and Aero
+Snap state when possible. If that path is unavailable or cannot verify the
+state, the previous taskbar-aware geometry fallback remains the Plan B.
+
+The custom titlebar is Windows-first per AMENDMENTS. On non-Windows the host
+root keeps native chrome and this widget is simply not constructed — see
+``gui/app.py``.
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ import tkinter as tk
 from collections.abc import Callable
 from ctypes import wintypes
 from tkinter import ttk
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from bgs_translator.gui.themes import ThemeConfig
 
@@ -36,6 +41,10 @@ _TITLEBAR_HEIGHT: Final[int] = 36
 _BUTTON_PAD_X: Final[int] = 14
 _BUTTON_PAD_Y: Final[int] = 6
 _BUTTON_GLYPH_BUMP: Final[int] = 2  # font size delta above base
+_WM_SYSCOMMAND: Final[int] = 0x0112
+_SC_MAXIMIZE: Final[int] = 0xF030
+_SC_RESTORE: Final[int] = 0xF120
+_GA_ROOT: Final[int] = 2
 
 
 class AmberTitlebar(ttk.Frame):
@@ -198,12 +207,16 @@ class AmberTitlebar(ttk.Frame):
                 pass
 
     def _on_max_click(self) -> None:
-        if self._maximized:
-            if self._saved_geometry is not None:
-                self._root.geometry(self._saved_geometry)
-            self._maximized = False
+        if self._is_maximized():
+            self._restore_from_maximized()
             return
         self._saved_geometry = self._root.geometry()
+        if _send_win32_syscommand(self._root, _SC_MAXIMIZE):
+            self._root.update_idletasks()
+            self._maximized = True
+            if win32_query_window_state(self._root) == "maximized":
+                return
+            log.debug("Win32 SC_MAXIMIZE did not verify; using geometry fallback")
         rect = _windows_work_area()
         if rect is not None:
             left, top, right, bottom = rect
@@ -221,10 +234,8 @@ class AmberTitlebar(ttk.Frame):
     # Drag handlers
     # ------------------------------------------------------------------
     def _on_drag_start(self, event: tk.Event[tk.Misc]) -> None:
-        if self._maximized:
-            # Drag-while-maximised restores first so the window does
-            # not stay glued to the work area while the user drags.
-            self._on_max_click()
+        if self._is_maximized():
+            self._restore_from_maximized_for_drag(int(event.x_root), int(event.y_root))
         try:
             root_x = self._root.winfo_x()
             root_y = self._root.winfo_y()
@@ -245,6 +256,48 @@ class AmberTitlebar(ttk.Frame):
     def _on_drag_end(self, _event: tk.Event[tk.Misc]) -> None:
         self._drag_anchor = None
 
+    def _is_maximized(self) -> bool:
+        state = win32_query_window_state(self._root)
+        return state == "maximized" or self._maximized
+
+    def _restore_from_maximized(self) -> None:
+        if _send_win32_syscommand(self._root, _SC_RESTORE):
+            self._root.update_idletasks()
+        if self._saved_geometry is not None:
+            try:
+                self._root.geometry(self._saved_geometry)
+            except tk.TclError:
+                pass
+        self._maximized = False
+
+    def _restore_from_maximized_for_drag(self, cur_root_x: int, cur_root_y: int) -> None:
+        """Restore so the cursor keeps the same relative window position."""
+
+        self._root.update_idletasks()
+        max_root_x = int(self._root.winfo_x())
+        max_root_y = int(self._root.winfo_y())
+        old_w = max(1, int(self._root.winfo_width()))
+        old_h = max(1, int(self._root.winfo_height()))
+
+        restored = _parse_geometry(self._saved_geometry or "")
+        if restored is None:
+            self._restore_from_maximized()
+            return
+        new_w, new_h, _saved_x, _saved_y = restored
+        frac_x = (cur_root_x - max_root_x) / old_w
+        frac_y = (cur_root_y - max_root_y) / old_h
+        new_root_x = cur_root_x - int(frac_x * new_w)
+        new_root_y = cur_root_y - int(frac_y * new_h)
+
+        if _send_win32_syscommand(self._root, _SC_RESTORE):
+            self._root.update_idletasks()
+        try:
+            self._root.geometry(f"{new_w}x{new_h}+{new_root_x}+{new_root_y}")
+            self._root.update_idletasks()
+        except tk.TclError:
+            return
+        self._maximized = False
+
     # Read-only introspection used by tests --------------------------
     @property
     def controls(self) -> dict[str, ttk.Label]:
@@ -252,7 +305,7 @@ class AmberTitlebar(ttk.Frame):
 
     @property
     def maximized(self) -> bool:
-        return self._maximized
+        return self._is_maximized()
 
 
 def install_titlebar_styles(root: tk.Misc, theme: ThemeConfig, base_font: tuple[str, int]) -> None:
@@ -357,4 +410,53 @@ def _windows_work_area() -> tuple[int, int, int, int] | None:
         return None
 
 
-__all__ = ["AmberTitlebar", "install_titlebar_styles"]
+def _parse_geometry(value: str) -> tuple[int, int, int, int] | None:
+    try:
+        size, x_part, y_part = value.replace("-", "+-").split("+", 2)
+        width_part, height_part = size.split("x", 1)
+        return (int(width_part), int(height_part), int(x_part), int(y_part))
+    except (AttributeError, ValueError):
+        return None
+
+
+def _window_handle(root: tk.Tk) -> int | None:
+    if sys.platform != "win32":
+        return None
+    try:
+        root.update_idletasks()
+        user32: Any = ctypes.windll.user32
+        child = int(root.winfo_id())
+        return int(user32.GetAncestor(child, _GA_ROOT)) or child
+    except (OSError, AttributeError, tk.TclError) as exc:
+        log.debug("Could not resolve window handle: %s", exc)
+        return None
+
+
+def _send_win32_syscommand(root: tk.Tk, command: int) -> bool:
+    hwnd = _window_handle(root)
+    if hwnd is None:
+        return False
+    try:
+        user32: Any = ctypes.windll.user32
+        user32.SendMessageW(hwnd, _WM_SYSCOMMAND, command, 0)
+        return True
+    except (OSError, AttributeError) as exc:
+        log.debug("Could not dispatch Win32 system command %#x: %s", command, exc)
+        return False
+
+
+def win32_query_window_state(root: tk.Tk) -> Literal["maximized", "normal"] | None:
+    """Return the OS window state when Win32 can answer it."""
+
+    hwnd = _window_handle(root)
+    if hwnd is None:
+        return None
+    try:
+        user32: Any = ctypes.windll.user32
+        return "maximized" if int(user32.IsZoomed(hwnd)) else "normal"
+    except (OSError, AttributeError) as exc:
+        log.debug("Could not query Win32 window state: %s", exc)
+        return None
+
+
+__all__ = ["AmberTitlebar", "install_titlebar_styles", "win32_query_window_state"]
