@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -223,6 +223,115 @@ def get_unit_by_row_id(conn: sqlite3.Connection, row_id: str) -> dict[str, Any] 
     return None if row is None else _row_to_dict(row)
 
 
+def select_units_filtered(
+    conn: sqlite3.Connection,
+    *,
+    sigs: Sequence[str] | None = None,
+    fields: Sequence[str] | None = None,
+    statuses: Sequence[str] | None = None,
+    search: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[sqlite3.Row]:
+    """SELECT units with composable WHERE clauses for GUI filtering."""
+
+    conn.row_factory = sqlite3.Row
+    clauses: list[str] = []
+    params: list[Any] = []
+
+    normalized_sigs = _normalized_filter_values(sigs, upper=True)
+    if normalized_sigs:
+        clauses.append(f"signature IN ({','.join('?' for _ in normalized_sigs)})")
+        params.extend(normalized_sigs)
+
+    normalized_fields = _normalized_filter_values(fields, upper=True)
+    if normalized_fields:
+        clauses.append(f"field IN ({','.join('?' for _ in normalized_fields)})")
+        params.extend(normalized_fields)
+
+    normalized_statuses = _normalized_filter_values(statuses, upper=False)
+    if normalized_statuses:
+        clauses.append(f"status IN ({','.join('?' for _ in normalized_statuses)})")
+        params.extend(normalized_statuses)
+
+    if search is not None and search.strip():
+        needle = f"%{search.strip().lower()}%"
+        clauses.append(
+            "(lower(coalesce(edid, '')) LIKE ? OR lower(source) LIKE ? "
+            "OR lower(coalesce(dest, '')) LIKE ? OR lower(row_id) LIKE ?)"
+        )
+        params.extend([needle, needle, needle, needle])
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    limit_clause = ""
+    if limit is not None:
+        limit_clause = "LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+    rows = conn.execute(
+        f"""
+        SELECT row_id, plugin, formid, formid_sanitized, edid, signature, field,
+               index_n, index_max, source, list_index, strid, rhash,
+               parent_context_json, dest, status, sparams, via_llm, profile_used,
+               sdk_via, cost_estimate_usd, cost_exact, retry_count, last_batch_id,
+               updated_at
+        FROM units
+        {where}
+        ORDER BY signature, field, formid, index_n
+        {limit_clause}
+        """,
+        params,
+    ).fetchall()
+    return list(rows)
+
+
+def select_batches_for_run(conn: sqlite3.Connection, run_id: str) -> list[sqlite3.Row]:
+    """SELECT all batches belonging to one run."""
+
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT batch_id, run_id, plan_id, profile_snapshot_json, item_count,
+               started_at, completed_at, status, tokens_in, tokens_out, cost_usd,
+               cost_exact, retry_count, notes
+        FROM batches
+        WHERE run_id = ?
+        ORDER BY started_at IS NULL, started_at, batch_id
+        """,
+        (run_id,),
+    ).fetchall()
+    return list(rows)
+
+
+def list_recent_runs(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.Row]:
+    """Return recent runs newest-first."""
+
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """
+        SELECT run_id, project, plan_id, started_at, completed_at, status,
+               batches_total, cost_total_usd, cost_exact
+        FROM runs
+        ORDER BY started_at DESC, run_id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    return list(rows)
+
+
+def _normalized_filter_values(values: Sequence[str] | None, *, upper: bool) -> list[str]:
+    if not values:
+        return []
+    normalized: list[str] = []
+    for value in values:
+        item = value.strip()
+        if not item or item.lower() == "all":
+            continue
+        normalized.append(item.upper() if upper else item.lower())
+    return normalized
+
+
 def _row_to_dict(row: sqlite3.Row | tuple[Any, ...]) -> dict[str, Any]:
     return {
         "row_id": row[0],
@@ -248,6 +357,9 @@ __all__ = [
     "get_unit_by_row_id",
     "get_unit_counts_by_signature",
     "insert_units",
+    "list_recent_runs",
     "list_units",
     "open_memory_db",
+    "select_batches_for_run",
+    "select_units_filtered",
 ]
