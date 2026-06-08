@@ -21,6 +21,18 @@ log = logging.getLogger(__name__)
 
 _ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]+$")
 _LITERAL_SECRET_FIELDS = {"api_key", "apikey", "key", "secret", "token"}
+_BASE_URL_ENDPOINT_SUFFIXES = (
+    "/chat/completions",
+    "/responses",
+    "/messages",
+    "/generate_content",
+    "/generateContent",
+    "/v1/chat/completions",
+    "/v1/responses",
+    "/v1/messages",
+    "/v1/generate_content",
+    "/v1/generateContent",
+)
 
 
 class ProfileValidationError(ValueError):
@@ -170,6 +182,17 @@ def resolve_api_key(profile: ProviderProfile) -> str:
     return str(key)
 
 
+def normalize_base_url(value: str) -> tuple[str, str | None]:
+    """Return an API-root base URL and the stripped endpoint suffix, if any."""
+
+    stripped = value.strip().rstrip("/")
+    folded = stripped.casefold()
+    for suffix in _BASE_URL_ENDPOINT_SUFFIXES:
+        if folded.endswith(suffix.casefold()):
+            return stripped[: -len(suffix)].rstrip("/"), suffix
+    return stripped, None
+
+
 def _dotenv_quote(value: str) -> str:
     if re.fullmatch(r"[A-Za-z0-9_@%+=:,./~\-]+", value):
         return value
@@ -260,6 +283,7 @@ __all__ = [
     "ProviderProfile",
     "get_active_profile",
     "load_profiles",
+    "normalize_base_url",
     "resolve_api_key",
     "save_profiles",
     "write_env_var",

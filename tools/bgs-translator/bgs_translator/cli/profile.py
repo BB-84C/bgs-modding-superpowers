@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -13,7 +14,18 @@ import typer
 
 from bgs_translator.cli.envelopes import Envelope, failure, success
 from bgs_translator.config import paths
-from bgs_translator.config.profiles import ProviderProfile, load_profiles, save_profiles
+from bgs_translator.config.profiles import (
+    ProfileMissingKeyError,
+    ProviderProfile,
+    load_profiles,
+    normalize_base_url,
+    resolve_api_key,
+    save_profiles,
+)
+from bgs_translator.parsers.tes4_family import TranslationUnit
+from bgs_translator.pipeline.batcher import Batch
+from bgs_translator.pipeline.clients.base import build_client_for
+from bgs_translator.pipeline.mask import build_masked_unit
 
 profile_app = typer.Typer(no_args_is_help=True)
 
@@ -54,6 +66,12 @@ def add_profile(
     assert base_url is not None
     assert model is not None
     assert api_key_env is not None
+    base_url, stripped_suffix = _normalize_base_url_for_cli(base_url)
+    if stripped_suffix is not None:
+        typer.echo(
+            f"Warning: stripped endpoint suffix {stripped_suffix!r}; base_url is now {base_url!r}.",
+            err=True,
+        )
     cfg = load_profiles()
     cfg.profiles[name] = ProviderProfile(
         name=name,
@@ -141,6 +159,7 @@ def remove_profile(name: str, yes: bool = typer.Option(False, "--yes")) -> None:
 @profile_app.command("edit")
 def edit_profile(
     name: str,
+    base_url: str | None = typer.Option(None, "--base-url"),
     model: str | None = typer.Option(None, "--model"),
     cost_cap_usd: float | None = typer.Option(None, "--cost-cap-usd"),
 ) -> None:
@@ -152,6 +171,16 @@ def edit_profile(
         _emit_failure("profile_not_found", f"Profile {name!r} does not exist.", {})
     assert profile is not None
     changed = False
+    if base_url is not None:
+        normalized_base_url, stripped_suffix = _normalize_base_url_for_cli(base_url)
+        if stripped_suffix is not None:
+            typer.echo(
+                "Warning: stripped endpoint suffix "
+                f"{stripped_suffix!r}; base_url is now {normalized_base_url!r}.",
+                err=True,
+            )
+        profile.base_url = normalized_base_url
+        changed = True
     if model is not None:
         profile.model = model
         changed = True
@@ -172,13 +201,29 @@ def edit_profile(
 
 @profile_app.command("probe")
 def probe_profile(name: str) -> None:
-    """Write a lightweight probe-cache entry without making real API calls."""
+    """Probe a provider profile with a real minimal provider call."""
 
     cfg = load_profiles()
     profile = cfg.profiles.get(name)
     if profile is None:
         _emit_failure("profile_not_found", f"Profile {name!r} does not exist.", {})
     assert profile is not None
+    try:
+        resolve_api_key(profile)
+    except ProfileMissingKeyError:
+        _emit_failure(
+            "missing_api_key",
+            "Profile "
+            f"{profile.name} requires env var {profile.api_key_env} in profiles/.env; "
+            "set it via `xtl profile set-key` or the GUI.",
+            {"profile": profile.name, "api_key_env": profile.api_key_env},
+        )
+    try:
+        asyncio.run(_probe_provider(profile))
+    except Exception as exc:
+        if _is_auth_error(exc):
+            _emit_failure("auth_failed", str(exc), {"profile": profile.name})
+        _emit_failure("probe_failed", str(exc), {"profile": profile.name})
     cache_path = paths.profiles_root() / ".probe-cache.json"
     payload = {
         "probe_id": f"probe_{uuid.uuid4().hex}",
@@ -190,6 +235,31 @@ def probe_profile(name: str) -> None:
     }
     cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     _emit_success(payload | {"cache_path": str(cache_path)})
+
+
+async def _probe_provider(profile: ProviderProfile) -> None:
+    client = build_client_for(profile)
+    try:
+        unit = TranslationUnit("Probe.esp", 1, 1, "PROBE", "MESG", "FULL", source="ping")
+        batch = Batch("probe", [build_masked_unit(unit)], None, [], [])
+        await client.translate_batch(
+            batch,
+            "Return a minimal JSON translation object for this connectivity probe.",
+        )
+    finally:
+        await client.aclose()
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    if status_code in {401, 403}:
+        return True
+    message = str(exc).casefold()
+    return "401" in message or "403" in message or "auth" in message or "unauthorized" in message
+
+
+def _normalize_base_url_for_cli(value: str) -> tuple[str, str | None]:
+    return normalize_base_url(value)
 
 
 def _emit_success(data: dict[str, Any]) -> None:
