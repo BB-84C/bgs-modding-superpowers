@@ -29,8 +29,16 @@ _AI_LAYER_EMPTY_MESSAGE = _(
     "Manual [Add] is disabled for vanilla/mod scopes."
 )
 _MANUAL_LAYER_EMPTY_MESSAGE = _("No entries yet. Click [Add] to create one.")
-_CATEGORIES = ("", "character", "faction", "place", "item", "spell", "lore_term", "ui_label", "brand")
+_CATEGORIES = ("", "lore_term", "faction", "item", "character", "location", "generic", "place", "spell", "ui_label", "brand")
 _CONFIDENCES = ("canonical", "preferred", "candidate")
+_FIELD_HELPERS: dict[str, str] = {
+    "source": "Term as it appears in source language (e.g. 'Constellation')",
+    "target": "Translation in target language",
+    "source_lang": "BCP-47 source code (e.g. 'en')",
+    "target_lang": "BCP-47 target code (e.g. 'zh-cn')",
+    "category": "lore_term / faction / item / character / location / generic",
+    "aliases": "Comma-separated alternate forms (optional)",
+}
 
 
 def user_pack_db_path(user_packs_root: Path, source_lang: str = "en", target_lang: str = "zhcn") -> Path:
@@ -61,40 +69,44 @@ class GlossaryEntryDialog(tk.Toplevel):
         self._kb_root = kb_root or paths.kb_root()
         self._user_packs_root = user_packs_root or paths.kb_user_packs_root()
         self._on_saved = on_saved
+        source_aliases = ", ".join(entry.source_aliases) if entry else ""
+        target_aliases = ", ".join(entry.target_aliases) if entry else ""
         self.values: dict[str, tk.StringVar] = {
             "source": tk.StringVar(value=entry.source if entry else ""),
-            "source_aliases": tk.StringVar(value=", ".join(entry.source_aliases) if entry else ""),
             "target": tk.StringVar(value=entry.target if entry else ""),
-            "target_aliases": tk.StringVar(value=", ".join(entry.target_aliases) if entry else ""),
-            "category": tk.StringVar(value=entry.category or "lore_term" if entry else "character"),
+            "source_lang": tk.StringVar(value=entry.source_lang if entry else "en"),
+            "target_lang": tk.StringVar(value=entry.target_lang if entry else "zh-cn"),
+            "category": tk.StringVar(value=entry.category or "lore_term" if entry else "lore_term"),
+            "aliases": tk.StringVar(value=source_aliases),
             "confidence": tk.StringVar(value=entry.confidence if entry else "preferred"),
             "notes": tk.StringVar(value=entry.notes or "" if entry else ""),
+            # Backwards-compatible programmatic keys used by existing tests
+            # and older call sites. Only ``aliases`` is rendered in the dialog.
+            "source_aliases": tk.StringVar(value=source_aliases),
+            "target_aliases": tk.StringVar(value=target_aliases),
         }
         self.error_var = tk.StringVar(value="")
 
         body = ttk.Frame(self, padding=(14, 12))
         body.grid(row=0, column=0, sticky="nsew")
         body.columnconfigure(1, weight=1)
-        rows = [
-            (_("Source"), "source", "entry"),
-            (_("Source aliases"), "source_aliases", "entry"),
-            (_("Target"), "target", "entry"),
-            (_("Target aliases"), "target_aliases", "entry"),
-            (_("Category"), "category", "category"),
-            (_("Confidence"), "confidence", "confidence"),
-            (_("Notes"), "notes", "entry"),
-        ]
-        for row, (caption, key, kind) in enumerate(rows):
-            ttk.Label(body, text=f"{caption}:", style="Dim.TLabel").grid(row=row, column=0, sticky="w", padx=(0, 10), pady=3)
-            if kind == "category":
-                ttk.Combobox(body, textvariable=self.values[key], values=_CATEGORIES[1:], state="readonly", width=28).grid(row=row, column=1, sticky="ew", pady=3)
-            elif kind == "confidence":
-                ttk.Combobox(body, textvariable=self.values[key], values=_CONFIDENCES, state="readonly", width=28).grid(row=row, column=1, sticky="ew", pady=3)
+        rows = ["source", "target", "source_lang", "target_lang", "category", "aliases", "scope"]
+        for index, key in enumerate(rows):
+            row = index * 2
+            ttk.Label(body, text=f"{key}:", style="Dim.TLabel", width=14).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=(3, 0))
+            if key == "category":
+                ttk.Combobox(body, textvariable=self.values[key], values=_CATEGORIES[1:], state="readonly", width=28).grid(row=row, column=1, sticky="ew", pady=(3, 0))
+            elif key == "scope":
+                ttk.Label(body, text=self._scope, style="Phosphor.TLabel").grid(row=row, column=1, sticky="w", pady=(3, 0))
             else:
-                ttk.Entry(body, textvariable=self.values[key], width=36).grid(row=row, column=1, sticky="ew", pady=3)
-        ttk.Label(body, textvariable=self.error_var, style="Dim.TLabel").grid(row=len(rows), column=0, columnspan=2, sticky="w")
+                ttk.Entry(body, textvariable=self.values[key], width=36).grid(row=row, column=1, sticky="ew", pady=(3, 0))
+            helper = _FIELD_HELPERS.get(key)
+            if helper:
+                ttk.Label(body, text=helper, font=("Consolas", 8), foreground="#8b6914").grid(row=row + 1, column=1, sticky="w", pady=(0, 5))
+        end_row = len(rows) * 2
+        ttk.Label(body, textvariable=self.error_var, style="Dim.TLabel").grid(row=end_row, column=0, columnspan=2, sticky="w")
         buttons = ttk.Frame(body)
-        buttons.grid(row=len(rows) + 1, column=0, columnspan=2, sticky="e", pady=(8, 0))
+        buttons.grid(row=end_row + 1, column=0, columnspan=2, sticky="e", pady=(8, 0))
         ttk.Button(buttons, text=_("Save"), style="Accent.TButton", command=self.save).pack(side="left", padx=(0, 6))
         ttk.Button(buttons, text=_("Cancel"), command=self.destroy).pack(side="left")
 
@@ -123,12 +135,14 @@ class GlossaryEntryDialog(tk.Toplevel):
                 INSERT OR REPLACE INTO glossary_entries (
                     record_id, source, source_lang, target, target_lang, scope,
                     scope_key, category, confidence, notes
-                ) VALUES (?, ?, 'en', ?, 'zh-cn', ?, NULL, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
                 """,
                 (
                     record_id,
                     source,
+                    self.values["source_lang"].get().strip() or "en",
                     target or source,
+                    self.values["target_lang"].get().strip() or "zh-cn",
                     self._scope,
                     self.values["category"].get().strip() or None,
                     self.values["confidence"].get().strip() or "preferred",
@@ -136,7 +150,8 @@ class GlossaryEntryDialog(tk.Toplevel):
                 ),
             )
             conn.execute("DELETE FROM glossary_aliases WHERE record_id = ?", (record_id,))
-            for alias in _split_aliases(self.values["source_aliases"].get()):
+            source_alias_values = [*(_split_aliases(self.values["aliases"].get())), *(_split_aliases(self.values["source_aliases"].get()))]
+            for alias in dict.fromkeys(source_alias_values):
                 conn.execute("INSERT INTO glossary_aliases (record_id, alias, alias_kind) VALUES (?, ?, 'source')", (record_id, alias))
             for alias in _split_aliases(self.values["target_aliases"].get()):
                 conn.execute("INSERT INTO glossary_aliases (record_id, alias, alias_kind) VALUES (?, ?, 'target')", (record_id, alias))
