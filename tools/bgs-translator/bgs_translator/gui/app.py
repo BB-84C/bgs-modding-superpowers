@@ -603,7 +603,16 @@ class TranslatorApp(tk.Tk):
             return
         self._notebook.select(self._prompt_tab)  # type: ignore[no-untyped-call]
         self._prompt_tab.batch_combo.set(batch_id)
-        self._prompt_tab.refresh_for_batch(batch_id)
+        # PromptTab._on_gui_event (drain-time subscriber) already rendered
+        # the prompt, side panels, and showed the action row. Do NOT call
+        # refresh_for_batch here — render_prompt_for_batch unconditionally
+        # hides the action row at its tail, which would race the approve
+        # UI back off the screen for live preview events.
+        if batch_id not in self._prompt_tab._batch_prompt_by_id:
+            # Edge case: event arrived before plan.json was indexed.
+            # Fall back to a refresh; action row stays hidden but at least
+            # the editor will have the prompt body.
+            self._prompt_tab.refresh_for_batch(batch_id)
 
     # ------------------------------------------------------------------
     # Event handlers
