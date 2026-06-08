@@ -1,6 +1,61 @@
 # Handoff — Post Live-Test (2026-06-08)
 
-> **STATUS 2026-06-08 (post-Q1/Q2/Q3)**: All three fixer lanes landed in 15 commits between `3deff7f..HEAD`. Pushed to `origin/feat/translator-tool`. Final test sweep: 312 passed, 3 skipped, 1 pre-existing flake (`test_drag_start_from_maximized_restores_with_proportional_cursor_anchor` — passes 3/3 in isolation, only fails under full-sweep Tk geometry contamination introduced in earlier commit `4a93ab2`). Ruff + mypy clean. Bugs 1/2/3/4/5 all addressed; UX todos 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 all landed. Next session = live re-verification: launch GUI, run a fresh `xtl batch run`, confirm Batches tab populates live, confirm Set API key dialog UX, confirm Glossary tab scope gating, confirm Prompt tab auto-jump on IPC preview.
+> **STATUS 2026-06-08 (post-Q1/Q2/Q3 + live acceptance round 1)**: Q1/Q2/Q3 landed (15 commits 3deff7f..ff5ec95). Plus `ccd68ff` for approve race. Live acceptance run executed (~$0.01) and surfaced more bugs that landed Tk-replacement decision; see "Live acceptance round 1 — open bugs" section below. Final test sweep before live: 312 passed, 3 skipped, 1 pre-existing flake (`test_drag_start_from_maximized_restores_with_proportional_cursor_anchor` — passes 3/3 in isolation, only fails under full-sweep Tk geometry contamination introduced in earlier commit `4a93ab2`). Ruff + mypy clean. Next decision = whether to rewrite GUI from Tk to a browser-rendered surface so the agent can self-verify via Playwright (see decision doc once written).
+
+## Live acceptance round 1 — open bugs (2026-06-08)
+
+User ran the GUI + a 67-item / 10-batch DeepSeek-via-OpenRouter live batch with full mod context (`plan_id=9bde9f04-bf3d-4d2c-be05-93aed9d2c90f`). Found:
+
+| # | Severity | Bug | Status |
+|---|---|---|---|
+| A | HIGH (live blocker) | Approve action row hidden by `_focus_prompt_preview` → `refresh_for_batch` → `render_prompt_for_batch:142` race; CLI worker blocked in `IPC.wait()` forever. | **FIXED `ccd68ff`** with regression test (`tests/gui/test_app_prompt.py::test_preview_event_shows_approve_action_row`) |
+| B | HIGH | Glossary subset in plan.json only carries 1 entry (`UC → 联殖`), DNT empty. User reports player + DNT glossary layers actually have content. Suggests `GlossaryComposer.collect_for_batch` or its scope filter is dropping entries, OR the user-pack registration is not resolving for `target_lang=zh-cn` + `scope=player`/`do_not_translate`. NOT investigated yet — user said "暂时先不管". | OPEN |
+| C | HIGH | Batches tab still shows `[尚无运行]` mid-flight and after completion. Bug 5 fix (`d68661f`) added INSERT runs/batches + emit `run.start`/`batch.*`/`cost.update`, but events don't actually surface in the tab. Either runner not emitting after all, or `BatchesTab._on_event` filter / subscription broken, or `runs`/`batches` rows being written but tab reads stale snapshot. Needs diagnostic (sample memory.sqlite + bridge subscriber list + event_queue.drain trace). | OPEN |
+| D | MEDIUM | Entries detail pane: only bottom 译/Dest half rendered; top 源/Source half missing. Q3 UX todo 4 (vertical PanedWindow split source/dest) implementation incomplete — observer-confirmed via screenshot 2026-06-08. | OPEN |
+| E | LOW (cosmetic) | `cli/batch.py:plan_batch` passes same `--game-lore` value to both `game_lore_world` and `game_context_lore_summary` prompt slots → header text duplicated in sample_system_prompt. Should be two separate CLI args (`--game-lore-world` short title + `--game-lore` long summary). | OPEN |
+
+### Live run evidence (`rn_<TBD>` from plan `9bde9f04`)
+- Cost: ~$0.01 (DeepSeek via OpenRouter, exact)
+- Item count: 67 MESG:DESC items in 10 batches
+- All 10 batches approved (some via Approve-all-remaining)
+- audit artifacts written under `batches/<run-id>/` (validates Q3 audit-write fix from prior round still holds)
+- memory.sqlite `units.dest` populated (validates Bug 3 unit-update persistence still holds)
+- `runs` / `batches` table state: NOT YET CAPTURED — needed for Bug C diagnosis next session
+
+### Pending investigation order (when ready to resume on Tk surface)
+1. Bug C — runs/batches table state + event_queue trace. **Oracle root-caused this during web-rewrite review**: `EventQueueBridge` singleton is process-local; `BatchRunner` runs in CLI process; GUI process has a different singleton; events never cross processes. Q1's `test_runner_persistence.py` passed because emit + drain were same-process in test. **Bug 5 fix is partial — INSERT-runs/batches works (shared sqlite), but emit-events is a no-op live until cross-process channel exists.** Will be naturally solved by web rewrite.
+2. Bug B — KB user-pack resolution. Check `bgs_kb_status` for current pack registration, check `GlossaryComposer.collect_for_batch` scope dispatch, check `paths.user_packs_root()` actually resolves to user's player/DNT pack. **Oracle confirms this is a backend KB bug, NOT a UI bug — will NOT be solved by web rewrite.**
+3. Bug D — `gui/tabs/entries_tab.py` PanedWindow assembly — Q3 designer likely added bottom pane but skipped top pane wiring. **Skipped — Tk dropping soon.**
+4. Bug E — `cli/batch.py:plan_batch` split into `--game-lore-world` (string title) + `--game-lore-summary` (long lore text). **Apply in web port; skip on Tk path.**
+
+### Run `rn_cdffc06ed3f2` actual outcome
+- 67 items / 10 batches / $0.10 (3.5x previous because reasoning model used more tokens with rich Starfield context)
+- 55 succeeded / 5 retried / **12 manual_review** / 0 cancelled
+- 12 manual_review = Bug 4 (empty-completion gate) catching real failures — defense working as designed
+- audit artifacts + memory.sqlite UPDATE confirmed (Bugs 3+4 fixes solid)
+- runs/batches tables + GUI events: confirmed broken per Oracle's cross-process diagnosis
+
+### Web rewrite decision (2026-06-08)
+
+Three perspectives consulted (saved under `D:\awesome-bgs-mod-master\.opencode\artifacts\web-rewrite-research\`):
+- `nicegui-eval.md` — librarian-alpha: NiceGUI strong fit, ~6–7 dev-days, FastAPI-native, `.mark()` for Playwright
+- `fastapi-htmx-alpine-eval.md` — librarian-beta: HTMX+Alpine also good fit, ~3–5k LOC, standard web stack
+- `architecture-review.md` — oracle: parallel migration strategy, first slice = Prompt approve handshake on synthetic, sqlite-backed event log + WS broadcast replaces process-local bridge
+
+Decision pending user signoff on:
+1. Framework choice: NiceGUI vs FastAPI+HTMX+Alpine
+2. Migration strategy: parallel (recommended) vs cut-over
+3. First slice scope: Prompt approve handshake (recommended) vs broader read-only slice
+
+Once chosen → write spec + implementation plan under `docs/plans/translator-tool/web-rewrite/`.
+
+### Why we are not fixing these immediately
+User decided after this round that the Tk surface is the wrong substrate for continued iteration:
+- Tk is laggy on the user's machine
+- Agent cannot drive Tk (no Playwright equivalent; the agent depends on the user as the eyes-and-hands for every verification)
+- The acceptance loop is asymmetric: 1 agent change requires 1 user-driven re-test round trip
+
+Decision pending: **migrate the GUI surface to a browser-rendered control panel** so the agent can self-verify via Playwright / Chrome DevTools MCP. Spec + plan doc to be written if framework choice converges. See `docs/plans/translator-tool/web-rewrite/` (to be created) once architecture proposal is approved.
 
 Context window almost full. Snapshot for next compaction loop. Pick up here.
 
