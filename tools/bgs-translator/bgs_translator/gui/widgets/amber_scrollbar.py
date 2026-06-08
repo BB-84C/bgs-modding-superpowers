@@ -70,8 +70,14 @@ class AmberScrollbar(tk.Canvas):
         self._command: ScrollCommand | None = command
         self._drag_offset: float | None = None
         self._theme_name = theme_name
-        self._trough_color = theme.background
+        # Polish pass 4: distinct track + thumb so the scrollbar reads as
+        # a CRT bar instead of a flat amber strip. Track is a darker
+        # shade of the dim colour; thumb is the dim colour with an
+        # accent outline; on hover the thumb fills with the accent.
+        self._track_color = theme.border
+        self._cap_color = theme.dim
         self._thumb_color = theme.dim
+        self._thumb_outline = theme.accent
         self._thumb_hover_color = theme.accent
         self._border_color = theme.border
 
@@ -96,19 +102,34 @@ class AmberScrollbar(tk.Canvas):
                 height=thickness,
             )
 
-        # Trough rectangle (fills the canvas).
-        self._trough_id = self.create_rectangle(
-            0, 0, 1, 1, fill=self._trough_color, outline=self._border_color, width=1
+        # Track rectangle (full-canvas dim layer) -- the "rail".
+        self._track_id = self.create_rectangle(
+            0, 0, 1, 1, fill=self._track_color, outline="", width=0
         )
-        # Thumb rectangle.
+        # End-cap glyphs at the two extremes of the track. Visual-only
+        # affordances; click handlers are not wired (the trackpress
+        # path inside _on_press already covers nudge-to-position).
+        self._cap_start_id = self.create_text(
+            0, 0, text="", fill=self._cap_color, font=("Consolas", 8, "bold")
+        )
+        self._cap_end_id = self.create_text(
+            0, 0, text="", fill=self._cap_color, font=("Consolas", 8, "bold")
+        )
+        # Thumb rectangle on top of the track.
         self._thumb_id = self.create_rectangle(
-            0, 0, 1, 1, fill=self._thumb_color, outline="", width=0
+            0,
+            0,
+            1,
+            1,
+            fill=self._thumb_color,
+            outline=self._thumb_outline,
+            width=1,
         )
 
         # Bindings.
         self.bind("<Configure>", lambda _e: self._redraw())
-        self.bind("<Enter>", lambda _e: self._set_thumb_color(self._thumb_hover_color))
-        self.bind("<Leave>", lambda _e: self._set_thumb_color(self._thumb_color))
+        self.bind("<Enter>", lambda _e: self._on_hover(True))
+        self.bind("<Leave>", lambda _e: self._on_hover(False))
         self.bind("<ButtonPress-1>", self._on_press)
         self.bind("<B1-Motion>", self._on_drag)
         self.bind("<ButtonRelease-1>", self._on_release)
@@ -134,18 +155,25 @@ class AmberScrollbar(tk.Canvas):
 
         theme = get_theme(theme_name)
         self._theme_name = theme_name
-        self._trough_color = theme.background
+        self._track_color = theme.border
+        self._cap_color = theme.dim
         self._thumb_color = theme.dim
+        self._thumb_outline = theme.accent
         self._thumb_hover_color = theme.accent
         self._border_color = theme.border
         self.configure(background=theme.background)
-        self.itemconfigure(self._trough_id, fill=self._trough_color, outline=self._border_color)
-        self.itemconfigure(self._thumb_id, fill=self._thumb_color)
+        self.itemconfigure(self._track_id, fill=self._track_color)
+        self.itemconfigure(self._cap_start_id, fill=self._cap_color)
+        self.itemconfigure(self._cap_end_id, fill=self._cap_color)
+        self.itemconfigure(self._thumb_id, fill=self._thumb_color, outline=self._thumb_outline)
         self._redraw()
 
     # Internals -------------------------------------------------------
-    def _set_thumb_color(self, color: str) -> None:
-        self.itemconfigure(self._thumb_id, fill=color)
+    def _on_hover(self, hover: bool) -> None:
+        if hover:
+            self.itemconfigure(self._thumb_id, fill=self._thumb_hover_color)
+        else:
+            self.itemconfigure(self._thumb_id, fill=self._thumb_color)
 
     def _thumb_extents(self) -> tuple[int, int]:
         """Return ``(start, end)`` pixel positions for the thumb."""
@@ -174,24 +202,52 @@ class AmberScrollbar(tk.Canvas):
         height = int(self.winfo_height())
         if width <= 0 or height <= 0:
             return
-        self.coords(self._trough_id, 0, 0, width, height)
+
+        # Track fills the canvas with a small inset so the end-caps and
+        # the thumb sit visually above it.
+        track_inset = 3
+        if self._orient == "vertical":
+            self.coords(
+                self._track_id,
+                track_inset,
+                track_inset,
+                width - track_inset,
+                height - track_inset,
+            )
+            # End caps top + bottom.
+            self.coords(self._cap_start_id, width / 2, track_inset + 4)
+            self.itemconfigure(self._cap_start_id, text="\u25b2")  # ▲
+            self.coords(self._cap_end_id, width / 2, height - track_inset - 4)
+            self.itemconfigure(self._cap_end_id, text="\u25bc")  # ▼
+        else:
+            self.coords(
+                self._track_id,
+                track_inset,
+                track_inset,
+                width - track_inset,
+                height - track_inset,
+            )
+            self.coords(self._cap_start_id, track_inset + 4, height / 2)
+            self.itemconfigure(self._cap_start_id, text="\u25c0")  # ◀
+            self.coords(self._cap_end_id, width - track_inset - 4, height / 2)
+            self.itemconfigure(self._cap_end_id, text="\u25b6")  # ▶
 
         start, end = self._thumb_extents()
-        inset = 2
+        inset = track_inset + 1
         if self._orient == "vertical":
             self.coords(
                 self._thumb_id,
                 inset,
-                max(0, start),
+                max(track_inset, start),
                 width - inset,
-                min(height, end),
+                min(height - track_inset, end),
             )
         else:
             self.coords(
                 self._thumb_id,
-                max(0, start),
+                max(track_inset, start),
                 inset,
-                min(width, end),
+                min(width - track_inset, end),
                 height - inset,
             )
 

@@ -30,9 +30,12 @@ from bgs_translator.gui.themes import ThemeConfig
 
 log = logging.getLogger(__name__)
 
-_TITLEBAR_HEIGHT: Final[int] = 30
-_BUTTON_PAD_X: Final[int] = 12
-_BUTTON_PAD_Y: Final[int] = 4
+# Polish pass 4: bigger buttons + taller bar so the controls are
+# comfortable mouse targets and the cluster reads as a discrete unit.
+_TITLEBAR_HEIGHT: Final[int] = 36
+_BUTTON_PAD_X: Final[int] = 14
+_BUTTON_PAD_Y: Final[int] = 6
+_BUTTON_GLYPH_BUMP: Final[int] = 2  # font size delta above base
 
 
 class AmberTitlebar(ttk.Frame):
@@ -64,7 +67,10 @@ class AmberTitlebar(ttk.Frame):
         title: str = "bgs-translator control panel",
         on_close: Callable[[], None] | None = None,
     ) -> None:
-        super().__init__(master, style="Titlebar.TFrame", padding=(8, 2))
+        # Padding controls horizontal inset; vertical extent comes from
+        # the children's natural size (the bigger button padding in
+        # _BUTTON_PAD_Y guarantees ~36px row height).
+        super().__init__(master, style="Titlebar.TFrame", padding=(8, 0))
         self._root = root
         self._theme = theme
         self._on_close = on_close
@@ -90,18 +96,20 @@ class AmberTitlebar(ttk.Frame):
         )
         self._title_label.grid(row=0, column=1, sticky="we")
 
-        # Control cluster (right-aligned).
+        # Control cluster (right-aligned). Tight padding so the three
+        # buttons read as one unit; cluster gets a small left margin
+        # to separate it from the title.
         controls = ttk.Frame(self, style="Titlebar.TFrame")
-        controls.grid(row=0, column=2, sticky="e")
+        controls.grid(row=0, column=2, sticky="e", padx=(8, 0))
         self._buttons: dict[str, ttk.Label] = {}
         self._make_button(controls, "min", "\u2500", self._on_min_click).grid(
-            row=0, column=0, padx=(0, 2)
+            row=0, column=0, padx=(0, 1)
         )
         self._make_button(controls, "max", "\u25a1", self._on_max_click).grid(
-            row=0, column=1, padx=(0, 2)
+            row=0, column=1, padx=(0, 1)
         )
         self._make_button(controls, "close", "\u00d7", self._on_close_click).grid(
-            row=0, column=2, padx=(0, 2)
+            row=0, column=2
         )
 
         # Drag bindings on title row.
@@ -135,12 +143,15 @@ class AmberTitlebar(ttk.Frame):
         command: Callable[[], None],
     ) -> ttk.Label:
         style = "TitlebarClose.TLabel" if kind == "close" else "TitlebarButton.TLabel"
+        # Padded label: wider hit-target + boxed background that flips
+        # to the accent on hover via style swap.
         button = ttk.Label(
             parent,
             text=f"  {glyph}  ",
             style=style,
             padding=(_BUTTON_PAD_X, _BUTTON_PAD_Y),
             cursor="hand2",
+            anchor="center",
         )
         button.bind("<ButtonPress-1>", lambda _e: command())
         button.bind("<Enter>", lambda _e: self._on_button_hover(button, kind, True))
@@ -255,6 +266,7 @@ def install_titlebar_styles(root: tk.Misc, theme: ThemeConfig, base_font: tuple[
     style = ttk.Style(root)
     family, size = base_font
     title_font = (family, size, "bold")
+    button_font = (family, size + _BUTTON_GLYPH_BUMP, "bold")
 
     style.configure(
         "Titlebar.TFrame",
@@ -283,37 +295,43 @@ def install_titlebar_styles(root: tk.Misc, theme: ThemeConfig, base_font: tuple[
         borderwidth=0,
         relief="flat",
     )
+    # Polish pass 4: button rest state has a dim-amber background so the
+    # cluster reads as discrete pads; hover swap pushes them to accent.
     style.configure(
         "TitlebarButton.TLabel",
-        background=theme.surface,
+        background=theme.border,
         foreground=theme.foreground,
-        font=(family, size + 1, "bold"),
+        font=button_font,
         borderwidth=0,
         relief="flat",
+        anchor="center",
     )
     style.configure(
         "TitlebarButtonHover.TLabel",
         background=theme.accent,
         foreground=theme.accent_fg,
-        font=(family, size + 1, "bold"),
+        font=button_font,
         borderwidth=0,
         relief="flat",
+        anchor="center",
     )
     style.configure(
         "TitlebarClose.TLabel",
-        background=theme.surface,
+        background=theme.border,
         foreground=theme.foreground,
-        font=(family, size + 1, "bold"),
+        font=button_font,
         borderwidth=0,
         relief="flat",
+        anchor="center",
     )
     style.configure(
         "TitlebarCloseHover.TLabel",
         background=theme.error,
         foreground=theme.accent_fg,
-        font=(family, size + 1, "bold"),
+        font=button_font,
         borderwidth=0,
         relief="flat",
+        anchor="center",
     )
 
 

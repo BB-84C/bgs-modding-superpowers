@@ -24,6 +24,7 @@ from bgs_translator.core.memory import open_memory_db
 from bgs_translator.gui.i18n import gettext as _
 from bgs_translator.gui.widgets.amber_checkbox import AmberCheckbox
 from bgs_translator.gui.widgets.amber_scrollbar import AmberScrollbar
+from bgs_translator.gui.widgets.empty_state import EmptyStatePanel
 
 log = logging.getLogger(__name__)
 
@@ -160,6 +161,17 @@ class ProjectTab(ttk.Frame):
         self._tree.grid(row=0, column=0, sticky="nsew")
         tree_scroll.grid(row=0, column=1, sticky="ns")
         self._tree_scroll = tree_scroll
+
+        # Polish pass 4: vault-tec empty-state glyph for when no project
+        # is loaded — stacks on top of the Treeview via grid and is
+        # raised/lowered explicitly in load_project / clear.
+        self._empty_state = EmptyStatePanel(
+            counts_frame,
+            caption="[ NO PROJECT LOADED ]",
+            sub_line="Select a project from the nav tree",
+        )
+        self._empty_state.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        self._empty_state.lift()
         counts_frame.rowconfigure(0, weight=1)
         counts_frame.columnconfigure(0, weight=1)
 
@@ -233,6 +245,8 @@ class ProjectTab(ttk.Frame):
         self._meta_vars["cost_cap"].set(cost_cap_text)
 
         self._refresh_counts(project_root)
+        # Hide the empty-state once a real project is mounted.
+        self._empty_state.lower()
 
     def clear(self) -> None:
         """Reset all displayed values."""
@@ -244,6 +258,8 @@ class ProjectTab(ttk.Frame):
             var.set(_PLACEHOLDER)
         for row in self._tree.get_children():
             self._tree.delete(row)
+        # Re-surface the empty-state glyph.
+        self._empty_state.lift()
 
     # Internals --------------------------------------------------------
     def _refresh_counts(self, project_root: Path) -> None:

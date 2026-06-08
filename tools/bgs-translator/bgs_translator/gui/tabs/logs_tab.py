@@ -18,6 +18,7 @@ from typing import Final
 from bgs_translator.config import paths
 from bgs_translator.gui.i18n import gettext as _
 from bgs_translator.gui.widgets.amber_scrollbar import AmberScrollbar
+from bgs_translator.gui.widgets.empty_state import EmptyStatePanel
 
 log = logging.getLogger(__name__)
 
@@ -97,6 +98,16 @@ class LogsTab(ttk.Frame):
         self._y_scroll = y_scroll
         self._x_scroll = x_scroll
 
+        # Polish pass 4: vault-tec empty-state glyph stacked above the
+        # Text widget for when today's log is missing/empty.
+        self._empty_state = EmptyStatePanel(
+            viewer_frame,
+            caption="[ NO LOGS RECORDED ]",
+            sub_line="Today's JSONL is empty",
+        )
+        self._empty_state.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        self._empty_state.lift()
+
         # Color tags.
         self._text.tag_configure("log-error", foreground="#ff5544")
         self._text.tag_configure("log-warn", foreground="#ffcc44")
@@ -147,6 +158,13 @@ class LogsTab(ttk.Frame):
     def _render(self, lines: list[str]) -> None:
         level_filter = self._level_filter.get()
         source_filter = self._source_filter.get()
+
+        # Toggle empty-state visibility based on whether there is any
+        # content to show after filtering.
+        if not lines:
+            self._empty_state.lift()
+        else:
+            self._empty_state.lower()
 
         self._text.configure(state="normal")
         self._text.delete("1.0", "end")

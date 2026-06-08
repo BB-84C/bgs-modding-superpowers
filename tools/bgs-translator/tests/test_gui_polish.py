@@ -377,3 +377,158 @@ def test_app_outer_frame_paints_accent_border() -> None:
         assert workspace_bg == AMBER_THEME.background.lower()
     finally:
         app.destroy()
+
+
+# ---------------------------------------------------------------------
+# Polish pass 4 — scrollbar track+thumb, empty-state glyph, bigger
+# titlebar buttons
+# ---------------------------------------------------------------------
+
+
+def test_amber_scrollbar_has_distinct_track_and_thumb_items() -> None:
+    """Track + thumb canvas items must both exist after polish pass 4."""
+
+    _need_tk_runtime()
+    import tkinter as tk
+
+    from bgs_translator.gui.widgets import AmberScrollbar
+
+    root = tk.Tk()
+    try:
+        sb = AmberScrollbar(root, orient="vertical")
+        sb.pack(side="right", fill="y", expand=True)
+        sb.update_idletasks()
+        # Track + thumb + two end caps == 4 canvas items.
+        items = sb.find_all()
+        assert len(items) >= 3, f"Expected track + thumb + caps, got {len(items)} items"
+        # Track and thumb must use different fills (track is rail, thumb is grip).
+        track_fill = str(sb.itemcget(sb._track_id, "fill")).lower()
+        thumb_fill = str(sb.itemcget(sb._thumb_id, "fill")).lower()
+        assert track_fill != thumb_fill, (
+            f"Track and thumb must have distinct fill colours, both = {track_fill!r}"
+        )
+        # Thumb has a visible outline so it reads as a discrete grip.
+        thumb_outline = str(sb.itemcget(sb._thumb_id, "outline")).lower()
+        assert thumb_outline, "Thumb must have a non-empty outline colour"
+    finally:
+        root.destroy()
+
+
+def test_amber_scrollbar_hover_brightens_thumb() -> None:
+    _need_tk_runtime()
+    import tkinter as tk
+
+    from bgs_translator.gui.widgets import AmberScrollbar
+
+    root = tk.Tk()
+    try:
+        sb = AmberScrollbar(root, orient="vertical")
+        sb.pack(side="right", fill="y", expand=True)
+        sb.update_idletasks()
+        rest_fill = str(sb.itemcget(sb._thumb_id, "fill")).lower()
+        sb._on_hover(True)
+        hover_fill = str(sb.itemcget(sb._thumb_id, "fill")).lower()
+        assert rest_fill != hover_fill, "Hover should switch the thumb fill colour"
+        sb._on_hover(False)
+        back_fill = str(sb.itemcget(sb._thumb_id, "fill")).lower()
+        assert back_fill == rest_fill, "Leaving hover should restore the rest fill"
+    finally:
+        root.destroy()
+
+
+def test_empty_state_panel_renders_caption_and_sub_line() -> None:
+    _need_tk_runtime()
+    import tkinter as tk
+
+    from bgs_translator.gui.widgets import EmptyStatePanel
+
+    root = tk.Tk()
+    try:
+        panel = EmptyStatePanel(
+            root, caption="[ TEST CAPTION ]", sub_line="TEST SUB"
+        )
+        panel.pack(fill="both", expand=True)
+        panel.update_idletasks()
+        # The caption + sub appear in the StringVar's value.
+        text = panel._var.get()
+        assert "[ TEST CAPTION ]" in text
+        assert "TEST SUB" in text
+        # Reachable through property.
+        assert panel.caption == "[ TEST CAPTION ]"
+        # Setter updates the rendered text.
+        panel.set_caption("[ OTHER ]", "OTHER SUB")
+        text2 = panel._var.get()
+        assert "[ OTHER ]" in text2
+        assert "OTHER SUB" in text2
+    finally:
+        root.destroy()
+
+
+def test_project_tab_mounts_empty_state_when_no_project() -> None:
+    _need_tk_runtime()
+    import tkinter as tk
+
+    from bgs_translator.gui.tabs import ProjectTab
+    from bgs_translator.gui.themes import AMBER_THEME, apply_theme
+    from bgs_translator.gui.widgets import EmptyStatePanel
+
+    root = tk.Tk()
+    try:
+        apply_theme(root, AMBER_THEME, "Consolas", 11)
+        tab = ProjectTab(root)
+        tab.pack(fill="both", expand=True)
+        tab.update_idletasks()
+        assert isinstance(tab._empty_state, EmptyStatePanel)
+        assert "NO PROJECT LOADED" in tab._empty_state.caption
+    finally:
+        root.destroy()
+
+
+def test_logs_tab_mounts_empty_state_when_no_log_file() -> None:
+    _need_tk_runtime()
+    import tkinter as tk
+
+    from bgs_translator.gui.tabs import LogsTab
+    from bgs_translator.gui.themes import AMBER_THEME, apply_theme
+    from bgs_translator.gui.widgets import EmptyStatePanel
+
+    root = tk.Tk()
+    try:
+        apply_theme(root, AMBER_THEME, "Consolas", 11)
+        tab = LogsTab(root)
+        tab.pack(fill="both", expand=True)
+        tab.update_idletasks()
+        assert isinstance(tab._empty_state, EmptyStatePanel)
+        assert "NO LOGS RECORDED" in tab._empty_state.caption
+    finally:
+        root.destroy()
+
+
+def test_amber_titlebar_buttons_have_non_zero_padding() -> None:
+    _need_tk_runtime()
+    import sys
+
+    from bgs_translator.gui.app import TranslatorApp
+
+    if sys.platform not in ("win32", "linux"):
+        import pytest
+
+        pytest.skip("Custom titlebar is Windows/Linux-first")
+
+    app = TranslatorApp()
+    try:
+        app.update_idletasks()
+        titlebar = app.titlebar
+        assert titlebar is not None
+        for kind, button in titlebar.controls.items():
+            padding_value = button.cget("padding")
+            # ttk returns a tuple-or-list; coerce to ints and check both axes.
+            if isinstance(padding_value, (tuple, list)):
+                px = int(str(padding_value[0]))
+                py = int(str(padding_value[1])) if len(padding_value) > 1 else px
+            else:
+                px = py = int(str(padding_value))
+            assert px >= 8, f"{kind!r} button padx={px} too small for a click target"
+            assert py >= 4, f"{kind!r} button pady={py} too small for a click target"
+    finally:
+        app.destroy()
