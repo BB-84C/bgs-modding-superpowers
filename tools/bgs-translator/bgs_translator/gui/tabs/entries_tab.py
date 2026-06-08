@@ -199,8 +199,8 @@ class EntriesTab(ttk.Frame):
 
     def _build_detail_pane(self) -> None:
         detail = ttk.Frame(self._paned, style="Surface.TFrame", padding=(8, 8))
-        detail.columnconfigure(1, weight=1)
-        detail.rowconfigure(1, weight=1)
+        detail.columnconfigure(0, weight=1)
+        detail.rowconfigure(0, weight=1)
         self._paned.add(detail, weight=2)
         self._detail_pane = detail
 
@@ -209,14 +209,57 @@ class EntriesTab(ttk.Frame):
         self._detail_rhash_var = tk.StringVar(value="")
         self._detail_status_var = tk.StringVar(value="untranslated")
 
-        ttk.Label(detail, text=f"{_('Source')}:", style="Phosphor.TLabel").grid(row=0, column=0, sticky="nw")
-        ttk.Label(detail, textvariable=self._detail_source_var, style="Dim.TLabel", wraplength=300).grid(
-            row=0, column=1, sticky="ew", pady=(0, 6)
-        )
+        self._detail_paned = ttk.PanedWindow(detail, orient=tk.VERTICAL)
+        self._detail_paned.grid(row=0, column=0, sticky="nsew", pady=(0, 6))
+        source_frame = ttk.Frame(self._detail_paned, style="Surface.TFrame")
+        dest_frame = ttk.Frame(self._detail_paned, style="Surface.TFrame")
+        for frame in (source_frame, dest_frame):
+            frame.columnconfigure(0, weight=1)
+            frame.rowconfigure(1, weight=1)
+        self._detail_paned.add(source_frame, weight=1)
+        self._detail_paned.add(dest_frame, weight=1)
 
-        ttk.Label(detail, text=f"{_('Dest')}:", style="Phosphor.TLabel").grid(row=1, column=0, sticky="nw")
-        self._dest_text = tk.Text(
-            detail,
+        ttk.Label(source_frame, text="源 / Source", style="Phosphor.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 3))
+        self._source_text = self._make_detail_text(source_frame)
+        source_scroll = AmberScrollbar(source_frame, orient="vertical", command=self._source_text.yview, theme_name=self._theme.name)
+        self._source_text.configure(yscrollcommand=source_scroll.set, state="disabled")
+        self._source_text.grid(row=1, column=0, sticky="nsew")
+        source_scroll.grid(row=1, column=1, sticky="ns")
+
+        ttk.Label(dest_frame, text="译 / Dest", style="Phosphor.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 3))
+        self._dest_text = self._make_detail_text(dest_frame)
+        dest_scroll = AmberScrollbar(dest_frame, orient="vertical", command=self._dest_text.yview, theme_name=self._theme.name)
+        self._dest_text.configure(yscrollcommand=dest_scroll.set)
+        self._dest_text.grid(row=1, column=0, sticky="nsew")
+        dest_scroll.grid(row=1, column=1, sticky="ns")
+        self.after_idle(self._set_initial_detail_sash)
+
+        meta = ttk.Frame(detail, style="Surface.TFrame")
+        meta.grid(row=1, column=0, sticky="ew")
+        meta.columnconfigure(1, weight=1)
+
+        ttk.Label(meta, text=f"{_('Status')}:", style="Phosphor.TLabel").grid(row=0, column=0, sticky="w")
+        self._detail_status_combo = ttk.Combobox(
+            meta, textvariable=self._detail_status_var, values=_STATUS_VALUES[1:], state="readonly", width=16
+        )
+        self._detail_status_combo.grid(row=0, column=1, sticky="w", pady=(0, 4))
+
+        ttk.Label(meta, text="EDID:", style="Phosphor.TLabel").grid(row=1, column=0, sticky="w")
+        ttk.Label(meta, textvariable=self._detail_edid_var, style="Dim.TLabel").grid(row=1, column=1, sticky="ew")
+
+        ttk.Label(meta, text="rHash:", style="Phosphor.TLabel").grid(row=2, column=0, sticky="w")
+        ttk.Label(meta, textvariable=self._detail_rhash_var, style="Dim.TLabel").grid(row=2, column=1, sticky="ew")
+
+        buttons = ttk.Frame(meta, style="Surface.TFrame")
+        buttons.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Button(buttons, text=_("Save edit"), command=self._on_save_edit).pack(side="left", padx=(0, 4))
+        ttk.Button(buttons, text=_("Revert"), command=self._on_revert_detail).pack(side="left", padx=(0, 4))
+        ttk.Button(buttons, text=_("Lock"), command=self._on_lock_selected).pack(side="left", padx=(0, 4))
+        ttk.Button(buttons, text=_("Mark orphan"), command=self._on_mark_orphan).pack(side="left")
+
+    def _make_detail_text(self, parent: tk.Misc) -> tk.Text:
+        return tk.Text(
+            parent,
             height=6,
             wrap="word",
             background=self._theme.background,
@@ -229,26 +272,12 @@ class EntriesTab(ttk.Frame):
             highlightcolor=self._theme.accent,
             font=("Consolas", 10),
         )
-        self._dest_text.grid(row=1, column=1, sticky="nsew", pady=(0, 6))
 
-        ttk.Label(detail, text=f"{_('Status')}:", style="Phosphor.TLabel").grid(row=2, column=0, sticky="w")
-        self._detail_status_combo = ttk.Combobox(
-            detail, textvariable=self._detail_status_var, values=_STATUS_VALUES[1:], state="readonly", width=16
-        )
-        self._detail_status_combo.grid(row=2, column=1, sticky="w", pady=(0, 4))
-
-        ttk.Label(detail, text="EDID:", style="Phosphor.TLabel").grid(row=3, column=0, sticky="w")
-        ttk.Label(detail, textvariable=self._detail_edid_var, style="Dim.TLabel").grid(row=3, column=1, sticky="ew")
-
-        ttk.Label(detail, text="rHash:", style="Phosphor.TLabel").grid(row=4, column=0, sticky="w")
-        ttk.Label(detail, textvariable=self._detail_rhash_var, style="Dim.TLabel").grid(row=4, column=1, sticky="ew")
-
-        buttons = ttk.Frame(detail, style="Surface.TFrame")
-        buttons.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        ttk.Button(buttons, text=_("Save edit"), command=self._on_save_edit).pack(side="left", padx=(0, 4))
-        ttk.Button(buttons, text=_("Revert"), command=self._on_revert_detail).pack(side="left", padx=(0, 4))
-        ttk.Button(buttons, text=_("Lock"), command=self._on_lock_selected).pack(side="left", padx=(0, 4))
-        ttk.Button(buttons, text=_("Mark orphan"), command=self._on_mark_orphan).pack(side="left")
+    def _set_initial_detail_sash(self) -> None:
+        try:
+            self._detail_paned.sashpos(0, max(120, self._detail_paned.winfo_height() // 2))  # type: ignore[no-untyped-call]
+        except tk.TclError:
+            pass
 
     def _on_row_select(self, _event: object) -> None:
         selection = self._tree.selection()
@@ -263,6 +292,7 @@ class EntriesTab(ttk.Frame):
         self._detail_edid_var.set(str(unit.get("edid") or "-"))
         self._detail_rhash_var.set(str(unit.get("rhash") or "-"))
         self._detail_status_var.set(str(unit["status"]))
+        self._set_source_text(str(unit["source"]))
         self._dest_text.delete("1.0", "end")
         self._dest_text.insert("1.0", str(unit.get("dest") or ""))
 
@@ -394,7 +424,14 @@ class EntriesTab(ttk.Frame):
         self._detail_edid_var.set("")
         self._detail_rhash_var.set("")
         self._detail_status_var.set("untranslated")
+        self._set_source_text("")
         self._dest_text.delete("1.0", "end")
+
+    def _set_source_text(self, value: str) -> None:
+        self._source_text.configure(state="normal")
+        self._source_text.delete("1.0", "end")
+        self._source_text.insert("1.0", value)
+        self._source_text.configure(state="disabled")
 
     def _show_empty_state(self, show: bool) -> None:
         if show:
