@@ -46,3 +46,4 @@ AGENTS.md
 
 # BGS KB pack build artifact; source records + manifest.json are committed.
 /knowledge/bgs-kb/packs/*/kb.sqlite
+*.pyc
