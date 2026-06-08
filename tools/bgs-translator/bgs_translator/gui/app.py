@@ -14,9 +14,11 @@ from __future__ import annotations
 import ctypes
 import logging
 import sys
+import threading
 import tkinter as tk
 import tomllib
 from collections.abc import Callable
+from pathlib import Path
 from tkinter import font as tkfont
 from tkinter import ttk
 from typing import Any, Final
@@ -25,6 +27,8 @@ from bgs_translator.config import paths
 from bgs_translator.config.profiles import ProfilesConfig, load_profiles
 from bgs_translator.config.settings import Settings, load_settings, update_setting
 from bgs_translator.core.event_queue import GuiEvent, get_bridge
+from bgs_translator.core.ipc import IPCServer
+from bgs_translator.core.runtime_pid import remove_gui_pid, write_gui_pid
 from bgs_translator.gui.close_handler import CloseHandler
 from bgs_translator.gui.dpi import apply_tk_scaling, enable_windows_dpi_awareness
 from bgs_translator.gui.i18n import Translator, set_default_language
@@ -175,6 +179,7 @@ class TranslatorApp(tk.Tk):
         self._amber_checkboxes: list[Any] = []
         self._resize_handles: ResizeHandles | None = None
         self._bridge = get_bridge()
+        self._ipc_server = IPCServer(self._handle_preview_request)
         self._drain_after_id: str | None = None
         self._settings_after_id: str | None = None
         self._nav_visible = True
@@ -193,6 +198,8 @@ class TranslatorApp(tk.Tk):
         self._populate_nav()
         self._bind_keyboard_shortcuts()
         self.bind("<Configure>", self._on_configure, add="+")
+        self._ipc_server.start()
+        write_gui_pid()
         self._start_pulse()
         self._schedule_drain()
 
@@ -388,21 +395,55 @@ class TranslatorApp(tk.Tk):
     def _build_tab(self, key: str) -> ttk.Frame:
         if key == "project":
             self._project_tab = ProjectTab(self._notebook)
+            if hasattr(self._project_tab, "attach_app"):
+                self._project_tab.attach_app(self)
             return self._project_tab
         if key == "profiles":
             self._profiles_tab = ProfilesTab(self._notebook)
+            if hasattr(self._profiles_tab, "attach_app"):
+                self._profiles_tab.attach_app(self)
             return self._profiles_tab
         if key == "logs":
             self._logs_tab = LogsTab(self._notebook)
+            if hasattr(self._logs_tab, "attach_app"):
+                self._logs_tab.attach_app(self)
             return self._logs_tab
         if key == "entries":
-            return EntriesTab(self._notebook)
+            tab: ttk.Frame = EntriesTab(
+                self._notebook,
+                project_root_provider=self.current_project_root,
+                theme=self._theme_config,
+                gui_event_bridge=self._bridge,
+            )
+            if hasattr(tab, "attach_app"):
+                tab.attach_app(self)
+            return tab
         if key == "batches":
-            return BatchesTab(self._notebook)
+            tab = BatchesTab(
+                self._notebook,
+                project_root_provider=self.current_project_root,
+                theme=self._theme_config,
+                gui_event_bridge=self._bridge,
+            )
+            if hasattr(tab, "attach_app"):
+                tab.attach_app(self)
+            return tab
         if key == "prompt":
-            return PromptTab(self._notebook)
+            tab = PromptTab(
+                self._notebook,
+                project_root_provider=self.current_project_root,
+                theme=self._current_theme,
+                gui_event_bridge=self._bridge,
+                ipc_server=self._ipc_server,
+            )
+            if hasattr(tab, "attach_app"):
+                tab.attach_app(self)
+            return tab
         if key == "glossary":
-            return GlossaryTab(self._notebook)
+            tab = GlossaryTab(self._notebook)
+            if hasattr(tab, "attach_app"):
+                tab.attach_app(self)
+            return tab
         raise KeyError(f"Unknown tab key: {key}")
 
     def _populate_nav(self) -> None:
@@ -457,6 +498,38 @@ class TranslatorApp(tk.Tk):
     def _dispatch_event(self, event: GuiEvent) -> None:
         log.debug("GUI event received: %s", event.kind)
 
+    def _handle_preview_request(
+        self,
+        batch_id: str,
+        prompt: str,
+        items: list[dict[str, object]],
+    ) -> dict[str, object]:
+        """Synchronous GUI-side prompt preview handler for CLI batch runs.
+
+        The IPC server thread blocks on a per-batch event while the Prompt tab
+        renders the prompt and the user decides approve / approve-all / discard.
+        """
+
+        payload = {
+            "batch_id": batch_id,
+            "prompt": prompt,
+            "items": items,
+            "glossary_subset": [],
+            "do_not_translate": [],
+        }
+        waiter = self._ipc_server._pending_lock
+        with waiter:
+            event = threading.Event()
+            bucket: dict[str, object] = {}
+            self._ipc_server._pending[batch_id] = (event, bucket)
+        self._bridge.emit(GuiEvent(kind="prompt.preview_request", batch_id=batch_id, payload=payload))
+        event.wait(timeout=300.0)
+        with waiter:
+            _pending = self._ipc_server._pending.pop(batch_id, None)
+        if not bucket:
+            return {"op": "timeout"}
+        return dict(bucket)
+
     def _stop_pulse(self) -> None:
         if self._pulse_after_id is not None:
             try:
@@ -493,6 +566,13 @@ class TranslatorApp(tk.Tk):
             self._notebook.select(self._tabs["project"])  # type: ignore[no-untyped-call]
             self._status_bar.set_project(name)
             self._refresh_cost_from_project(name)
+            for key in ("entries", "batches", "prompt", "glossary", "logs"):
+                tab = self._tabs.get(key)
+                if tab is not None and hasattr(tab, "load_project"):
+                    try:
+                        tab.load_project(name)
+                    except Exception as exc:  # pragma: no cover - defensive UI integration
+                        log.debug("%s.load_project failed: %s", key, exc)
         elif iid.startswith("profile::"):
             self._profiles_tab.refresh()
             self._notebook.select(self._tabs["profiles"])  # type: ignore[no-untyped-call]
@@ -647,8 +727,21 @@ class TranslatorApp(tk.Tk):
         project_name = getattr(self._project_tab, "_project_name", None)
         return project_name if isinstance(project_name, str) else None
 
+    def current_project_root(self) -> Path | None:
+        """Return the current project root path if a project is selected."""
+
+        project_name = self._current_project_name()
+        if not project_name:
+            return None
+        return paths.project_root(project_name)
+
     def destroy(self) -> None:
         self._on_force_close()
+        try:
+            self._ipc_server.stop()
+        except Exception:
+            pass
+        remove_gui_pid()
         if self._escape_bind_id is not None:
             try:
                 self.unbind_all("<Escape>")

@@ -23,6 +23,7 @@ GuiEventKind = Literal[
     "cost.update",
     "rate.observed",
     "log.entry",
+    "prompt.preview_request",
 ]
 
 
