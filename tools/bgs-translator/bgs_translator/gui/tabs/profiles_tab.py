@@ -17,6 +17,7 @@ from bgs_translator.config.profiles import (
     ProfilesConfig,
     ProviderProfile,
     load_profiles,
+    normalize_base_url,
     save_profiles,
     write_env_var,
 )
@@ -63,6 +64,7 @@ class ProfileDialog(tk.Toplevel):
         }
         self.prompt_caching_var = tk.BooleanVar(value=bool(profile.prompt_caching) if profile else False)
         self.error_var = tk.StringVar(value="")
+        self.base_url_warning_var = tk.StringVar(value="")
 
         body = ttk.Frame(self, padding=(14, 12))
         body.grid(row=0, column=0, sticky="nsew")
@@ -98,8 +100,33 @@ class ProfileDialog(tk.Toplevel):
                     state="readonly",
                     width=26,
                 ).grid(row=row, column=1, sticky="ew", pady=3)
+            elif key == "base_url":
+                base_url_frame = ttk.Frame(body)
+                base_url_frame.grid(row=row, column=1, sticky="ew", pady=3)
+                base_url_frame.columnconfigure(0, weight=1)
+                ttk.Entry(base_url_frame, textvariable=self.values[key], width=34).grid(
+                    row=0,
+                    column=0,
+                    sticky="ew",
+                )
+                ttk.Label(
+                    base_url_frame,
+                    text=_(
+                        "Base URL = API root only, e.g. https://openrouter.ai/api/v1 "
+                        "(not the /chat/completions endpoint)"
+                    ),
+                    style="Dim.TLabel",
+                    wraplength=420,
+                ).grid(row=1, column=0, sticky="w", pady=(3, 0))
+                ttk.Label(
+                    base_url_frame,
+                    textvariable=self.base_url_warning_var,
+                    style="Dim.TLabel",
+                    wraplength=420,
+                ).grid(row=2, column=0, sticky="w")
             else:
                 ttk.Entry(body, textvariable=self.values[key], width=34).grid(row=row, column=1, sticky="ew", pady=3)
+        self.values["base_url"].trace_add("write", self._refresh_base_url_warning)
 
         prompt_row = len(rows)
         ttk.Label(body, text=f"{_('Prompt caching')}:", style="Dim.TLabel").grid(row=prompt_row, column=0, sticky="w", padx=(0, 10), pady=3)
@@ -124,11 +151,20 @@ class ProfileDialog(tk.Toplevel):
         name = self.values["name"].get().strip()
         sdk_kind = self.values["sdk_kind"].get().strip()
         json_mode = self.values["json_mode"].get().strip() if sdk_kind == "openai-compat" else ""
+        base_url, stripped_suffix = normalize_base_url(self.values["base_url"].get())
+        if stripped_suffix is not None:
+            self.values["base_url"].set(base_url)
+            self.base_url_warning_var.set(
+                _("Removed endpoint suffix {suffix}; saved API root {base_url}.").format(
+                    suffix=stripped_suffix,
+                    base_url=base_url,
+                )
+            )
         try:
             profile = ProviderProfile(
                 name=name,
                 sdk_kind=sdk_kind,  # type: ignore[arg-type]
-                base_url=self.values["base_url"].get().strip(),
+                base_url=base_url,
                 model=self.values["model"].get().strip(),
                 api_key_env=self.values["api_key_env"].get().strip(),
                 max_concurrency=int(self.values["max_concurrency"].get().strip() or "4"),
@@ -153,6 +189,18 @@ class ProfileDialog(tk.Toplevel):
             self._on_saved()
         self.destroy()
         return True
+
+    def _refresh_base_url_warning(self, *_args: object) -> None:
+        base_url, stripped_suffix = normalize_base_url(self.values["base_url"].get())
+        if stripped_suffix is None:
+            self.base_url_warning_var.set("")
+            return
+        self.base_url_warning_var.set(
+            _("Endpoint suffix {suffix} will be removed; API root will be {base_url}.").format(
+                suffix=stripped_suffix,
+                base_url=base_url,
+            )
+        )
 
 
 class SetApiKeyDialog(tk.Toplevel):
