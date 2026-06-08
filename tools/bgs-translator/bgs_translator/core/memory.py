@@ -139,6 +139,53 @@ def insert_units(conn: sqlite3.Connection, units: Iterable[TranslationUnit]) -> 
     return inserted
 
 
+def update_unit_translation(
+    conn: sqlite3.Connection,
+    *,
+    row_id: str,
+    dest: str,
+    status: str,
+    sparams: int,
+    via_llm: bool,
+    profile_used: str | None,
+    sdk_via: str,
+    cost_estimate_usd: float | None,
+    cost_exact: bool,
+    retry_count: int,
+    last_batch_id: str,
+) -> None:
+    """Persist a translated unit's dest and provenance back to memory.sqlite."""
+
+    cursor = conn.execute(
+        """
+        UPDATE units SET
+            dest = ?, status = ?, sparams = ?, via_llm = ?,
+            profile_used = ?, sdk_via = ?, cost_estimate_usd = ?,
+            cost_exact = ?, retry_count = ?, last_batch_id = ?,
+            updated_at = ?
+        WHERE row_id = ?
+        """,
+        (
+            dest,
+            status,
+            sparams,
+            1 if via_llm else 0,
+            profile_used,
+            sdk_via,
+            cost_estimate_usd,
+            1 if cost_exact else 0,
+            retry_count,
+            last_batch_id,
+            datetime.now(UTC).isoformat(),
+            row_id,
+        ),
+    )
+    if cursor.rowcount != 1:
+        conn.rollback()
+        raise ValueError(f"No memory.sqlite unit row updated for row_id={row_id!r}")
+    conn.commit()
+
+
 def get_unit_counts_by_signature(conn: sqlite3.Connection) -> dict[str, int]:
     """Return diagnostic unit counts grouped by record signature."""
 
@@ -362,4 +409,5 @@ __all__ = [
     "open_memory_db",
     "select_batches_for_run",
     "select_units_filtered",
+    "update_unit_translation",
 ]

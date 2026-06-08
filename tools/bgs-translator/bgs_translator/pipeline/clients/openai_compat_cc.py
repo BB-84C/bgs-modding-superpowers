@@ -43,13 +43,14 @@ class OpenAICompatChatCompletionsClient:
         content = getattr(response.choices[0].message, "content", "{}")
         output = BatchTranslationOutput.model_validate(json.loads(str(content)))
         usage = _usage_from_response(response)
-        cost_credits = _openrouter_cost_credits(response) if _is_openrouter(self.profile.base_url) else None
+        cost_usd = _openrouter_cost_usd(response) if _is_openrouter(self.profile.base_url) else None
         return LLMResponse(
             items=output.items,
             usage=usage,
-            cost_usd=cost_credits,
-            cost_exact=cost_credits is not None,
+            cost_usd=cost_usd,
+            cost_exact=cost_usd is not None,
             request_id=_as_optional_str(getattr(response, "id", None)),
+            raw_response=_raw_response_json(response),
             via="chat_completions",
         )
 
@@ -92,7 +93,7 @@ def _usage_from_response(response: Any) -> TokenUsage:
     return TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens, total_tokens=total_tokens)
 
 
-def _openrouter_cost_credits(response: Any) -> float | None:
+def _openrouter_cost_usd(response: Any) -> float | None:
     usage = getattr(response, "usage", None)
     raw_cost = getattr(usage, "cost", None)
     return float(raw_cost) if raw_cost is not None else None
@@ -100,6 +101,22 @@ def _openrouter_cost_credits(response: Any) -> float | None:
 
 def _is_openrouter(base_url: str) -> bool:
     return "openrouter" in base_url.casefold()
+
+
+def _raw_response_json(value: Any) -> Any:
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(mode="json")
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _raw_response_json(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_raw_response_json(item) for item in value]
+    attrs = getattr(value, "__dict__", None)
+    if isinstance(attrs, dict):
+        return {key: _raw_response_json(item) for key, item in attrs.items() if not key.startswith("_")}
+    return str(value)
 
 
 async def _maybe_await(value: Any) -> Any:

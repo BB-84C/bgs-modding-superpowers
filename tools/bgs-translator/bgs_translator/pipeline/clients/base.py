@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -48,6 +48,7 @@ class LLMResponse:
     rate_limit_observed: RateLimit | None = None
     request_id: str | None = None
     raw_response_path: Path | None = None
+    raw_response: Any | None = None
     via: Literal[
         "responses", "messages", "generate_content", "chat_completions", "synthetic"
     ] = "synthetic"
