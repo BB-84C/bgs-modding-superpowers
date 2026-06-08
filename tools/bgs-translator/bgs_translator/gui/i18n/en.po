@@ -124,6 +124,45 @@ msgstr "No project selected"
 msgid "Configure API keys via the .env file under profiles/"
 msgstr "Configure API keys via the .env file under profiles/"
 
+msgid "Batch"
+msgstr "Batch"
+
+msgid "Editable"
+msgstr "Editable"
+
+msgid "Scope"
+msgstr "Scope"
+
+msgid "This batch"
+msgstr "This batch"
+
+msgid "This sig"
+msgstr "This sig"
+
+msgid "Global"
+msgstr "Global"
+
+msgid "Glossary subset"
+msgstr "Glossary subset"
+
+msgid "DNT list"
+msgstr "DNT list"
+
+msgid "Approve and send"
+msgstr "Approve and send"
+
+msgid "Approve all remaining"
+msgstr "Approve all remaining"
+
+msgid "Discard"
+msgstr "Discard"
+
+msgid "[ NO PROMPT TO PREVIEW ]"
+msgstr "[ NO PROMPT TO PREVIEW ]"
+
+msgid "Run xtl batch plan to assemble a system prompt"
+msgstr "Run xtl batch plan to assemble a system prompt"
+
 msgid "Source"
 msgstr "Source"
 

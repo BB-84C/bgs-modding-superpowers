@@ -9,7 +9,7 @@ import tomllib
 import uuid
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 import typer
 from pydantic import BaseModel
@@ -17,13 +17,16 @@ from pydantic import BaseModel
 from bgs_translator.cli.envelopes import Envelope, failure, success
 from bgs_translator.config import paths
 from bgs_translator.config.profiles import ProviderProfile, get_active_profile, load_profiles
+from bgs_translator.config.settings import load_settings
+from bgs_translator.core import runtime_pid
+from bgs_translator.core.client import request_preview
 from bgs_translator.kb.glossary import GlossaryComposer
 from bgs_translator.kb.models import GlossaryEntry
 from bgs_translator.observability.cost_tracker import CostTracker
 from bgs_translator.observability.rate_tracker import RateTracker
 from bgs_translator.parsers.tes4_family import TranslationUnit
 from bgs_translator.pipeline.batcher import Batch, BatchPlan, plan_batches
-from bgs_translator.pipeline.clients.base import build_client_for
+from bgs_translator.pipeline.clients.base import LLMResponse, TokenUsage, build_client_for
 from bgs_translator.pipeline.clients.synthetic import SyntheticLLMClient
 from bgs_translator.pipeline.extractor import collect_units_for_run
 from bgs_translator.pipeline.mask import build_masked_unit
@@ -142,6 +145,8 @@ def run_batch(
         cfg = load_profiles()
         profile = get_active_profile(cfg) if cfg.active is not None else cfg.profiles[plan.profile_name]
         client = build_client_for(profile)
+    if _preview_enabled_for_session():
+        client = _PreviewingLLMClient(client, profile)
     runner = BatchRunner(plan, client, RateTracker(profile), CostTracker(profile))
     result = asyncio.run(runner.run(run_id))
     _emit_success({"run_id": run_id, "plan_id": plan.plan_id, "dry_run": dry_run, "summary": asdict(result)})
@@ -202,6 +207,70 @@ def _read_project_game(project_root: Path) -> str:
     project_data = data.get("project", {})
     game = project_data.get("game")
     return str(game) if game else "SkyrimSE"
+
+
+class _PreviewingLLMClient:
+    """LLM client wrapper that performs GUI prompt approval before dispatch."""
+
+    def __init__(self, inner: Any, profile: ProviderProfile) -> None:
+        self._inner = inner
+        self.profile = profile
+        self._approve_all_remaining = False
+
+    async def translate_batch(self, batch: Batch, system_prompt: str) -> LLMResponse:
+        prompt = system_prompt
+        if not self._approve_all_remaining:
+            response = self._request_preview(batch, system_prompt)
+            op = str(response.get("op", "approved"))
+            if op == "approved":
+                prompt = str(response.get("prompt", system_prompt))
+            elif op == "approve_all":
+                prompt = str(response.get("prompt", system_prompt))
+                self._approve_all_remaining = True
+            elif op == "discarded":
+                return _discarded_response(batch)
+            elif op == "timeout":
+                prompt = system_prompt
+        return cast(LLMResponse, await self._inner.translate_batch(batch, prompt))
+
+    async def aclose(self) -> None:
+        close = getattr(self._inner, "aclose", None)
+        if close is not None:
+            await close()
+
+    def _request_preview(self, batch: Batch, system_prompt: str) -> dict[str, Any]:
+        try:
+            return request_preview(
+                batch.batch_id,
+                system_prompt,
+                _items_payload(batch),
+                timeout=300.0,
+            )
+        except Exception:
+            return {"op": "timeout"}
+
+
+def _preview_enabled_for_session() -> bool:
+    settings = load_settings()
+    if not settings.behavior.prompt_preview_required:
+        return False
+    alive, _pid = runtime_pid.is_gui_alive()
+    return alive
+
+
+def _items_payload(batch: Batch) -> list[dict[str, object]]:
+    payload = _to_jsonable(batch.items)
+    if not isinstance(payload, list):
+        return []
+    return [cast(dict[str, object], item) for item in payload if isinstance(item, dict)]
+
+
+def _discarded_response(batch: Batch) -> LLMResponse:
+    return LLMResponse(
+        items={f"I{index}": item.source_masked for index, item in enumerate(batch.items, start=1)},
+        usage=TokenUsage(input_tokens=0, output_tokens=0, total_tokens=0),
+        via="synthetic",
+    )
 
 
 def _to_jsonable(value: Any) -> Any:

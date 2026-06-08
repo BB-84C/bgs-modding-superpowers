@@ -1,0 +1,87 @@
+"""Prompt-preview IPC integration for ``xtl batch run``."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+from typer.testing import CliRunner
+
+
+def test_batch_run_requests_gui_preview_when_required(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.cli.app import app
+    from bgs_translator.config.settings import Settings, save_settings
+    from bgs_translator.core.memory import insert_units, open_memory_db
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+    from bgs_translator.pipeline.clients.synthetic import SyntheticLLMClient
+
+    save_settings(Settings.model_validate({"behavior": {"prompt_preview_required": True}}))
+    project_root = tmp_path / "translator" / "projects" / "demo"
+    conn = open_memory_db(project_root)
+    insert_units(conn, [TranslationUnit("A.esp", 1, 1, "A", "WEAP", "FULL", source="Iron Sword")])
+    conn.close()
+
+    captured_requests: list[dict[str, Any]] = []
+    captured_prompts: list[str] = []
+
+    def fake_is_gui_alive() -> tuple[bool, int | None]:
+        return True, 1234
+
+    def fake_request_preview(
+        batch_id: str, prompt: str, items: list[dict[str, object]], timeout: float = 300.0
+    ) -> dict[str, str]:
+        captured_requests.append(
+            {"batch_id": batch_id, "prompt": prompt, "items": items, "timeout": timeout}
+        )
+        return {"op": "approved", "prompt": prompt + "\nEDITED BY GUI"}
+
+    original_translate = SyntheticLLMClient.translate_batch
+
+    async def capture_translate(
+        self: SyntheticLLMClient, batch: Any, system_prompt: str
+    ) -> Any:
+        captured_prompts.append(system_prompt)
+        return await original_translate(self, batch, system_prompt)
+
+    monkeypatch.setattr("bgs_translator.cli.batch.runtime_pid.is_gui_alive", fake_is_gui_alive)
+    monkeypatch.setattr("bgs_translator.cli.batch.request_preview", fake_request_preview)
+    monkeypatch.setattr(SyntheticLLMClient, "translate_batch", capture_translate)
+
+    runner = CliRunner()
+    planned = runner.invoke(
+        app,
+        [
+            "batch",
+            "plan",
+            "demo",
+            "--register",
+            "dialogue",
+            "--target-lang",
+            "zh-cn",
+            "--profile",
+            "synthetic",
+            "--game-lore",
+            "Skyrim",
+            "--mod-name",
+            "Demo",
+            "--mod-theme",
+            "Weapons",
+            "--style",
+            "Concise",
+        ],
+    )
+    assert planned.exit_code == 0, planned.output
+    plan_id = json.loads(planned.output)["data"]["plan_id"]
+
+    result = runner.invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert len(captured_requests) == 1
+    assert captured_requests[0]["batch_id"]
+    assert captured_requests[0]["items"][0]["source_masked"] == "Iron Sword"
+    assert captured_prompts == [captured_requests[0]["prompt"] + "\nEDITED BY GUI"]

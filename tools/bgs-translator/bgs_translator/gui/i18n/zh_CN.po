@@ -124,6 +124,45 @@ msgstr "未选择项目"
 msgid "Configure API keys via the .env file under profiles/"
 msgstr "请通过 profiles/.env 文件配置 API key"
 
+msgid "Batch"
+msgstr "批次"
+
+msgid "Editable"
+msgstr "可编辑"
+
+msgid "Scope"
+msgstr "作用域"
+
+msgid "This batch"
+msgstr "仅此批次"
+
+msgid "This sig"
+msgstr "此签名"
+
+msgid "Global"
+msgstr "全局"
+
+msgid "Glossary subset"
+msgstr "术语子集"
+
+msgid "DNT list"
+msgstr "禁止翻译列表"
+
+msgid "Approve and send"
+msgstr "批准并发送"
+
+msgid "Approve all remaining"
+msgstr "批准所有剩余批次"
+
+msgid "Discard"
+msgstr "丢弃"
+
+msgid "[ NO PROMPT TO PREVIEW ]"
+msgstr "[ 无可预览提示词 ]"
+
+msgid "Run xtl batch plan to assemble a system prompt"
+msgstr "运行 xtl batch plan 组装系统提示词"
+
 msgid "Source"
 msgstr "源语言"
 
