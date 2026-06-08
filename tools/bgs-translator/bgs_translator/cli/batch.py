@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
+import sys
 import tomllib
 import uuid
 from dataclasses import asdict, is_dataclass
@@ -21,7 +23,7 @@ from bgs_translator.config.settings import load_settings
 from bgs_translator.core import runtime_pid
 from bgs_translator.core.client import request_preview
 from bgs_translator.kb.glossary import GlossaryComposer
-from bgs_translator.kb.models import GlossaryEntry
+from bgs_translator.kb.reader import KBGlossaryReader
 from bgs_translator.observability.cost_tracker import CostTracker
 from bgs_translator.observability.rate_tracker import RateTracker
 from bgs_translator.parsers.tes4_family import TranslationUnit
@@ -35,18 +37,7 @@ from bgs_translator.pipeline.runner import BatchRunner
 batch_app = typer.Typer(no_args_is_help=True)
 SIG_OPTION = typer.Option(None, "--sig")
 FIELD_OPTION = typer.Option(None, "--field")
-
-
-class _EmptyGlossaryReader:
-    def query_matching_entries(
-        self,
-        source_strings: list[str],
-        target_lang: str,
-        game: str,
-        mod_slug: str | None = None,
-    ) -> list[GlossaryEntry]:
-        del source_strings, target_lang, game, mod_slug
-        return []
+log = logging.getLogger(__name__)
 
 
 @batch_app.command("plan")
@@ -84,7 +75,7 @@ def plan_batch(
             profile_name=profile,
             target_lang=target_lang,
             register=register,
-            glossary_composer=GlossaryComposer(_EmptyGlossaryReader()),  # type: ignore[arg-type]
+            glossary_composer=GlossaryComposer(KBGlossaryReader()),
             game=game,
             batch_size=batch_size,
             game_lore_world=game_lore or game,
@@ -229,7 +220,8 @@ class _PreviewingLLMClient:
                 self._approve_all_remaining = True
             elif op == "discarded":
                 return _discarded_response(batch)
-            elif op == "timeout":
+            elif op in {"no_gui", "timeout", "transport_unavailable"}:
+                log.info("Using original prompt for batch %s after preview op=%s", batch.batch_id, op)
                 prompt = system_prompt
         return cast(LLMResponse, await self._inner.translate_batch(batch, prompt))
 
@@ -246,8 +238,26 @@ class _PreviewingLLMClient:
                 _items_payload(batch),
                 timeout=300.0,
             )
-        except Exception:
+        except (FileNotFoundError, ConnectionRefusedError) as exc:
+            log.warning(
+                "IPC preview unavailable for batch %s (GUI not listening): %s",
+                batch.batch_id,
+                exc,
+            )
+            sys.stderr.write(
+                f"[warn] preview skipped for batch {batch.batch_id}: GUI not reachable ({exc})\n"
+            )
+            return {"op": "no_gui"}
+        except TimeoutError as exc:
+            log.warning("IPC preview timed out for batch %s: %s", batch.batch_id, exc)
+            sys.stderr.write(f"[warn] preview timeout for batch {batch.batch_id}\n")
             return {"op": "timeout"}
+        except RuntimeError as exc:
+            log.error("IPC preview transport unavailable: %s", exc)
+            sys.stderr.write(
+                f"[error] preview transport missing: {exc}\n  install pywin32: pip install pywin32\n"
+            )
+            return {"op": "transport_unavailable"}
 
 
 def _preview_enabled_for_session() -> bool:

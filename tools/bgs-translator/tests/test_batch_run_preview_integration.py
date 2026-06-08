@@ -85,3 +85,88 @@ def test_batch_run_requests_gui_preview_when_required(
     assert captured_requests[0]["batch_id"]
     assert captured_requests[0]["items"][0]["source_masked"] == "Iron Sword"
     assert captured_prompts == [captured_requests[0]["prompt"] + "\nEDITED BY GUI"]
+
+
+def test_preview_no_gui_emits_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from bgs_translator.cli.app import app
+    from bgs_translator.config.settings import Settings, save_settings
+
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    save_settings(Settings.model_validate({"behavior": {"prompt_preview_required": True}}))
+    plan_id = _create_preview_plan(tmp_path, monkeypatch)
+
+    def fake_is_gui_alive() -> tuple[bool, int | None]:
+        return True, 1234
+
+    def fake_request_preview(
+        batch_id: str, prompt: str, items: list[dict[str, object]], timeout: float = 300.0
+    ) -> dict[str, str]:
+        del batch_id, prompt, items, timeout
+        raise FileNotFoundError("pipe missing")
+
+    monkeypatch.setattr("bgs_translator.cli.batch.runtime_pid.is_gui_alive", fake_is_gui_alive)
+    monkeypatch.setattr("bgs_translator.cli.batch.request_preview", fake_request_preview)
+
+    result = CliRunner().invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "preview skipped" in result.stderr
+    assert "GUI not reachable" in result.stderr
+
+
+def test_preview_transport_unavailable_emits_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bgs_translator.cli.app import app
+    from bgs_translator.config.settings import Settings, save_settings
+
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    save_settings(Settings.model_validate({"behavior": {"prompt_preview_required": True}}))
+    plan_id = _create_preview_plan(tmp_path, monkeypatch)
+
+    def fake_is_gui_alive() -> tuple[bool, int | None]:
+        return True, 1234
+
+    def fake_request_preview(
+        batch_id: str, prompt: str, items: list[dict[str, object]], timeout: float = 300.0
+    ) -> dict[str, str]:
+        del batch_id, prompt, items, timeout
+        raise RuntimeError("pywin32 missing")
+
+    monkeypatch.setattr("bgs_translator.cli.batch.runtime_pid.is_gui_alive", fake_is_gui_alive)
+    monkeypatch.setattr("bgs_translator.cli.batch.request_preview", fake_request_preview)
+
+    result = CliRunner().invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "transport missing" in result.stderr
+    assert "install pywin32" in result.stderr
+
+
+def _create_preview_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.cli.app import app
+    from bgs_translator.core.memory import insert_units, open_memory_db
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+
+    project_root = tmp_path / "translator" / "projects" / "demo"
+    conn = open_memory_db(project_root)
+    insert_units(conn, [TranslationUnit("A.esp", 1, 1, "A", "WEAP", "FULL", source="Iron Sword")])
+    conn.close()
+
+    planned = CliRunner().invoke(
+        app,
+        [
+            "batch",
+            "plan",
+            "demo",
+            "--register",
+            "dialogue",
+            "--target-lang",
+            "zh-cn",
+            "--profile",
+            "synthetic",
+        ],
+    )
+    assert planned.exit_code == 0, planned.output
+    return str(json.loads(planned.output)["data"]["plan_id"])

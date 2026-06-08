@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import os
 import socket
 import threading
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 PreviewCallback = Callable[[str, str, list[dict[str, object]]], dict[str, Any]]
+log = logging.getLogger(__name__)
 
 
 class IPCServer:
@@ -31,6 +33,7 @@ class IPCServer:
         self._actual_addr = self._addr
         self._pending: dict[str, tuple[threading.Event, dict[str, Any]]] = {}
         self._pending_lock = threading.Lock()
+        self._init_error: Exception | None = None
 
     @property
     def address(self) -> str:
@@ -44,11 +47,18 @@ class IPCServer:
 
         return self._thread is not None and self._thread.is_alive()
 
+    @property
+    def init_error(self) -> Exception | None:
+        """Return the startup failure that prevented IPC from listening, if any."""
+
+        return self._init_error
+
     def start(self) -> None:
         """Start the background accept loop."""
 
         if self.is_running:
             return
+        self._init_error = None
         self._stop_event.clear()
         self._ready_event.clear()
         self._thread = threading.Thread(target=self._serve_loop, name="bgs-translator-ipc", daemon=True)
@@ -169,7 +179,13 @@ class IPCServer:
         try:
             win32file = importlib.import_module("win32file")
             win32pipe = importlib.import_module("win32pipe")
-        except ImportError:
+        except ImportError as exc:
+            log.error(
+                "pywin32 not installed; Windows named-pipe IPC unavailable. "
+                "pip install pywin32. Detail: %s",
+                exc,
+            )
+            self._init_error = exc
             self._ready_event.set()
             return
 

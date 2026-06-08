@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
+
+GlossaryPackFactory = Callable[[str, Sequence[Mapping[str, object]], bool], Path]
 
 
 def test_batch_plan_cli_persists_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,3 +52,54 @@ def test_batch_plan_cli_persists_plan(tmp_path: Path, monkeypatch: pytest.Monkey
     plan_json = json.loads(plan_path.read_text(encoding="utf-8"))
     assert plan_json["plan_id"] == envelope["data"]["plan_id"]
     assert plan_json["total_items"] == 1
+
+
+def test_batch_plan_queries_real_glossary_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_fixture_pack: GlossaryPackFactory
+) -> None:
+    from bgs_translator.cli.app import app
+    from bgs_translator.core.memory import insert_units, open_memory_db
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    monkeypatch.setenv("BGS_KB_USER_PACKS", str(tmp_path / "user-packs"))
+    make_fixture_pack(
+        "translator-overrides-en-zhcn",
+        [
+            {
+                "record_id": "glossary.test.iron-sword",
+                "source": "Iron Sword",
+                "target": "铁剑",
+                "target_lang": "zh-cn",
+                "scope": "player",
+                "category": "item",
+                "confidence": "canonical",
+            }
+        ],
+        True,
+    )
+    project_root = tmp_path / "translator" / "projects" / "demo"
+    conn = open_memory_db(project_root)
+    insert_units(conn, [TranslationUnit("A.esp", 1, 1, "A", "WEAP", "FULL", source="Iron Sword")])
+    conn.close()
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "batch",
+            "plan",
+            "demo",
+            "--register",
+            "dialogue",
+            "--target-lang",
+            "zh-cn",
+            "--profile",
+            "fake",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    envelope = json.loads(result.output)
+    plan_path = Path(envelope["data"]["plan_path"])
+    plan_json = json.loads(plan_path.read_text(encoding="utf-8"))
+    assert "Iron Sword → 铁剑" in plan_json["sample_system_prompt"]
