@@ -141,6 +141,15 @@ class PromptTab(ttk.Frame):
         self._render_side_panel(self._batch_payload_by_id.get(batch_id, {}))
         self._hide_action_row()
 
+    def refresh_for_batch(self, batch_id: str) -> None:
+        """Reload plan files, then render the requested batch if available."""
+
+        if batch_id not in self._batch_prompt_by_id:
+            self._load_plans()
+        self._batch_var.set(batch_id)
+        if batch_id in self._batch_prompt_by_id:
+            self.render_prompt_for_batch(batch_id)
+
     def render_sample_prompt(self, slots: dict[str, object]) -> None:
         """Render a sample prompt with custom slot values."""
 
@@ -456,6 +465,12 @@ class PromptTab(ttk.Frame):
     def _refresh_batch_values(self) -> None:
         values = tuple(self._batch_prompt_by_id.keys()) or ("next batch",)
         self._batch_combo.configure(values=values)
+
+    @property
+    def batch_combo(self) -> ttk.Combobox:
+        """Expose the batch selector for app-level preview routing."""
+
+        return self._batch_combo
 
     def _show_empty_state(self) -> None:
         self._set_editor_text("")

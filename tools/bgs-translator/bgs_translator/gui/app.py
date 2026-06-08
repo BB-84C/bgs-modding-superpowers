@@ -182,6 +182,9 @@ class TranslatorApp(tk.Tk):
         self._ipc_server = IPCServer(self._handle_preview_request)
         self._drain_after_id: str | None = None
         self._settings_after_id: str | None = None
+        self._plan_watcher_stop = threading.Event()
+        self._plan_watcher_thread: threading.Thread | None = None
+        self._plan_mtimes: dict[Path, float] = {}
         self._nav_visible = True
         self._nav_width = _NAV_TREE_WIDTH
         self._escape_bind_id: str | None = None
@@ -202,6 +205,7 @@ class TranslatorApp(tk.Tk):
         write_gui_pid()
         self._start_pulse()
         self._schedule_drain()
+        self._start_plan_watcher()
 
         # Re-show the window. When chrome was stripped we also flip the
         # extended-style bits so the window keeps a taskbar entry —
@@ -436,6 +440,7 @@ class TranslatorApp(tk.Tk):
                 gui_event_bridge=self._bridge,
                 ipc_server=self._ipc_server,
             )
+            self._prompt_tab = tab
             if hasattr(tab, "attach_app"):
                 tab.attach_app(self)
             return tab
@@ -497,6 +502,9 @@ class TranslatorApp(tk.Tk):
 
     def _dispatch_event(self, event: GuiEvent) -> None:
         log.debug("GUI event received: %s", event.kind)
+        if event.kind == "prompt.preview_request":
+            batch_id = event.batch_id or str(event.payload.get("batch_id", ""))
+            self._focus_prompt_preview(batch_id)
 
     def _handle_preview_request(
         self,
@@ -523,6 +531,10 @@ class TranslatorApp(tk.Tk):
             bucket: dict[str, object] = {}
             self._ipc_server._pending[batch_id] = (event, bucket)
         self._bridge.emit(GuiEvent(kind="prompt.preview_request", batch_id=batch_id, payload=payload))
+        try:
+            self.after(0, lambda: self._focus_prompt_preview(batch_id))
+        except tk.TclError:
+            pass
         event.wait(timeout=300.0)
         with waiter:
             _pending = self._ipc_server._pending.pop(batch_id, None)
@@ -545,6 +557,53 @@ class TranslatorApp(tk.Tk):
             except (tk.TclError, ValueError):
                 pass
             self._drain_after_id = None
+
+    def _start_plan_watcher(self) -> None:
+        if self._plan_watcher_thread is not None:
+            return
+        self._plan_watcher_thread = threading.Thread(
+            target=self._poll_plan_files,
+            name="bgs-translator-plan-watcher",
+            daemon=True,
+        )
+        self._plan_watcher_thread.start()
+
+    def _poll_plan_files(self) -> None:
+        while not self._plan_watcher_stop.wait(2.0):
+            if self._plan_files_changed():
+                try:
+                    self.after(0, self._reload_prompt_plans_from_watcher)
+                except tk.TclError:
+                    return
+
+    def _plan_files_changed(self) -> bool:
+        project_root = self.current_project_root()
+        if project_root is None:
+            if self._plan_mtimes:
+                self._plan_mtimes = {}
+            return False
+        current: dict[Path, float] = {}
+        for plan_path in (project_root / "batches").glob("*/plan.json"):
+            try:
+                current[plan_path] = plan_path.stat().st_mtime
+            except OSError:
+                continue
+        changed = current != self._plan_mtimes and bool(self._plan_mtimes or current)
+        self._plan_mtimes = current
+        return changed
+
+    def _reload_prompt_plans_from_watcher(self) -> None:
+        try:
+            self._prompt_tab._load_plans()
+        except tk.TclError:
+            pass
+
+    def _focus_prompt_preview(self, batch_id: str) -> None:
+        if not batch_id:
+            return
+        self._notebook.select(self._prompt_tab)  # type: ignore[no-untyped-call]
+        self._prompt_tab.batch_combo.set(batch_id)
+        self._prompt_tab.refresh_for_batch(batch_id)
 
     # ------------------------------------------------------------------
     # Event handlers
@@ -714,6 +773,7 @@ class TranslatorApp(tk.Tk):
     def _on_force_close(self) -> None:
         self._stop_pulse()
         self._stop_drain()
+        self._plan_watcher_stop.set()
         if self._settings_after_id is not None:
             try:
                 self.after_cancel(self._settings_after_id)
