@@ -1,5 +1,7 @@
 # Handoff — Post Live-Test (2026-06-08)
 
+> **STATUS 2026-06-08 (post-Q1/Q2/Q3)**: All three fixer lanes landed in 15 commits between `3deff7f..HEAD`. Pushed to `origin/feat/translator-tool`. Final test sweep: 312 passed, 3 skipped, 1 pre-existing flake (`test_drag_start_from_maximized_restores_with_proportional_cursor_anchor` — passes 3/3 in isolation, only fails under full-sweep Tk geometry contamination introduced in earlier commit `4a93ab2`). Ruff + mypy clean. Bugs 1/2/3/4/5 all addressed; UX todos 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 all landed. Next session = live re-verification: launch GUI, run a fresh `xtl batch run`, confirm Batches tab populates live, confirm Set API key dialog UX, confirm Glossary tab scope gating, confirm Prompt tab auto-jump on IPC preview.
+
 Context window almost full. Snapshot for next compaction loop. Pick up here.
 
 ## Branch state
