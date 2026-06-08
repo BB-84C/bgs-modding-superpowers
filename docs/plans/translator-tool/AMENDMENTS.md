@@ -249,6 +249,24 @@ Working assumption pending Chunk D verification: Oblivion emits XML (safer fallb
 
 ---
 
+## §6. Reasoning models + json_schema strict — empty completion risk
+
+**Source**: Post live-test handoff, Fixer Q2 Bug 4 mitigation (2026-06-08).
+
+Reasoning-heavy providers can consume the available output budget in hidden or explicit thinking traces and return empty user-visible completion content when paired with strict structured output. This risk applies to DeepSeek reasoning models (`deepseek/deepseek-v4-pro`, `deepseek-r1` family), Anthropic extended-thinking configurations, OpenAI o-series reasoning models, and similar profiles when `json_schema` strict output is enabled.
+
+For translation batch workloads, prefer non-reasoning siblings such as `deepseek/deepseek-chat` unless the operator has a specific reason to pay for reasoning tokens. Translation needs faithful structured JSON and terminology control more than long hidden deliberation.
+
+Defense in depth now includes:
+
+1. OpenAI-compatible chat-completions clients mark whitespace-only completion content as `empty_completion=True` and log the batch/request identifiers.
+2. Validator gate 9 (`empty_dest_for_nonempty_source`) fails any non-empty source whose normalized destination is empty with reason `empty_completion`, routing the unit through the existing retry policy instead of accepting `dest=''` as translated.
+3. Corrective retries for `empty_completion` prepend: "Your previous response had empty content. Return the JSON object directly without any reasoning trace, thinking tags, or preamble."
+
+This mitigation is not a recommendation to run reasoning models by default; it prevents silent bad writes when an operator does.
+
+---
+
 ## How to use AMENDMENTS in subagent dispatch
 
 When dispatching a fixer / implementer subagent for any chunk:
@@ -266,3 +284,4 @@ When closing a chunk, audit the chunk's discovered amendments and decide whether
 ## Changelog
 
 - **2026-06-07** Initial AMENDMENTS file from Chunk A spike findings (Amendments 1–5).
+- **2026-06-08** Added §6 reasoning-model empty-completion risk and mitigation notes.
