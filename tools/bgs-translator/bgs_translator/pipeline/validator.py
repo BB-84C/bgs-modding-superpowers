@@ -35,6 +35,7 @@ GATES = [
     "do_not_translate_intact",
     "mcm_key_intact",
     "length_sanity",
+    "empty_dest_for_nonempty_source",
 ]
 
 _PLACEHOLDER_RE = re.compile(r"\{\{P\d+\}\}")
@@ -49,6 +50,9 @@ def validate_item(
     """Run validation gates in order, returning the first hard failure."""
 
     item_id = _item_id(masked_unit)
+    hard_failure = _empty_dest_for_nonempty_source(item_id, masked_unit.unit.source, dest_masked)
+    if hard_failure is not None:
+        return ValidationResult(item_id=item_id, ok=False, failures=[hard_failure])
     hard_failure = _mask_completeness(item_id, masked_unit, dest_masked)
     if hard_failure is not None:
         return ValidationResult(item_id=item_id, ok=False, failures=[hard_failure])
@@ -189,6 +193,21 @@ def _mcm_key_intact(
             item_id=item_id,
             gate="mcm_key_intact",
             reason=f"destination must start with MCM key prefix {prefix!r}",
+            soft=False,
+        )
+    return None
+
+
+def _empty_dest_for_nonempty_source(
+    item_id: str,
+    source: str,
+    dest: str,
+) -> ValidationFailure | None:
+    if source.strip() and not dest.strip():
+        return ValidationFailure(
+            item_id=item_id,
+            gate="empty_dest_for_nonempty_source",
+            reason="empty_completion",
             soft=False,
         )
     return None
