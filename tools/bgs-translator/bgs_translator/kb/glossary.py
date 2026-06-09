@@ -7,6 +7,7 @@ from typing import ClassVar, Literal
 
 from bgs_translator.kb.models import GlossaryEntry, ResolvedTerm
 from bgs_translator.kb.reader import KBGlossaryReader
+from bgs_translator.kb.retriever import GlossaryRetrievalResult, GlossaryRetriever
 
 
 @dataclass
@@ -38,6 +39,7 @@ class GlossaryComposer:
 
     def __init__(self, reader: KBGlossaryReader):
         self.reader = reader
+        self.retriever = GlossaryRetriever(reader)
 
     def collect_for_batch(
         self,
@@ -48,40 +50,33 @@ class GlossaryComposer:
         max_entries: int = 50,
     ) -> GlossarySubset:
         """Collect, score, cap, and bucket glossary entries for a batch."""
-        entries = self.reader.query_matching_entries(
+        result = self.collect_for_batch_with_evidence(
             source_strings,
             target_lang,
             game,
             mod_slug=mod_slug,
+            max_terms=max_entries,
         )
-        entries_by_id = {entry.record_id: entry for entry in entries}
-        for entry in self.reader.query_user_scope_entries(
+        return GlossarySubset(entries_by_scope=result.entries_by_scope)
+
+    def collect_for_batch_with_evidence(
+        self,
+        source_strings: list[str],
+        target_lang: str,
+        game: str,
+        mod_slug: str | None = None,
+        max_terms: int = 50,
+        max_prompt_chars: int = 8000,
+    ) -> GlossaryRetrievalResult:
+        """Collect glossary entries and retain full match evidence."""
+        return self.retriever.collect_for_batch(
+            source_strings,
             target_lang,
             game,
-            scopes={"player", "do_not_translate"},
-        ):
-            entries_by_id[entry.record_id] = entry
-        entries = list(entries_by_id.values())
-
-        dnt_entries = [entry for entry in entries if entry.scope == "do_not_translate"]
-        other_entries = [entry for entry in entries if entry.scope != "do_not_translate"]
-        other_entries.sort(
-            key=lambda entry: (
-                -self._score_entry(entry, source_strings),
-                -self.SCOPE_PRIORITY[entry.scope],
-                entry.source.casefold(),
-                entry.record_id,
-            )
+            mod_slug=mod_slug,
+            max_terms=max_terms,
+            max_prompt_chars=max_prompt_chars,
         )
-
-        allowed_other_count = max(max_entries - len(dnt_entries), 0)
-        selected = [*dnt_entries, *other_entries[:allowed_other_count]]
-        grouped = _empty_scope_map()
-        for entry in selected:
-            grouped[entry.scope].append(entry)
-        for scope_entries in grouped.values():
-            scope_entries.sort(key=lambda entry: (entry.source.casefold(), entry.record_id))
-        return GlossarySubset(entries_by_scope=grouped)
 
     @staticmethod
     def resolve_term(term: str, entries: list[GlossaryEntry]) -> ResolvedTerm:

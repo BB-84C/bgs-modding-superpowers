@@ -37,6 +37,7 @@ def request_preview_http(
     items: list[dict[str, object]],
     glossary_subset: list[dict[str, object]],
     do_not_translate: list[str],
+    glossary_evidence: list[dict[str, object]] | None = None,
     timeout: float = 300.0,
 ) -> dict[str, Any]:
     """Request browser approval for one batch prompt."""
@@ -55,6 +56,7 @@ def request_preview_http(
                 "system_prompt": system_prompt,
                 "items": items,
                 "glossary_subset": glossary_subset,
+                "glossary_evidence": glossary_evidence or [],
                 "do_not_translate": do_not_translate,
                 "timeout_seconds": timeout,
             },

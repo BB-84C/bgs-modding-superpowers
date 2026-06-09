@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import struct
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -19,6 +21,29 @@ def test_healthz_returns_ok(tmp_path: Path, monkeypatch) -> None:
     assert response.json() == {"status": "ok"}
 
 
+def _tes4_subrecord(sig: bytes, data: bytes) -> bytes:
+    return sig + struct.pack("<H", len(data)) + data
+
+
+def _tes4_record(sig: bytes, data: bytes, *, flags: int = 0, formid: int = 0x01020304, fv: int = 552) -> bytes:
+    return sig + struct.pack("<III I H H", len(data), flags, formid, 0, fv, 0) + data
+
+
+def _tes4_header(*, flags: int = 0, fv: int = 552) -> bytes:
+    return _tes4_record(b"TES4", _tes4_subrecord(b"HEDR", struct.pack("<fII", 1.0, 1, fv)), flags=flags, formid=0, fv=fv)
+
+
+def _tes4_grup(*children: bytes) -> bytes:
+    payload = b"".join(children)
+    return b"GRUP" + struct.pack("<I4sIII", 24 + len(payload), b"WEAP", 0, 0, 0) + payload
+
+
+def _minimal_tes4_plugin(*, localized: bool = False) -> bytes:
+    flags = 0x80 if localized else 0
+    child = _tes4_record(b"WEAP", _tes4_subrecord(b"FULL", b"Test Sword\x00"), fv=552)
+    return _tes4_header(flags=flags, fv=552) + _tes4_grup(child)
+
+
 def test_projects_api_requires_auth_and_accepts_bearer(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
     from bgs_translator.web import app as web_app
@@ -31,6 +56,296 @@ def test_projects_api_requires_auth_and_accepts_bearer(tmp_path: Path, monkeypat
     response = client.get("/api/projects", headers={"Authorization": f"Bearer {secret}"})
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_project_import_api_creates_project_from_plugin(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.web.app import fastapi_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    plugin = tmp_path / "Demo.esm"
+    plugin.write_bytes(_minimal_tes4_plugin())
+
+    client = TestClient(fastapi_app)
+    headers = {"Authorization": f"Bearer {ensure_shared_secret()}"}
+    response = client.post(
+        "/api/projects/import",
+        headers=headers,
+        json={"project_name": "demo-import", "plugin_path": str(plugin)},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["project"] == "demo-import"
+    assert data["game"] == "Starfield"
+    assert data["form_version"] == 552
+    assert data["plugin_type"] == "ESM"
+    assert data["is_localized"] is False
+    assert data["units_extracted"] == 1
+    assert data["signature_distribution"] == {"WEAP": 1}
+    assert (paths.project_root("demo-import") / "memory" / "memory.sqlite").is_file()
+
+
+def test_entry_quick_translate_uses_active_provider_and_writes_audit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.config.profiles import ProfilesConfig, ProviderProfile, save_profiles
+    from bgs_translator.pipeline.clients import base as clients_base
+    from bgs_translator.pipeline.clients.base import LLMResponse, TokenUsage
+    from bgs_translator.web.app import fastapi_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    plugin = tmp_path / "Demo.esm"
+    plugin.write_bytes(_minimal_tes4_plugin())
+    save_profiles(
+        ProfilesConfig(
+            active="OpenRouter-Test",
+            profiles={
+                "OpenRouter-Test": ProviderProfile(
+                    name="OpenRouter-Test",
+                    sdk_kind="openai-compat",
+                    base_url="https://openrouter.ai/api/v1",
+                    model="anthropic/claude-opus-4.6",
+                    api_key_env="OPENROUTER_API_KEY",
+                    json_mode="json_object",
+                )
+            },
+        )
+    )
+
+    class FakeClient:
+        def __init__(self, profile: ProviderProfile) -> None:
+            self.profile = profile
+
+        async def translate_batch(self, batch, system_prompt: str) -> LLMResponse:
+            assert "Starfield" in system_prompt
+            assert "Demo" in system_prompt
+            assert batch.items[0].source_masked == "Test Sword"
+            return LLMResponse(
+                items={"I1": "测试剑"},
+                usage=TokenUsage(input_tokens=12, output_tokens=3, total_tokens=15),
+                cost_usd=0.001,
+                cost_exact=True,
+                request_id="req_test",
+                via="chat_completions",
+            )
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(clients_base, "build_client_for", lambda profile: FakeClient(profile))
+    client = TestClient(fastapi_app)
+    headers = {"Authorization": f"Bearer {ensure_shared_secret()}"}
+    created = client.post(
+        "/api/projects/import",
+        headers=headers,
+        json={"project_name": "demo-import", "plugin_path": str(plugin)},
+    )
+    assert created.status_code == 200, created.text
+    conn = sqlite3.connect(paths.project_root("demo-import") / "memory" / "memory.sqlite")
+    row_id = str(conn.execute("SELECT row_id FROM units LIMIT 1").fetchone()[0])
+    conn.close()
+
+    response = client.post(
+        f"/api/projects/demo-import/entries/{row_id}/quick-translate",
+        headers=headers,
+        json={"apply": True},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["entry"]["dest"] == "测试剑"
+    assert data["entry"]["status"] == "translated"
+    assert data["profile"] == "OpenRouter-Test"
+    assert data["cost_usd"] == 0.001
+    conn = sqlite3.connect(paths.project_root("demo-import") / "memory" / "memory.sqlite")
+    stored = conn.execute(
+        "SELECT dest, status, via_llm, profile_used, sdk_via, last_batch_id FROM units WHERE row_id = ?",
+        (row_id,),
+    ).fetchone()
+    conn.close()
+    assert stored[:5] == ("测试剑", "translated", 1, "OpenRouter-Test", "chat_completions")
+    assert str(stored[5]).startswith("quick-")
+    audit_lines = list((paths.project_root("demo-import") / "batches" / "manual-edits").glob("*.jsonl"))
+    assert audit_lines
+    audit = json.loads(audit_lines[0].read_text(encoding="utf-8").splitlines()[0])
+    assert audit["operation"] == "quick-translate"
+    assert audit["after"]["dest"] == "测试剑"
+
+
+def test_entry_quick_translate_falls_back_from_empty_json_schema_response(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.config.profiles import ProfilesConfig, ProviderProfile, save_profiles
+    from bgs_translator.pipeline.clients import base as clients_base
+    from bgs_translator.pipeline.clients.base import LLMResponse, TokenUsage
+    from bgs_translator.web.app import fastapi_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    plugin = tmp_path / "Demo.esm"
+    plugin.write_bytes(_minimal_tes4_plugin())
+    save_profiles(
+        ProfilesConfig(
+            active="OpenRouter-Test",
+            profiles={
+                "OpenRouter-Test": ProviderProfile(
+                    name="OpenRouter-Test",
+                    sdk_kind="openai-compat",
+                    base_url="https://openrouter.ai/api/v1",
+                    model="anthropic/claude-opus-4.6",
+                    api_key_env="OPENROUTER_API_KEY",
+                    json_mode="json_schema",
+                )
+            },
+        )
+    )
+    seen_modes: list[str | None] = []
+
+    class FakeClient:
+        def __init__(self, profile: ProviderProfile) -> None:
+            self.profile = profile
+            seen_modes.append(profile.json_mode)
+
+        async def translate_batch(self, batch, system_prompt: str) -> LLMResponse:
+            items = {} if self.profile.json_mode == "json_schema" else {"I1": "测试剑"}
+            return LLMResponse(
+                items=items,
+                usage=TokenUsage(input_tokens=12, output_tokens=3, total_tokens=15),
+                via="chat_completions",
+            )
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(clients_base, "build_client_for", lambda profile: FakeClient(profile))
+    client = TestClient(fastapi_app)
+    headers = {"Authorization": f"Bearer {ensure_shared_secret()}"}
+    created = client.post(
+        "/api/projects/import",
+        headers=headers,
+        json={"project_name": "demo-import", "plugin_path": str(plugin)},
+    )
+    assert created.status_code == 200, created.text
+    conn = sqlite3.connect(paths.project_root("demo-import") / "memory" / "memory.sqlite")
+    row_id = str(conn.execute("SELECT row_id FROM units LIMIT 1").fetchone()[0])
+    conn.close()
+
+    response = client.post(
+        f"/api/projects/demo-import/entries/{row_id}/quick-translate",
+        headers=headers,
+        json={"apply": True},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["entry"]["dest"] == "测试剑"
+    assert seen_modes == ["json_schema", "json_object"]
+
+
+def test_batch_queue_api_writes_cli_handoff_request(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.config.profiles import ProfilesConfig, ProviderProfile, save_profiles
+    from bgs_translator.web.app import fastapi_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    plugin = tmp_path / "Demo.esm"
+    plugin.write_bytes(_minimal_tes4_plugin())
+    save_profiles(
+        ProfilesConfig(
+            active="OpenRouter-Test",
+            profiles={
+                "OpenRouter-Test": ProviderProfile(
+                    name="OpenRouter-Test",
+                    sdk_kind="openai-compat",
+                    base_url="https://openrouter.ai/api/v1",
+                    model="anthropic/claude-opus-4.6",
+                    api_key_env="OPENROUTER_API_KEY",
+                    json_mode="json_object",
+                )
+            },
+        )
+    )
+    client = TestClient(fastapi_app)
+    headers = {"Authorization": f"Bearer {ensure_shared_secret()}"}
+    created = client.post(
+        "/api/projects/import",
+        headers=headers,
+        json={"project_name": "demo-import", "plugin_path": str(plugin)},
+    )
+    assert created.status_code == 200, created.text
+    conn = sqlite3.connect(paths.project_root("demo-import") / "memory" / "memory.sqlite")
+    row_id = str(conn.execute("SELECT row_id FROM units LIMIT 1").fetchone()[0])
+    conn.close()
+
+    response = client.post(
+        "/api/projects/demo-import/batch-queue",
+        headers=headers,
+        json={"row_ids": [row_id]},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["queued_count"] == 1
+    assert "--queue" in data["command"]
+    queue_path = Path(data["queue_path"])
+    assert queue_path.is_file()
+    queue = json.loads(queue_path.read_text(encoding="utf-8"))
+    assert queue["row_ids"] == [row_id]
+    assert queue["profile"] == "OpenRouter-Test"
+    assert "CLI" not in data["message"]
+    assert data["command"].startswith("xtl batch plan")
+
+
+def test_project_import_api_rejects_duplicate_project(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.web.app import fastapi_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    plugin = tmp_path / "Demo.esm"
+    plugin.write_bytes(_minimal_tes4_plugin())
+    existing = paths.project_root("demo-import")
+    existing.mkdir(parents=True)
+    (existing / "project.toml").write_text("[project]\nname='demo-import'\n", encoding="utf-8")
+
+    client = TestClient(fastapi_app)
+    response = client.post(
+        "/api/projects/import",
+        headers={"Authorization": f"Bearer {ensure_shared_secret()}"},
+        json={"project_name": "demo-import", "plugin_path": str(plugin)},
+    )
+
+    assert response.status_code == 409
+    assert "已存在" in response.text
+
+
+def test_project_import_api_reports_localized_plugin_missing_strings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.web.app import fastapi_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    plugin = tmp_path / "Localized.esm"
+    plugin.write_bytes(_minimal_tes4_plugin(localized=True))
+
+    client = TestClient(fastapi_app)
+    response = client.post(
+        "/api/projects/import",
+        headers={"Authorization": f"Bearer {ensure_shared_secret()}"},
+        json={"project_name": "localized-import", "plugin_path": str(plugin)},
+    )
+
+    assert response.status_code == 400
+    data = response.json()["detail"]
+    assert data["code"] == "missing_strings"
+    assert data["strings"]["missing"] == ["STRINGS", "DLSTRINGS", "ILSTRINGS"]
+    assert not (tmp_path / "translator" / "projects" / "localized-import").exists()
 
 
 def test_pending_previews_api_returns_unresolved_requests(tmp_path: Path, monkeypatch) -> None:
@@ -65,6 +380,7 @@ def test_pending_previews_api_returns_unresolved_requests(tmp_path: Path, monkey
             "system_prompt": "RYOS prompt",
             "items": [{"id": "I1", "source": "New Beginnings"}],
             "glossary_subset": [{"source": "Starfield", "target": "星空"}],
+            "glossary_evidence": [],
             "do_not_translate": ["RYOS"],
             "timeout_seconds": 300.0,
         }
@@ -449,3 +765,70 @@ def test_glossary_api_scope_gating_and_player_entry_reaches_next_plan(
     assert deleted_global.status_code == 200
     deleted_dnt = client.delete(f"/api/glossary/{dnt_record_id}", headers=headers)
     assert deleted_dnt.status_code == 200
+
+
+def test_glossary_api_syncs_bundled_vanilla_kb_for_project(
+    tmp_path: Path,
+    monkeypatch,
+    make_fixture_pack,
+) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BGS_KB_USER_PACKS", str(tmp_path / "home" / "kb" / "user-packs"))
+
+    from bgs_translator.config import paths
+    from bgs_translator.web import app as web_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    bundled_db = make_fixture_pack(
+        "bgs-l10n-starfield-zhhans",
+        [
+            {
+                "record_id": "sf.new-atlantis",
+                "source": "New Atlantis",
+                "target": "新亚特兰蒂斯城",
+                "scope": "vanilla",
+                "games": ["Starfield"],
+            }
+        ],
+    )
+    bundled_pack = bundled_db.parent
+    (bundled_pack / "manifest.json").write_text(
+        json.dumps(
+            {
+                "games": ["Starfield"],
+                "domains": ["translation", "localization", "glossary"],
+                "recordCount": 1,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_app, "_bundled_kb_packs_root", lambda: bundled_pack.parent)
+
+    project_root = paths.project_root("sf-demo")
+    project_root.mkdir(parents=True)
+    (project_root / "project.toml").write_text(
+        """
+schema_version = 1
+
+[project]
+name = "sf-demo"
+game = "Starfield"
+target_lang = "zh-cn"
+source_plugin_path = "D:\\\\Starfield MO2\\\\mods\\\\demo\\\\demo.esm"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    client = TestClient(web_app.fastapi_app)
+    headers = {"Authorization": f"Bearer {ensure_shared_secret()}"}
+    response = client.get(
+        "/api/glossary?scope=vanilla&project=sf-demo&search=New%20Atlantis",
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert "已同步 Starfield 本体术语库" in data["message"]
+    assert data["entries"][0]["source"] == "New Atlantis"
+    assert (paths.kb_packs_root() / "bgs-l10n-starfield-zhhans" / "kb.sqlite").is_file()

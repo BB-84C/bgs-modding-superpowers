@@ -27,6 +27,7 @@ from bgs_translator.core.event_publisher import get_publisher
 from bgs_translator.core.event_queue import GuiEvent
 from bgs_translator.core.web_ipc_client import discover_gui, request_preview_http
 from bgs_translator.kb.glossary import GlossaryComposer
+from bgs_translator.kb.models import GlossaryMatchEvidence
 from bgs_translator.kb.reader import KBGlossaryReader
 from bgs_translator.observability.cost_tracker import CostTracker
 from bgs_translator.observability.rate_tracker import RateTracker
@@ -41,6 +42,8 @@ from bgs_translator.pipeline.runner import BatchRunner
 batch_app = typer.Typer(no_args_is_help=True)
 SIG_OPTION = typer.Option(None, "--sig")
 FIELD_OPTION = typer.Option(None, "--field")
+QUEUE_OPTION = typer.Option(None, "--queue", help="Use a GUI-selected batch queue request id or JSON path.")
+ROW_ID_OPTION = typer.Option(None, "--row-id", help="Plan only the selected memory row id. Repeatable.")
 log = logging.getLogger(__name__)
 
 
@@ -65,6 +68,8 @@ def plan_batch(
     mod_theme: str = typer.Option("", "--mod-theme"),
     style: str = typer.Option("", "--style"),
     batch_size: int | None = typer.Option(None, "--batch-size"),
+    queue: str | None = QUEUE_OPTION,
+    row_id: list[str] | None = ROW_ID_OPTION,
     sig: list[str] | None = SIG_OPTION,
     field: list[str] | None = FIELD_OPTION,
 ) -> None:
@@ -74,6 +79,8 @@ def plan_batch(
     memory_path = project_root / "memory" / "memory.sqlite"
     if not memory_path.exists():
         _emit_failure("project_not_found", f"memory.sqlite not found for project: {project}", {})
+    queued_row_ids = _row_ids_from_queue(project_root, queue) if queue else []
+    selected_row_ids = [*(row_id or []), *queued_row_ids]
     conn = sqlite3.connect(memory_path)
     try:
         units = collect_units_for_run(
@@ -81,7 +88,11 @@ def plan_batch(
             statuses=["untranslated"],
             signatures=sig,
             fields=field,
+            row_ids=selected_row_ids or None,
+            dedupe_sources=not selected_row_ids,
         )
+        if selected_row_ids and not units:
+            _emit_failure("queue_empty", "Selected row ids did not match untranslated entries.", {"row_ids": selected_row_ids})
         game = _read_project_game(project_root)
         batch_plan = plan_batches(
             units,
@@ -117,6 +128,8 @@ def plan_batch(
             "est_input_tokens": batch_plan.est_input_tokens,
             "est_output_tokens": batch_plan.est_output_tokens,
             "est_cost_usd": batch_plan.est_cost_usd,
+            "queue": queue,
+            "selected_row_ids": selected_row_ids,
         }
     )
 
@@ -214,6 +227,21 @@ def _read_project_game(project_root: Path) -> str:
     return str(game) if game else "SkyrimSE"
 
 
+def _row_ids_from_queue(project_root: Path, queue: str | None) -> list[str]:
+    if not queue:
+        return []
+    queue_path = Path(queue)
+    if not queue_path.exists():
+        queue_path = project_root / "batches" / "selection-queue" / f"{queue}.json"
+    if not queue_path.exists():
+        _emit_failure("queue_not_found", f"Queue request not found: {queue}", {"queue": queue})
+    data = json.loads(queue_path.read_text(encoding="utf-8"))
+    row_ids = data.get("row_ids") if isinstance(data, dict) else None
+    if not isinstance(row_ids, list) or not all(isinstance(item, str) and item for item in row_ids):
+        _emit_failure("queue_invalid", f"Queue request has no row_ids list: {queue_path}", {"queue": str(queue_path)})
+    return list(dict.fromkeys(row_ids))
+
+
 class _PreviewingLLMClient:
     """LLM client wrapper that performs GUI prompt approval before dispatch."""
 
@@ -278,6 +306,7 @@ class _PreviewingLLMClient:
                 items=_items_payload(batch),
                 glossary_subset=_dict_list(batch.glossary_subset),
                 do_not_translate=batch.do_not_translate,
+                glossary_evidence=_dict_list(batch.glossary_evidence),
                 timeout=300.0,
             )
         try:
@@ -429,6 +458,11 @@ def _load_batch(data: dict[str, Any]) -> Batch:
         parent_context_summary=data.get("parent_context_summary"),
         glossary_subset=[],
         do_not_translate=[str(item) for item in data.get("do_not_translate", [])],
+        glossary_evidence=[
+            GlossaryMatchEvidence.model_validate(item)
+            for item in data.get("glossary_evidence", [])
+            if isinstance(item, dict)
+        ],
     )
 
 

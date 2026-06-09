@@ -54,6 +54,57 @@ def test_batch_plan_cli_persists_plan(tmp_path: Path, monkeypatch: pytest.Monkey
     assert plan_json["total_items"] == 1
 
 
+def test_batch_plan_cli_accepts_gui_selection_queue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bgs_translator.cli.app import app
+    from bgs_translator.core.memory import insert_units, open_memory_db
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    project_root = tmp_path / "translator" / "projects" / "demo"
+    conn = open_memory_db(project_root)
+    insert_units(
+        conn,
+        [
+            TranslationUnit("A.esp", 1, 1, "A", "WEAP", "FULL", source="Queued Sword"),
+            TranslationUnit("A.esp", 2, 2, "B", "WEAP", "FULL", source="Other Sword"),
+        ],
+    )
+    row_id = str(conn.execute("SELECT row_id FROM units WHERE source = 'Queued Sword'").fetchone()[0])
+    conn.close()
+    queue_dir = project_root / "batches" / "selection-queue"
+    queue_dir.mkdir(parents=True)
+    (queue_dir / "queue-test.json").write_text(
+        json.dumps({"queue_id": "queue-test", "row_ids": [row_id]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "batch",
+            "plan",
+            "demo",
+            "--queue",
+            "queue-test",
+            "--register",
+            "dialogue",
+            "--target-lang",
+            "zh-cn",
+            "--profile",
+            "fake",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    envelope = json.loads(result.output)
+    assert envelope["data"]["selected_row_ids"] == [row_id]
+    plan_json = json.loads(Path(envelope["data"]["plan_path"]).read_text(encoding="utf-8"))
+    sources = [item["unit"]["source"] for batch in plan_json["batches"] for item in batch["items"]]
+    assert sources == ["Queued Sword"]
+
+
 def test_batch_plan_splits_lore_world_and_summary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

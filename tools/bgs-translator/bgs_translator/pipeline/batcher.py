@@ -8,11 +8,12 @@ import hashlib
 import uuid
 from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from bgs_translator.kb.glossary import GlossaryComposer, GlossarySubset
-from bgs_translator.kb.models import GlossaryEntry
+from bgs_translator.kb.models import GlossaryEntry, GlossaryMatchEvidence
+from bgs_translator.kb.retriever import GlossaryRetrievalResult
 from bgs_translator.parsers.tes4_family import TranslationUnit
 from bgs_translator.pipeline.mask import MaskedUnit, apply_skip_heuristics, build_masked_unit
 from bgs_translator.pipeline.prompt import load_template, render_prompt
@@ -38,6 +39,7 @@ class Batch:
     parent_context_summary: str | None
     glossary_subset: list[GlossaryEntry]
     do_not_translate: list[str]
+    glossary_evidence: list[GlossaryMatchEvidence] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -124,15 +126,15 @@ def plan_batches(
     """Apply masks, group compatible units, pack batches, and estimate cost."""
 
     grouped: dict[tuple[str, str, str, int | None, LengthTier, str], list[MaskedUnit]] = defaultdict(list)
-    subset_by_hash: dict[str, GlossarySubset] = {}
+    subset_by_hash: dict[str, GlossaryRetrievalResult] = {}
     for masked_unit in (build_masked_unit(unit) for unit in units):
         if masked_unit.skip_llm:
             continue
-        subset = glossary_composer.collect_for_batch(
+        result = glossary_composer.collect_for_batch_with_evidence(
             [masked_unit.unit.source], target_lang, game, mod_slug=mod_slug
         )
-        subset_hash = glossary_subset_hash(_flatten_subset(subset))
-        subset_by_hash[subset_hash] = subset
+        subset_hash = glossary_subset_hash(result.included_entries())
+        subset_by_hash[subset_hash] = result
         grouped[batch_group_key(masked_unit, register, target_lang, subset_hash)].append(masked_unit)
 
     batches: list[Batch] = []
@@ -140,7 +142,8 @@ def plan_batches(
         items = grouped[key]
         tier = key[4]
         cap = batch_size_for(tier, batch_size)
-        subset = subset_by_hash[key[5]]
+        result = subset_by_hash[key[5]]
+        subset = GlossarySubset(entries_by_scope=result.entries_by_scope)
         for start in range(0, len(items), cap):
             chunk = items[start : start + cap]
             batches.append(
@@ -150,6 +153,7 @@ def plan_batches(
                     parent_context_summary=_parent_context_summary(chunk),
                     glossary_subset=_flatten_subset(subset),
                     do_not_translate=_do_not_translate_terms(subset, chunk),
+                    glossary_evidence=result.evidence,
                 )
             )
 

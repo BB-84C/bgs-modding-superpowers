@@ -40,4 +40,28 @@ class ResolvedTerm(BaseModel):
     scope_used: str | None
 
 
-__all__ = ["GlossaryEntry", "ResolvedTerm"]
+class GlossaryMatchEvidence(BaseModel):
+    """Why one glossary entry was considered for a batch prompt."""
+
+    term: str
+    scope: Literal["vanilla", "mod", "player", "do_not_translate"]
+    record_id: str
+    source: str
+    target: str
+    matched_by: Literal[
+        "source_exact",
+        "alias_exact",
+        "normalized",
+        "rag",
+        "player_rule",
+        "dnt_rule",
+    ]
+    matched_text: str
+    source_excerpt: str
+    score: float
+    included: bool
+    excluded_reason: str | None
+    dedupe_key: str
+
+
+__all__ = ["GlossaryEntry", "GlossaryMatchEvidence", "ResolvedTerm"]

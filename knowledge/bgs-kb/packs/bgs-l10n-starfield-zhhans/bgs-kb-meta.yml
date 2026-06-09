@@ -1,0 +1,9 @@
+packId: bgs-l10n-starfield-zhhans
+displayName: BGS Localization Glossary - Starfield zh-Hans
+version: 2026.06.09
+schemaVersion: 1
+minPluginVersion: 0.2.0
+owner: bgs-modding-superpowers maintainers
+license: Bethesda official localization data; redistribution policy follows project pack policy
+sourceLang: en
+targetLang: zh-cn

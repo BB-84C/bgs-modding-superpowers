@@ -1,0 +1,42 @@
+{
+  "builtAt": "2026-06-09T04:54:57.964250Z",
+  "displayName": "BGS Localization Glossary - Starfield zh-Hans",
+  "domains": [
+    "translation",
+    "localization",
+    "glossary"
+  ],
+  "engineFamilies": [
+    "Creation Engine 2"
+  ],
+  "games": [
+    "Starfield"
+  ],
+  "license": "Bethesda official localization data; redistribution policy follows project pack policy",
+  "minPluginVersion": "0.2.0",
+  "owner": "bgs-modding-superpowers maintainers",
+  "packId": "bgs-l10n-starfield-zhhans",
+  "recordCount": 151426,
+  "schemaVersion": 1,
+  "sha256": {
+    "kb.sqlite": "dd346c30212f3e77bf49ecc8d6c00880532eb8bd6fe7c73b46cba1dbaae4c647"
+  },
+  "sourceLang": "en",
+  "targetLang": "zh-cn",
+  "version": "2026.06.09",
+  "buildStats": {
+    "entries_seen": 187316,
+    "entries_inserted": 151426,
+    "empty_skipped": 1188,
+    "duplicate_skipped": 30389,
+    "conflict_skipped": 4313,
+    "categories": {
+      "character": 122418,
+      "item": 4765,
+      "ui_label": 3649,
+      "lore_term": 18555,
+      "faction": 229,
+      "place": 1810
+    }
+  }
+}

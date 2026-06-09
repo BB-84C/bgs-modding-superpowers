@@ -14,7 +14,9 @@ def collect_units_for_run(
     statuses: list[str] | None = None,
     signatures: list[str] | None = None,
     fields: list[str] | None = None,
+    row_ids: list[str] | None = None,
     limit: int | None = None,
+    dedupe_sources: bool = True,
 ) -> list[TranslationUnit]:
     """Read filtered, source-deduplicated TranslationUnits from memory.sqlite."""
 
@@ -29,6 +31,9 @@ def collect_units_for_run(
     if fields:
         clauses.append(f"field IN ({_placeholders(fields)})")
         params.extend(field.upper() for field in fields)
+    if row_ids:
+        clauses.append(f"row_id IN ({_placeholders(row_ids)})")
+        params.extend(row_ids)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     limit_sql = "LIMIT ?" if limit is not None else ""
     if limit is not None:
@@ -48,7 +53,7 @@ def collect_units_for_run(
     units: list[TranslationUnit] = []
     for row in rows:
         source = str(row[6])
-        if source in seen_sources:
+        if dedupe_sources and source in seen_sources:
             continue
         seen_sources.add(source)
         units.append(

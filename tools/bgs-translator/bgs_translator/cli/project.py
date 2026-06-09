@@ -21,7 +21,7 @@ from bgs_translator.cli.envelopes import Envelope, failure, success
 from bgs_translator.config import paths
 from bgs_translator.core.memory import insert_units, open_memory_db
 from bgs_translator.parsers.extractor import GameSchema, extract_translation_units
-from bgs_translator.parsers.form_versions import detect_game_from_form_version
+from bgs_translator.parsers.form_versions import detect_game_from_header
 from bgs_translator.parsers.schemas import get_schema_for_game
 from bgs_translator.parsers.tes4_family import TES4FamilyWalker, TES4Header, TranslationUnit
 from bgs_translator.sst.hash import compute_rhash
@@ -117,7 +117,7 @@ def init_project(
 
 
 def _detect_unique_game(header: TES4Header) -> str:
-    candidates = detect_game_from_form_version(header.form_version)
+    candidates = detect_game_from_header(header.form_version, header.masters)
     if len(candidates) == 1:
         return candidates[0]
     details = {"form_version": header.form_version, "candidates": candidates}

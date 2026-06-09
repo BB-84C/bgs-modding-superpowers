@@ -11,11 +11,14 @@ import html
 import json
 import os
 import re
+import shutil
 import socket
 import sqlite3
 import subprocess
 import sys
 import tomllib
+import uuid
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,11 +29,14 @@ from fastapi import Depends, HTTPException, Query, Request, Response, WebSocket,
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
+from bgs_translator.cli.project import _sha256, _write_cache, _write_project_toml
 from bgs_translator.config import paths
 from bgs_translator.config.profiles import (
     ProfileMissingKeyError,
     ProfilesConfig,
+    ProfileValidationError,
     ProviderProfile,
+    get_active_profile,
     load_profiles,
     normalize_base_url,
     resolve_api_key,
@@ -41,15 +47,21 @@ from bgs_translator.config.settings import load_settings, update_setting
 from bgs_translator.core.memory import (
     fetch_events_for_run,
     get_unit_by_row_id,
+    insert_units,
     list_recent_runs,
     open_memory_db,
     select_units_filtered,
+    update_unit_translation,
 )
 from bgs_translator.core.runtime_pid import remove_gui_pid, write_gui_pid
 from bgs_translator.kb._schema import apply_stub_schema
 from bgs_translator.kb.models import GlossaryEntry
 from bgs_translator.kb.reader import KBGlossaryReader
-from bgs_translator.parsers.tes4_family import TES4FamilyWalker
+from bgs_translator.parsers.extractor import extract_translation_units
+from bgs_translator.parsers.form_versions import detect_game_from_header
+from bgs_translator.parsers.schemas import get_schema_for_game
+from bgs_translator.parsers.strings_io import find_strings_files
+from bgs_translator.parsers.tes4_family import TES4FamilyWalker, TES4Header
 from bgs_translator.web.events import broadcast_ws, connect_ws
 from bgs_translator.web.security import (
     ensure_shared_secret,
@@ -113,6 +125,7 @@ class PreviewRequest(BaseModel):
     system_prompt: str
     items: list[dict[str, Any]] = []
     glossary_subset: list[dict[str, Any]] = []
+    glossary_evidence: list[dict[str, Any]] = []
     do_not_translate: list[str] = []
     timeout_seconds: float = 300.0
 
@@ -142,6 +155,18 @@ class EntryUpdate(BaseModel):
     dest: str | None = None
     status: str = "translated"
     reason: str = "Web Entries tab edit"
+
+
+class EntryQuickTranslateRequest(BaseModel):
+    """Provider-backed quick translation request for one entry."""
+
+    apply: bool = True
+
+
+class EntryBatchQueueRequest(BaseModel):
+    """Selected entry ids to hand off to CLI batch planning."""
+
+    row_ids: list[str]
 
 
 class ProfileSave(BaseModel):
@@ -189,6 +214,16 @@ class ThemeSave(BaseModel):
     """Persisted web theme payload."""
 
     theme: str
+
+
+class ProjectImportRequest(BaseModel):
+    """Create a project from a local ESP/ESM/ESL plugin path."""
+
+    project_name: str
+    plugin_path: str
+    game: str | None = None
+    source_lang: str = "en"
+    target_lang: str = "zh-cn"
 
 
 class LanguageSave(BaseModel):
@@ -292,6 +327,16 @@ def api_projects(_auth: None = Depends(require_shared_secret)) -> list[dict[str,
     return _list_projects()
 
 
+@fastapi_app.post("/api/projects/import")
+def api_project_import(
+    payload: ProjectImportRequest,
+    _auth: None = Depends(require_shared_secret),
+) -> dict[str, Any]:
+    """Create a project from a local plugin path."""
+
+    return _import_project_from_plugin(payload)
+
+
 @fastapi_app.get("/api/projects/{project}")
 def api_project(project: str, _auth: None = Depends(require_shared_secret)) -> dict[str, Any]:
     """Return one project summary."""
@@ -386,6 +431,39 @@ def api_update_project_entry(
     finally:
         conn.close()
     return {"ok": True, "entry": after}
+
+
+@fastapi_app.post("/api/projects/{project}/entries/{row_id}/quick-translate")
+async def api_quick_translate_project_entry(
+    project: str,
+    row_id: str,
+    payload: EntryQuickTranslateRequest,
+    _auth: None = Depends(require_shared_secret),
+) -> dict[str, Any]:
+    """Translate one entry through the active provider and persist it."""
+
+    del payload
+    try:
+        result = await _quick_translate_entry(project, row_id)
+    except ProfileMissingKeyError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"当前账号缺少 API Key：{exc.api_key_env}。请先到账号页填写密钥。",
+        ) from exc
+    except ProfileValidationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"还没有可用的 AI 账号：{exc}") from exc
+    return result
+
+
+@fastapi_app.post("/api/projects/{project}/batch-queue")
+def api_create_project_batch_queue(
+    project: str,
+    payload: EntryBatchQueueRequest,
+    _auth: None = Depends(require_shared_secret),
+) -> dict[str, Any]:
+    """Create a GUI-selected batch queue request for later CLI planning."""
+
+    return _create_batch_queue(project, payload.row_ids)
 
 
 @fastapi_app.get("/api/projects/{project}/close-summary")
@@ -664,20 +742,39 @@ async def api_probe_profile(name: str, _auth: None = Depends(require_shared_secr
 def api_glossary(
     scope: str = "player",
     search: str | None = None,
+    project: str | None = None,
     _auth: None = Depends(require_shared_secret),
 ) -> dict[str, Any]:
     """Return glossary entries for one scope."""
 
     normalized_scope = _normalize_glossary_scope(scope)
+    project_context = _glossary_project_context(project)
+    sync_notes = _sync_bundled_game_kb(project_context["game"]) if project_context["game"] else []
     entries = [
         _glossary_payload(entry)
-        for entry in _glossary_entries(scope=normalized_scope, search=search)
+        for entry in _glossary_entries(
+            scope=normalized_scope,
+            search=search,
+            game=project_context["game"],
+            target_lang=project_context["target_lang"],
+            mod_slug=project_context["mod_slug"],
+            limit=501,
+        )
     ]
+    limited = entries[:500]
+    message = _glossary_scope_message(normalized_scope)
+    if sync_notes:
+        message = f"{message} {' '.join(sync_notes)}"
+    if len(entries) > len(limited):
+        message = f"{message} 当前列表只显示前 {len(limited)} 条，请用搜索框查具体术语。"
     return {
         "scope": normalized_scope,
         "writable": normalized_scope in _GLOSSARY_WRITABLE_SCOPES,
-        "message": _glossary_scope_message(normalized_scope),
-        "entries": entries,
+        "message": message,
+        "project": project_context,
+        "total": len(entries),
+        "shown": len(limited),
+        "entries": limited,
     }
 
 
@@ -1077,7 +1174,12 @@ def _content_html(active: str, project: str | None) -> str:
 
 def _project_html(project: str | None) -> str:
     if project is None:
-        return '<div class="xtl-empty">还没有项目。先用 xtl project init 创建一个翻译项目。</div>'
+        return f"""
+        <div class="xtl-workbench">
+          {_project_import_panel_html()}
+          <div class="xtl-empty">还没有项目。可以在左侧导入 ESP/ESM/ESL 来创建翻译项目。</div>
+        </div>
+        """
     summary = _project_summary(project)
     source = summary["source"]
     plugins = source["memory_plugins"] or []
@@ -1116,6 +1218,7 @@ def _project_html(project: str | None) -> str:
         </div>
       </div>
       <div class="xtl-stack">
+        {_project_import_panel_html()}
         <div class="xtl-panel">
           <div class="xtl-panel-title">工作流</div>
           <div class="xtl-panel-body">
@@ -1150,6 +1253,27 @@ def _project_html(project: str | None) -> str:
     """
 
 
+def _project_import_panel_html() -> str:
+    return """
+    <div class="xtl-panel" data-marker="panel-project-import">
+      <div class="xtl-panel-title">导入新的 MOD 文件</div>
+      <div class="xtl-panel-body">
+        <div class="xtl-form-grid compact">
+          <label><span>项目名</span><input class="xtl-input" id="xtl-import-project-name" data-marker="field-import-project-name" placeholder="例如 my-starfield-mod-zhcn"></label>
+          <label class="wide"><span>ESP/ESM/ESL 文件路径</span><input class="xtl-input" id="xtl-import-plugin-path" data-marker="field-import-plugin-path" placeholder="例如 D:\\Starfield MO2\\mods\\某个MOD\\mod.esm"></label>
+          <label><span>游戏</span><select class="xtl-select" id="xtl-import-game" data-marker="field-import-game"><option value="">自动检测</option><option value="Starfield">Starfield</option><option value="Fallout4">Fallout 4</option><option value="Fallout76">Fallout 76</option><option value="SkyrimSE">Skyrim SE/AE</option><option value="SkyrimLE">Skyrim LE</option><option value="FalloutNV">Fallout New Vegas</option><option value="Fallout3">Fallout 3</option></select></label>
+          <label><span>目标语言</span><input class="xtl-input" id="xtl-import-target-lang" value="zh-cn"></label>
+        </div>
+        <div class="xtl-toolbar" style="margin-top: 10px">
+          <button class="xtl-btn primary" id="xtl-import-project" data-marker="btn-import-project">导入并创建项目</button>
+          <span class="xtl-help" id="xtl-import-status" data-marker="status-import-project">导入只会读取插件并创建翻译项目，不会修改原始 MOD 文件。</span>
+        </div>
+        <p class="xtl-help">如果插件使用 Strings 本地化文件，请保持 ESP/ESM/ESL 和旁边的 Strings 文件夹在同一个 MOD 目录中。</p>
+      </div>
+    </div>
+    """
+
+
 def _project_script(project: str | None) -> str:
     project_json = _json_for_script(project or "")
     script = r"""
@@ -1161,7 +1285,12 @@ def _project_script(project: str | None) -> str:
         const res = await fetch(path, {credentials: 'same-origin', ...options});
         const text = await res.text();
         const data = text ? JSON.parse(text) : null;
-        if (!res.ok) throw new Error((data && (data.detail || data.message)) || `${path} -> ${res.status}`);
+        if (!res.ok) {
+          const err = new Error((data && (typeof data.detail === 'string' ? data.detail : data.message)) || `${path} -> ${res.status}`);
+          err.data = data;
+          err.status = res.status;
+          throw err;
+        }
         return data;
       }
       function setStatus(text, tone = '') {
@@ -1169,6 +1298,55 @@ def _project_script(project: str | None) -> str:
         if (!el) return;
         el.textContent = text;
         el.className = `xtl-help ${tone}`;
+      }
+      function setImportStatus(text, tone = '') {
+        const el = byId('xtl-import-status');
+        if (!el) return;
+        el.textContent = text;
+        el.className = `xtl-help ${tone}`;
+      }
+      function projectNameFromPath(value) {
+        const fileName = String(value || '').split(/[\\/]/).pop() || '';
+        const stem = fileName.replace(/\.(esp|esm|esl)$/i, '');
+        return stem.toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 56);
+      }
+      function importErrorText(err) {
+        const detail = err && err.data ? err.data.detail : null;
+        if (detail && detail.code === 'ambiguous_game') {
+          const choices = Array.isArray(detail.candidates) && detail.candidates.length ? `可选：${detail.candidates.join('、')}` : '请手动选择游戏';
+          return `${detail.message} 文件头版本：${detail.form_version}。${choices}。`;
+        }
+        if (detail && detail.code === 'missing_strings') {
+          const missing = detail.strings && Array.isArray(detail.strings.missing) ? detail.strings.missing.join('、') : 'Strings 文件';
+          return `${detail.message} 缺少：${missing}。通常需要保留 MOD 文件夹里的 Strings 子文件夹，不要只单独复制 .esm/.esp 文件。`;
+        }
+        if (typeof detail === 'string') return detail;
+        return err && err.message ? err.message : '导入失败。';
+      }
+      async function importProject() {
+        const name = (byId('xtl-import-project-name')?.value || '').trim();
+        const pluginPath = (byId('xtl-import-plugin-path')?.value || '').trim();
+        const game = (byId('xtl-import-game')?.value || '').trim();
+        const targetLang = (byId('xtl-import-target-lang')?.value || 'zh-cn').trim() || 'zh-cn';
+        if (!name || !pluginPath) {
+          setImportStatus('请填写项目名和 ESP/ESM/ESL 文件路径。', 'danger');
+          return;
+        }
+        setImportStatus('正在读取 MOD 文件并创建项目...');
+        try {
+          const result = await api('/api/projects/import', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({project_name: name, plugin_path: pluginPath, game: game || null, target_lang: targetLang}),
+          });
+          const localized = result.is_localized ? '使用 Strings 本地化文件' : '文本直接在插件中';
+          const esl = result.is_esl ? 'ESL/light 插件' : `${result.plugin_type || '插件'}`;
+          setImportStatus(`导入完成：${result.game}，${esl}，${localized}，抽取 ${result.units_extracted} 条文本。正在打开新项目...`, 'good');
+          window.location.href = `/project?project=${encodeURIComponent(result.project)}`;
+        } catch (err) {
+          setImportStatus(importErrorText(err), 'danger');
+          console.warn('project import failed', err);
+        }
       }
       function showReloadResultIfNeeded() {
         const url = new URL(window.location.href);
@@ -1264,6 +1442,13 @@ def _project_script(project: str | None) -> str:
         if (event.target && event.target.id === 'xtl-project-export') exportProject();
         if (event.target && event.target.id === 'xtl-project-open-exports') openExports();
         if (event.target && event.target.id === 'xtl-project-reload') reloadProject();
+        if (event.target && event.target.id === 'xtl-import-project') importProject();
+      });
+      document.addEventListener('input', event => {
+        if (event.target && event.target.id === 'xtl-import-plugin-path') {
+          const name = byId('xtl-import-project-name');
+          if (name && !name.value.trim()) name.value = projectNameFromPath(event.target.value);
+        }
       });
       if (!window.__xtlCloseGuardBound) {
         window.__xtlCloseGuardBound = true;
@@ -1295,12 +1480,15 @@ def _entries_html(project: str | None) -> str:
       <span class="xtl-label">文本字段</span><select class="xtl-select" data-marker="select-entries-field" id="xtl-entries-field"><option value="">全部</option><option value="FULL">名称文本（FULL）</option><option value="DESC">说明文本（DESC）</option></select>
       <span class="xtl-label">状态</span><select class="xtl-select" data-marker="select-entries-status" id="xtl-entries-status"><option value="">全部</option><option value="untranslated">未翻译</option><option value="translated">已翻译</option><option value="partial">需复查</option><option value="locked">锁定</option></select>
       <input class="xtl-input" data-marker="field-entries-search" id="xtl-entries-search" placeholder="搜索原文、译文或条目编号">
+      <button class="xtl-btn" data-marker="btn-entries-submit-queue" id="xtl-entries-submit-queue">提交到批量翻译队列</button>
     </div>
+    <div class="xtl-help" data-marker="status-entries-queue" id="xtl-entries-queue-status">勾选条目后可以交给批量队列；不会直接调用 AI，下一步仍需翻译助手生成提示词并让你预览。</div>
+    <details class="xtl-help xtl-tech-details" id="xtl-entries-queue-tech" hidden><summary>技术详情</summary><code id="xtl-entries-queue-command"></code></details>
     <div class="xtl-workbench xtl-entries-workbench">
       <div class="xtl-panel" data-marker="panel-entries-table">
         <div class="xtl-panel-title">条目列表</div>
         <div class="xtl-panel-body">
-          <table class="xtl-table xtl-entries-table" id="xtl-entries-table"><thead><tr><th>类型</th><th>字段</th><th>状态</th><th>原文</th><th>译文</th></tr></thead><tbody><tr><td colspan="5">正在读取条目...</td></tr></tbody></table>
+          <table class="xtl-table xtl-entries-table" id="xtl-entries-table"><thead><tr><th>选择</th><th>状态</th><th>原文</th><th>译文</th></tr></thead><tbody><tr><td colspan="4">正在读取条目...</td></tr></tbody></table>
         </div>
       </div>
       <div class="xtl-panel" data-marker="panel-entry-detail">
@@ -1310,6 +1498,7 @@ def _entries_html(project: str | None) -> str:
           <div>
             <div class="xtl-help">译文：可以手动修正 AI 结果。普通玩家只需要改这里。</div>
             <textarea class="xtl-entry-text" data-marker="field-entry-dest" id="xtl-entry-dest">{dest}</textarea>
+            <div class="xtl-help">快速翻译会真实调用当前 AI 账号，可能产生少量费用；结果只写入本项目记忆库，不会修改原始 MOD。复杂术语建议走批量翻译并先预览提示词。</div>
             <div class="xtl-toolbar" style="margin-top: 10px">
               <span class="xtl-label">保存状态</span>
               <select class="xtl-select" id="xtl-entry-status">
@@ -1319,6 +1508,7 @@ def _entries_html(project: str | None) -> str:
                 <option value="untranslated" {"selected" if status_value == "untranslated" else ""}>未翻译</option>
               </select>
               <button class="xtl-btn primary" data-marker="btn-entry-save" id="xtl-entry-save">保存修正</button>
+              <button class="xtl-btn" data-marker="btn-entry-quick-translate" id="xtl-entry-quick-translate">快速翻译当前条目</button>
               <button class="xtl-btn" data-marker="btn-entry-restore" id="xtl-entry-restore">恢复当前译文</button>
               <button class="xtl-btn" data-marker="btn-entry-lock" id="xtl-entry-lock">标记不翻译</button>
               <button class="xtl-btn danger" data-marker="btn-entry-orphan" id="xtl-entry-clear">清空译文</button>
@@ -1400,8 +1590,14 @@ def _prompt_html(project: str | None) -> str:
     else:
         history_options = "<option>暂无历史预览</option>"
     options = f"<option>{_esc(first_label)}</option>"
-    first_glossary = _format_glossary_panel(current_preview.glossary_subset) if current_preview else (
-        _format_glossary_panel(planned[0]["glossary_subset"]) if planned else "预览后，这里会显示本次用到的专有名词。"
+    first_glossary = _format_glossary_panel_html(
+        current_preview.glossary_evidence,
+        current_preview.glossary_subset,
+    ) if current_preview else (
+        _format_glossary_panel_html(
+            planned[0].get("glossary_evidence", []),
+            planned[0]["glossary_subset"],
+        ) if planned else "<div class=\"xtl-empty\">预览后，这里会显示本次用到的专有名词。</div>"
     )
     first_dnt = _format_dnt_panel(current_preview.do_not_translate) if current_preview else (
         _format_dnt_panel(planned[0]["do_not_translate"]) if planned else "这里会列出人名、地名、缩写等不应翻译的词。"
@@ -1437,7 +1633,7 @@ def _prompt_html(project: str | None) -> str:
           <p class="xtl-help">这里用于回看最近生成过的提示词。只有上方显示“等待确认”的当前批次，才可以点击确认发送给 AI。</p>
         </details>
         <div class="xtl-bottom-split">
-          <div class="xtl-panel" data-marker="panel-glossary-subset"><div class="xtl-panel-title">本次用到的专有名词</div><div class="xtl-panel-body" id="xtl-glossary">{_esc(first_glossary)}</div></div>
+          <div class="xtl-panel" data-marker="panel-glossary-subset"><div class="xtl-panel-title">本次用到的专有名词</div><div class="xtl-panel-body" id="xtl-glossary">{first_glossary}</div></div>
           <div class="xtl-panel" data-marker="panel-dnt-list"><div class="xtl-panel-title">不要翻译的词</div><div class="xtl-panel-body" id="xtl-dnt">{_esc(first_dnt)}</div></div>
         </div>
       </div>
@@ -1454,13 +1650,81 @@ def _prompt_html(project: str | None) -> str:
     """
 
 
-def _format_glossary_panel(items: list[dict[str, Any]]) -> str:
-    lines = [
-        f"{item.get('source') or item.get('term') or ''} -> {item.get('target') or ''}"
-        for item in items
-        if item.get("source") or item.get("term")
+def _format_glossary_panel_html(
+    evidence: list[dict[str, Any]],
+    fallback_items: list[dict[str, Any]],
+) -> str:
+    if not evidence:
+        lines = [
+            f"{_esc(item.get('source') or item.get('term') or '')} -&gt; {_esc(item.get('target') or '')}"
+            for item in fallback_items
+            if item.get("source") or item.get("term")
+        ]
+        return "<br>".join(lines) or '<div class="xtl-empty">本次没有命中的专有名词。</div>'
+
+    included = [item for item in evidence if item.get("included")]
+    deduped = [
+        item
+        for item in evidence
+        if not item.get("included") and str(item.get("excluded_reason") or "").startswith("dedupe")
     ]
-    return "\n".join(lines) or "本次没有命中的专有名词。"
+    omitted = [
+        item
+        for item in evidence
+        if not item.get("included") and not str(item.get("excluded_reason") or "").startswith("dedupe")
+    ]
+    return "\n".join(
+        [
+            _evidence_section_html("已注入提示词", included, open_section=True),
+            _evidence_section_html("被去重或覆盖", deduped),
+            _evidence_section_html("因预算省略", omitted),
+        ]
+    )
+
+
+def _evidence_section_html(title: str, items: list[dict[str, Any]], *, open_section: bool = False) -> str:
+    open_attr = " open" if open_section else ""
+    if not items:
+        body = '<div class="xtl-empty">没有项目。</div>'
+    else:
+        rows = [
+            (
+                "<li>"
+                f"<b>{_esc(item.get('source') or item.get('term') or '')}</b>"
+                f" -&gt; {_esc(item.get('target') or '')}"
+                f"<div class=\"xtl-help\">{_esc(_evidence_reason(item))}</div>"
+                "</li>"
+            )
+            for item in items[:80]
+        ]
+        if len(items) > 80:
+            rows.append(f'<li class="xtl-help">还有 {len(items) - 80} 条没有展开显示。</li>')
+        body = f"<ul class=\"xtl-evidence-list\">{''.join(rows)}</ul>"
+    return f"<details class=\"xtl-evidence-section\"{open_attr}><summary>{_esc(title)}（{len(items)}）</summary>{body}</details>"
+
+
+def _evidence_reason(item: dict[str, Any]) -> str:
+    matched_by = str(item.get("matched_by") or "")
+    matched_text = str(item.get("matched_text") or item.get("source") or item.get("term") or "")
+    scope = str(item.get("scope") or "")
+    excluded = str(item.get("excluded_reason") or "")
+    if excluded == "budget_cap":
+        return "命中了，但本批提示词空间有限，所以暂时没有注入。"
+    if excluded.startswith("dedupe"):
+        return "命中了，但和更高优先级或重复的术语合并了。"
+    if matched_by == "player_rule":
+        return "因为这是你设置的固定翻译偏好。"
+    if matched_by == "dnt_rule":
+        return "因为这是你设置的固定不翻译词。"
+    if matched_by == "alias_exact":
+        return f"因为本批文本出现了别名：{matched_text}。"
+    if matched_by == "normalized":
+        return f"因为本批文本出现了同一术语的大小写、空格或标点变体：{matched_text}。"
+    if matched_by == "rag":
+        return "因为本体/MOD 术语库判断它和本批文本相关。"
+    if scope == "do_not_translate":
+        return f"因为本批文本出现了需要保留原文的词：{matched_text}。"
+    return f"因为本批文本出现了：{matched_text}。"
 
 
 def _format_dnt_panel(items: list[str]) -> str:
@@ -1554,13 +1818,13 @@ def _glossary_html() -> str:
       <button class="xtl-btn" data-marker="tab-glossary-player" data-scope="player">我的翻译偏好</button>
       <button class="xtl-btn" data-marker="tab-glossary-dnt" data-scope="do_not_translate">不要翻译的词</button>
       <input class="xtl-input" data-marker="field-glossary-search" id="xtl-glossary-search" placeholder="搜索术语 / 译名 / 备注">
-      <button class="xtl-btn primary" data-marker="btn-add-glossary-entry" id="xtl-glossary-add">添加术语</button>
+      <button class="xtl-btn" data-marker="btn-add-glossary-entry" id="xtl-glossary-add" disabled>添加术语</button>
     </div>
     <div class="xtl-workbench xtl-glossary-workbench">
       <div class="xtl-panel" data-marker="panel-glossary-table">
         <div class="xtl-panel-title">专有名词表 <span class="xtl-detail-id" id="xtl-glossary-scope-title">游戏本体术语</span></div>
         <div class="xtl-panel-body">
-          <div class="xtl-help" data-marker="status-glossary-empty-vanilla" id="xtl-glossary-message">这些词表会交给 AI，用来统一译名、保留人名地名和避免把缩写乱翻。游戏本体术语通常由工具从知识库自动整理。</div>
+          <div class="xtl-help" data-marker="status-glossary-empty-vanilla" id="xtl-glossary-message">这些词表会交给 AI，用来统一译名、保留人名地名和避免把缩写乱翻。游戏本体术语通常由工具从知识库自动整理，生成提示词时会自动挑相关术语。</div>
           <table class="xtl-table xtl-glossary-table" id="xtl-glossary-table">
             <thead><tr><th>原文</th><th>译名/规则</th><th>类别</th><th>来源</th><th>操作</th></tr></thead>
             <tbody><tr><td colspan="5">正在读取术语...</td></tr></tbody>
@@ -1853,8 +2117,9 @@ def _glossary_script() -> str:
         player: '我的翻译偏好',
         do_not_translate: '不要翻译的词',
       };
-      const glossaryIntro = '这些词表会交给 AI，用来统一译名、保留人名地名和避免把缩写乱翻。';
+      const glossaryIntro = '这些词表会交给 AI，用来统一译名、保留人名地名和避免把缩写乱翻。游戏本体术语会在生成提示词时自动挑相关条目，不需要手动添加。';
       const writableScopes = new Set(['player', 'do_not_translate']);
+      const activeProject = new URLSearchParams(window.location.search).get('project') || '';
       let currentScope = 'vanilla';
       let entries = [];
       let editingRecordId = null;
@@ -1939,6 +2204,7 @@ def _glossary_script() -> str:
       }
       async function loadGlossary() {
         const params = new URLSearchParams({scope: currentScope});
+        if (activeProject) params.set('project', activeProject);
         const search = byId('xtl-glossary-search')?.value || '';
         if (search.trim()) params.set('search', search.trim());
         const data = await api(`/api/glossary?${params}`);
@@ -2378,10 +2644,49 @@ def _prompt_script(project: str | None) -> str:
       function shortId(value) {
         return String(value || '').slice(0, 8);
       }
-      function fillSidePanels(glossaryItems, dntItems) {
+      function esc(value) {
+        return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+      }
+      function evidenceReason(item) {
+        const matchedBy = String(item.matched_by || '');
+        const matchedText = String(item.matched_text || item.source || item.term || '');
+        const scope = String(item.scope || '');
+        const excluded = String(item.excluded_reason || '');
+        if (excluded === 'budget_cap') return '命中了，但本批提示词空间有限，所以暂时没有注入。';
+        if (excluded.startsWith('dedupe')) return '命中了，但和更高优先级或重复的术语合并了。';
+        if (matchedBy === 'player_rule') return '因为这是你设置的固定翻译偏好。';
+        if (matchedBy === 'dnt_rule') return '因为这是你设置的固定不翻译词。';
+        if (matchedBy === 'alias_exact') return `因为本批文本出现了别名：${matchedText}。`;
+        if (matchedBy === 'normalized') return `因为本批文本出现了同一术语的大小写、空格或标点变体：${matchedText}。`;
+        if (matchedBy === 'rag') return '因为本体/MOD 术语库判断它和本批文本相关。';
+        if (scope === 'do_not_translate') return `因为本批文本出现了需要保留原文的词：${matchedText}。`;
+        return `因为本批文本出现了：${matchedText}。`;
+      }
+      function evidenceSection(title, items, open = false) {
+        const rows = (items || []).slice(0, 80).map(item => `<li><b>${esc(item.source || item.term || '')}</b> → ${esc(item.target || '')}<div class="xtl-help">${esc(evidenceReason(item))}</div></li>`);
+        if ((items || []).length > 80) rows.push(`<li class="xtl-help">还有 ${(items || []).length - 80} 条没有展开显示。</li>`);
+        const body = rows.length ? `<ul class="xtl-evidence-list">${rows.join('')}</ul>` : '<div class="xtl-empty">没有项目。</div>';
+        return `<details class="xtl-evidence-section"${open ? ' open' : ''}><summary>${esc(title)}（${(items || []).length}）</summary>${body}</details>`;
+      }
+      function renderGlossaryPanel(glossaryItems, evidenceItems) {
+        const evidence = Array.isArray(evidenceItems) ? evidenceItems : [];
+        if (evidence.length) {
+          const included = evidence.filter(item => item.included);
+          const deduped = evidence.filter(item => !item.included && String(item.excluded_reason || '').startsWith('dedupe'));
+          const omitted = evidence.filter(item => !item.included && !String(item.excluded_reason || '').startsWith('dedupe'));
+          return [
+            evidenceSection('已注入提示词', included, true),
+            evidenceSection('被去重或覆盖', deduped),
+            evidenceSection('因预算省略', omitted),
+          ].join('');
+        }
+        const lines = (glossaryItems || []).map(x => `${esc(x.source || x.term || '')} → ${esc(x.target || '')}`).filter(Boolean);
+        return lines.length ? lines.join('<br>') : '<div class="xtl-empty">本次没有命中的专有名词。</div>';
+      }
+      function fillSidePanels(glossaryItems, dntItems, evidenceItems = []) {
         const glossary = document.getElementById('xtl-glossary');
         const dnt = document.getElementById('xtl-dnt');
-        if (glossary) glossary.textContent = (glossaryItems || []).map(x => `${x.source || x.term || ''} → ${x.target || ''}`).join('\\n') || '本次没有命中的专有名词。';
+        if (glossary) glossary.innerHTML = renderGlossaryPanel(glossaryItems || [], evidenceItems || []);
         if (dnt) dnt.textContent = (dntItems || []).join('\\n') || '本次没有额外的“不要翻译”词。';
       }
       function setPreviewControls(enabled) {
@@ -2407,7 +2712,7 @@ def _prompt_script(project: str | None) -> str:
         }
         setPreviewStatus('这是历史预览；不会发送给 AI。');
         if (promptBody()) promptBody().value = item.prompt || '';
-        fillSidePanels(item.glossary_subset || [], item.do_not_translate || []);
+        fillSidePanels(item.glossary_subset || [], item.do_not_translate || [], item.glossary_evidence || []);
       }
       function hydratePlannedSelect() {
         if (planned.length === 0) return;
@@ -2440,7 +2745,7 @@ def _prompt_script(project: str | None) -> str:
         }
         setPreviewStatus('等待你确认。');
         if (promptBody()) promptBody().value = msg.system_prompt || '';
-        fillSidePanels(msg.glossary_subset || [], msg.do_not_translate || []);
+        fillSidePanels(msg.glossary_subset || [], msg.do_not_translate || [], msg.glossary_evidence || []);
       }
       async function reconcilePendingPreview() {
         try {
@@ -2839,6 +3144,7 @@ def _entries_script(project: str | None) -> str:
       const project = __PROJECT__;
       let entries = [];
       let selected = null;
+      let checkedRows = new Set();
       let savedDest = '';
       let savedStatus = 'untranslated';
       let searchTimer = null;
@@ -2862,8 +3168,15 @@ def _entries_script(project: str | None) -> str:
       const byId = id => document.getElementById(id);
       const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
       function api(path, options = {}) {
-        return fetch(path, {credentials: 'same-origin', ...options}).then(res => {
-          if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+        return fetch(path, {credentials: 'same-origin', ...options}).then(async res => {
+          if (!res.ok) {
+            let detail = `${path} -> ${res.status}`;
+            try {
+              const data = await res.json();
+              detail = typeof data.detail === 'string' ? data.detail : (data.detail?.message || detail);
+            } catch {}
+            throw new Error(detail);
+          }
           return res.json();
         });
       }
@@ -2886,23 +3199,31 @@ def _entries_script(project: str | None) -> str:
         el.textContent = text;
         el.className = `xtl-help ${tone}`;
       }
+      function setQueueStatus(text, tone = '') {
+        const el = byId('xtl-entries-queue-status');
+        if (!el) return;
+        el.textContent = text;
+        el.className = `xtl-help ${tone}`;
+      }
       function renderTable() {
         const body = document.querySelector('#xtl-entries-table tbody');
         if (!body) return;
         if (!entries.length) {
-          body.innerHTML = '<tr><td colspan="5">没有匹配的条目。换个筛选条件试试。</td></tr>';
+          body.innerHTML = '<tr><td colspan="4">没有匹配的条目。换个筛选条件试试。</td></tr>';
           return;
         }
         body.innerHTML = entries.map(entry => {
           const active = selected && selected.row_id === entry.row_id ? ' class="active"' : '';
           const sigLabel = signatureLabels[entry.signature] ? `${signatureLabels[entry.signature]}（${entry.signature}）` : entry.signature;
           const fieldLabel = fieldLabels[entry.field] ? `${fieldLabels[entry.field]}（${entry.field}）` : entry.field;
+          const checked = checkedRows.has(entry.row_id) ? ' checked' : '';
+          const disabled = entry.status === 'untranslated' ? '' : ' disabled';
+          const meta = `类型：${sigLabel}；字段：${fieldLabel}；条目编号：${entry.edid || entry.row_id}`;
           return `<tr${active} data-row-id="${esc(entry.row_id)}" data-marker="row-entries-${esc(entry.row_id)}">
-            <td title="条目编号：${esc(entry.edid || entry.row_id)}"><b>${esc(sigLabel)}</b></td>
-            <td>${esc(fieldLabel)}</td>
-            <td><span class="xtl-status-pill ${esc(entry.status)}">${esc(statusLabels[entry.status] || entry.status)}</span></td>
-            <td>${esc(entry.source)}</td>
-            <td>${esc(entry.dest || '')}</td>
+            <td><input type="checkbox" class="xtl-entry-check" data-row-id="${esc(entry.row_id)}"${checked}${disabled} title="勾选后可提交到批量翻译队列"></td>
+            <td title="${esc(meta)}"><span class="xtl-status-pill ${esc(entry.status)}">${esc(statusLabels[entry.status] || entry.status)}</span></td>
+            <td title="${esc(meta)}">${esc(entry.source)}</td>
+            <td title="${esc(meta)}">${esc(entry.dest || '')}</td>
           </tr>`;
         }).join('');
       }
@@ -2920,6 +3241,8 @@ def _entries_script(project: str | None) -> str:
       async function loadEntries({keepSelection = false} = {}) {
         if (!project) return;
         entries = await api(entryUrl());
+        const visibleIds = new Set(entries.map(entry => entry.row_id));
+        checkedRows = new Set([...checkedRows].filter(rowId => visibleIds.has(rowId)));
         let next = null;
         if (keepSelection && selected) next = entries.find(entry => entry.row_id === selected.row_id) || null;
         renderTable();
@@ -2951,9 +3274,83 @@ def _entries_script(project: str | None) -> str:
         renderDetail(updated);
         setSaveStatus('已保存到本项目记忆库，并写入手动编辑记录。', 'good');
       }
+      async function quickTranslateEntry() {
+        if (!selected) {
+          setSaveStatus('先选择一个条目。', 'danger');
+          return;
+        }
+        if (!window.confirm('将使用当前 AI 账号快速翻译 1 条文本，可能产生少量费用。结果只写入本项目记忆库，不会修改原始 MOD。继续？')) {
+          setSaveStatus('已取消快速翻译，没有调用 AI。');
+          return;
+        }
+        const button = byId('xtl-entry-quick-translate');
+        if (button) button.disabled = true;
+        setSaveStatus('正在使用当前 AI 账号快速翻译当前条目...', '');
+        try {
+          const response = await api(`/api/projects/${encodeURIComponent(project)}/entries/${encodeURIComponent(selected.row_id)}/quick-translate`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({apply: true}),
+          });
+          const updated = response.entry;
+          selected = updated;
+          const index = entries.findIndex(entry => entry.row_id === updated.row_id);
+          if (index >= 0) entries[index] = updated;
+          renderDetail(updated);
+          const cost = response.cost_usd == null ? '' : ` 费用约 $${Number(response.cost_usd).toFixed(6)}。`;
+          const validation = response.validation && response.validation.failures && response.validation.failures.length ? ' 已标记为需复查。' : '';
+          setSaveStatus(`快速翻译已写入本项目记忆库：${response.profile || '当前账号'}。${cost}${validation}`, response.validation && response.validation.failures && response.validation.failures.length ? '' : 'good');
+        } catch (error) {
+          setSaveStatus(`快速翻译失败：${error.message || error} 请到“账号”页检查 API Key、模型和余额，或稍后重试。`, 'danger');
+        } finally {
+          if (button) button.disabled = false;
+        }
+      }
+      async function submitBatchQueue() {
+        const rowIds = [...checkedRows];
+        if (!rowIds.length) {
+          setQueueStatus('请先在左侧列表勾选至少一个未翻译条目。', 'danger');
+          return;
+        }
+        const button = byId('xtl-entries-submit-queue');
+        if (button) button.disabled = true;
+        setQueueStatus('正在写入批量队列请求...', '');
+        try {
+          const response = await api(`/api/projects/${encodeURIComponent(project)}/batch-queue`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({row_ids: rowIds}),
+          });
+          checkedRows.clear();
+          renderTable();
+          const skipped = response.skipped_count ? `，跳过 ${response.skipped_count} 个非未翻译条目` : '';
+          const tech = byId('xtl-entries-queue-tech');
+          const command = byId('xtl-entries-queue-command');
+          if (tech && command) {
+            command.textContent = response.command || '';
+            tech.hidden = !response.command;
+          }
+          setQueueStatus(`已加入待翻译清单 ${response.queued_count} 个条目${skipped}，还没有开始计费。下一步请让翻译助手生成提示词；如果开启了预览，你会先在“提示词”页确认后才会开始批量翻译。`, 'good');
+        } catch (error) {
+          setQueueStatus(`提交失败：${error.message || error}`, 'danger');
+        } finally {
+          if (button) button.disabled = false;
+        }
+      }
       document.addEventListener('click', event => {
+        if (event.target && event.target.classList && event.target.classList.contains('xtl-entry-check')) {
+          const rowId = event.target.getAttribute('data-row-id');
+          if (rowId && event.target.checked) checkedRows.add(rowId);
+          if (rowId && !event.target.checked) checkedRows.delete(rowId);
+          setQueueStatus(checkedRows.size ? `已勾选 ${checkedRows.size} 个未翻译条目。` : '勾选条目后可以交给批量队列；不会直接调用 AI，下一步仍需翻译助手生成提示词并让你预览。');
+          event.stopPropagation();
+          return;
+        }
         const row = event.target && event.target.closest ? event.target.closest('#xtl-entries-table tbody tr[data-row-id]') : null;
         if (row) selectRow(row.getAttribute('data-row-id'));
+        if (event.target && event.target.id === 'xtl-entries-submit-queue') {
+          submitBatchQueue();
+        }
         if (event.target && event.target.id === 'xtl-entry-save') {
           saveEntry({
             dest: byId('xtl-entry-dest')?.value || '',
@@ -2965,6 +3362,9 @@ def _entries_script(project: str | None) -> str:
           if (byId('xtl-entry-dest')) byId('xtl-entry-dest').value = savedDest;
           if (byId('xtl-entry-status')) byId('xtl-entry-status').value = savedStatus;
           setSaveStatus('已恢复为当前保存的译文，还没有再次写入。');
+        }
+        if (event.target && event.target.id === 'xtl-entry-quick-translate') {
+          quickTranslateEntry();
         }
         if (event.target && event.target.id === 'xtl-entry-lock' && selected) {
           if (!window.confirm('这会让该文本保持原文，并标记为不需要翻译。不会修改原始 MOD 文件。确定吗？')) return;
@@ -2995,6 +3395,405 @@ def _entries_script(project: str | None) -> str:
 
 def _theme_file(name: str) -> str:
     return (Path(__file__).parent / "themes" / name).read_text(encoding="utf-8")
+
+
+def _create_batch_queue(project: str, row_ids: list[str]) -> dict[str, Any]:
+    selected_ids = list(dict.fromkeys(item.strip() for item in row_ids if isinstance(item, str) and item.strip()))
+    if not selected_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先勾选至少一个条目。")
+    if len(selected_ids) > 500:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "一次最多提交 500 个条目到批量队列。")
+
+    project_root = paths.project_root(project)
+    data = _project_toml_data(project_root)
+    raw_project_block = data.get("project")
+    project_block: dict[str, Any] = raw_project_block if isinstance(raw_project_block, dict) else {}
+    target_lang = str(project_block.get("target_lang") or "zh-cn").strip() or "zh-cn"
+    game = str(project_block.get("game") or "").strip()
+    cfg = _load_profiles_for_api()
+    profile_name = cfg.active or next(iter(cfg.profiles), "")
+
+    conn = open_memory_db(project_root)
+    try:
+        placeholders = ",".join("?" for _ in selected_ids)
+        rows = conn.execute(
+            f"""
+            SELECT row_id, plugin, formid, edid, signature, field, source, dest, status
+            FROM units
+            WHERE row_id IN ({placeholders})
+            ORDER BY signature, field, formid, index_n
+            """,
+            selected_ids,
+        ).fetchall()
+    finally:
+        conn.close()
+    found_ids = {str(row[0]) for row in rows}
+    missing = [row_id for row_id in selected_ids if row_id not in found_ids]
+    if missing:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"有 {len(missing)} 个勾选条目已经不存在，请刷新条目页。")
+    untranslated = [row for row in rows if str(row[8]) == "untranslated"]
+    if not untranslated:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "勾选的条目都不是“未翻译”状态，不会加入批量队列。")
+    queued_ids = [str(row[0]) for row in untranslated]
+    queue_id = f"queue-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+    queue_dir = project_root / "batches" / "selection-queue"
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    command = _batch_queue_command(
+        project=project,
+        queue_id=queue_id,
+        target_lang=target_lang,
+        profile_name=profile_name,
+        game=game,
+    )
+    payload = {
+        "queue_id": queue_id,
+        "project": project,
+        "created_at": datetime.now(UTC).isoformat(),
+        "row_ids": queued_ids,
+        "skipped_non_untranslated": [str(row[0]) for row in rows if str(row[8]) != "untranslated"],
+        "target_lang": target_lang,
+        "game": game,
+        "profile": profile_name,
+        "recommended_cli": command,
+        "note": "GUI 只记录玩家勾选的条目。下一步仍需翻译助手生成提示词，并按设置交由你预览审批。",
+        "entries": [
+            {
+                "row_id": str(row[0]),
+                "plugin": str(row[1]),
+                "formid": f"0x{int(row[2]):08X}",
+                "edid": row[3],
+                "signature": str(row[4]),
+                "field": str(row[5]),
+                "source": str(row[6]),
+                "status": str(row[8]),
+            }
+            for row in untranslated[:50]
+        ],
+    }
+    queue_path = queue_dir / f"{queue_id}.json"
+    queue_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "ok": True,
+        "queue_id": queue_id,
+        "queue_path": str(queue_path),
+        "queued_count": len(queued_ids),
+        "skipped_count": len(rows) - len(untranslated),
+        "command": command,
+        "message": "已把勾选条目加入待翻译清单。下一步请让翻译助手生成提示词，并等待你预览确认。",
+    }
+
+
+def _batch_queue_command(
+    *,
+    project: str,
+    queue_id: str,
+    target_lang: str,
+    profile_name: str,
+    game: str,
+) -> str:
+    parts = [
+        "xtl",
+        "batch",
+        "plan",
+        project,
+        "--queue",
+        queue_id,
+        "--register",
+        "ui_label",
+        "--target-lang",
+        target_lang,
+    ]
+    if profile_name:
+        parts.extend(["--profile", profile_name])
+    if game:
+        parts.extend(["--game-lore-world", game, "--mod-name", project])
+    return " ".join(_quote_cli_part(part) for part in parts)
+
+
+def _quote_cli_part(part: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9_./:=@+-]+", part):
+        return part
+    return "'" + part.replace("'", "''") + "'"
+
+
+async def _quick_translate_entry(project: str, row_id: str) -> dict[str, Any]:
+    from bgs_translator.cli.edit import _append_audit, _get_unit
+    from bgs_translator.pipeline.batcher import Batch
+    from bgs_translator.pipeline.clients.base import build_client_for
+    from bgs_translator.pipeline.mask import build_masked_unit, unmask_dest
+    from bgs_translator.pipeline.validator import validate_item
+
+    cfg = _load_profiles_for_api()
+    profile = get_active_profile(cfg)
+    project_root = paths.project_root(project)
+    project_data = _project_toml_data(project_root)
+    raw_project_block = project_data.get("project")
+    project_block: dict[str, Any] = raw_project_block if isinstance(raw_project_block, dict) else {}
+    game = str(project_block.get("game") or "Bethesda Game Studios").strip() or "Bethesda Game Studios"
+    target_lang = str(project_block.get("target_lang") or "zh-cn").strip() or "zh-cn"
+    source_plugin = str(project_block.get("source_plugin_path") or "").strip()
+    mod_name = Path(source_plugin).stem if source_plugin else project
+
+    conn = open_memory_db(project_root)
+    try:
+        before = _get_unit(conn, row_id)
+        if before is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"entry not found: {row_id}")
+        unit = _translation_unit_from_entry(before)
+        masked = build_masked_unit(unit)
+        if masked.skip_llm:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"这条文本不适合交给 AI 快速翻译：{masked.skip_reason}")
+        batch_id = f"quick-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{row_id[:8]}"
+        batch = Batch(
+            batch_id=batch_id,
+            items=[masked],
+            parent_context_summary=None,
+            glossary_subset=[],
+            do_not_translate=[],
+        )
+        system_prompt = _quick_translate_prompt(game=game, mod_name=mod_name, target_lang=target_lang)
+        response = await _quick_translate_with_profile(
+            profile=profile,
+            batch=batch,
+            system_prompt=system_prompt,
+            build_client_for=build_client_for,
+        )
+        dest_masked = _quick_translate_dest_from_response(response.items)
+        if not dest_masked and profile.json_mode == "json_schema":
+            fallback_profile = profile.model_copy(update={"json_mode": "json_object"})
+            response = await _quick_translate_with_profile(
+                profile=fallback_profile,
+                batch=batch,
+                system_prompt=system_prompt,
+                build_client_for=build_client_for,
+            )
+            dest_masked = _quick_translate_dest_from_response(response.items)
+        validation = validate_item(masked, dest_masked, [], ["utf-8"])
+        dest = unmask_dest(dest_masked, masked.mask_map, masked.mcm_token_prefix)
+        if not dest.strip():
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "AI 返回了空译文，已取消写入。请稍后重试。")
+        if not validation.ok:
+            reasons = "；".join(failure.reason for failure in validation.failures) or "校验未通过"
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"AI 返回内容未通过校验，已取消写入：{reasons}")
+        new_status = "translated" if not validation.failures else "partial"
+        update_unit_translation(
+            conn,
+            row_id=row_id,
+            dest=dest,
+            status=new_status,
+            sparams=_sparams_for_entry_status(new_status),
+            via_llm=True,
+            profile_used=profile.name,
+            sdk_via=response.via,
+            cost_estimate_usd=response.cost_usd,
+            cost_exact=response.cost_exact,
+            retry_count=0,
+            last_batch_id=batch_id,
+        )
+        after = _get_unit(conn, row_id)
+        if after is None:
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"entry disappeared: {row_id}")
+        _append_audit(
+            project_root,
+            row_id=row_id,
+            before=before,
+            after=after,
+            reason=f"Web Entries quick translate via {profile.name}",
+            operation="quick-translate",
+        )
+    finally:
+        conn.close()
+
+    return {
+        "ok": True,
+        "entry": after,
+        "profile": profile.name,
+        "model": profile.model,
+        "batch_id": batch_id,
+        "cost_usd": response.cost_usd,
+        "cost_exact": response.cost_exact,
+        "request_id": response.request_id,
+        "validation": {
+            "ok": validation.ok,
+            "failures": [failure.model_dump(mode="json") for failure in validation.failures],
+        },
+    }
+
+
+async def _quick_translate_with_profile(
+    *,
+    profile: ProviderProfile,
+    batch: Any,
+    system_prompt: str,
+    build_client_for: Callable[[ProviderProfile], Any],
+) -> Any:
+    client = build_client_for(profile)
+    try:
+        return await client.translate_batch(batch, system_prompt)
+    finally:
+        await client.aclose()
+
+
+def _quick_translate_dest_from_response(items: dict[str, str]) -> str:
+    dest_masked = items.get("I1", "")
+    if not dest_masked and len(items) == 1:
+        dest_masked = next(iter(items.values()))
+    return dest_masked
+
+
+def _translation_unit_from_entry(entry: dict[str, Any]) -> Any:
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+
+    return TranslationUnit(
+        plugin=str(entry["plugin"]),
+        formid=int(str(entry["formid"]), 16),
+        formid_sanitized=int(str(entry["formid_sanitized"]), 16),
+        edid=entry.get("edid"),
+        signature=str(entry["signature"]),
+        field=str(entry["field"]),
+        source=str(entry["source"]),
+        index_n=int(entry.get("index") or 0),
+        index_max=int(entry.get("index_max") or 0),
+        list_index=int(entry.get("list_index") or 0),
+        strid=int(entry.get("strid") or 0),
+    )
+
+
+def _quick_translate_prompt(*, game: str, mod_name: str, target_lang: str) -> str:
+    language = "简体中文" if target_lang.casefold() in {"zh-cn", "zhhans", "zh-hans"} else target_lang
+    return (
+        f"你正在翻译 {game} 的 MOD「{mod_name}」。\n"
+        f"把提供的英文文本翻译成{language}，面向普通玩家，表达自然、简洁。\n"
+        "保持所有占位符、变量、换行、尖括号标签、{{P0}} 这类标记完全不变。\n"
+        "必须翻译并返回用户消息里的每个编号，例如 I1；不要省略任何条目。\n"
+        "不要添加解释，不要补充原文没有的信息。只返回要求的 JSON 对象。"
+    )
+
+
+def _sparams_for_entry_status(status_value: str) -> int:
+    from bgs_translator.sst.status import SStrParam
+
+    mapping = {
+        "translated": SStrParam.TRANSLATED,
+        "partial": SStrParam.INCOMPLETE_TRANS,
+        "locked": SStrParam.LOCKED_TRANS,
+        "untranslated": SStrParam.NONE,
+    }
+    return int(mapping.get(status_value, SStrParam.NONE))
+
+
+def _import_project_from_plugin(payload: ProjectImportRequest) -> dict[str, Any]:
+    project_name = payload.project_name.strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{1,63}", project_name):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "项目名只能使用字母、数字、点、下划线和横线，长度 2-64。")
+
+    plugin = Path(payload.plugin_path).expanduser()
+    if plugin.suffix.casefold() not in {".esp", ".esm", ".esl"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请选择 .esp / .esm / .esl 文件。")
+    if not plugin.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"找不到这个 MOD 文件：{plugin}")
+
+    project_root = paths.project_root(project_name)
+    if project_root.exists() and any(project_root.iterdir()):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"项目 {project_name} 已存在，请换一个项目名。")
+
+    header = _read_tes4_header_for_import(plugin)
+    candidates = detect_game_from_header(header.form_version, header.masters)
+    selected_game = payload.game.strip() if isinstance(payload.game, str) and payload.game.strip() else None
+    if selected_game is None:
+        if len(candidates) != 1:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                {
+                    "code": "ambiguous_game",
+                    "message": "无法只根据文件头判断这是哪个游戏的 MOD，请在导入框里选择游戏。",
+                    "form_version": header.form_version,
+                    "candidates": candidates,
+                },
+            )
+        selected_game = candidates[0]
+
+    try:
+        schema = get_schema_for_game(selected_game)
+    except KeyError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"暂不支持这个游戏：{selected_game}") from exc
+
+    strings_status = _localized_strings_status(plugin, header.is_localized, payload.source_lang)
+    if header.is_localized and not strings_status["found"]:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            {
+                "code": "missing_strings",
+                "message": "这个插件使用本地化 Strings 文件，但旁边没有找到对应的 Strings/DLStrings/ILStrings。请把插件和 Strings 文件放在同一个 MOD 目录后再导入。",
+                "strings": strings_status,
+            },
+        )
+
+    created = False
+    try:
+        units = list(extract_translation_units(plugin, selected_game, schema=schema))
+        if not units:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "没有从这个插件里抽取到可翻译文本。")
+        for subdir in ["sources", "memory", "batches", "exports"]:
+            (project_root / subdir).mkdir(parents=True, exist_ok=True)
+        created = True
+        plugin_sha = _sha256(plugin)
+        _write_cache(project_root, plugin, units, plugin_sha, schema)
+        conn = open_memory_db(project_root)
+        try:
+            inserted = insert_units(conn, units)
+        finally:
+            conn.close()
+        _write_project_toml(
+            project_root,
+            name=project_name,
+            plugin=plugin,
+            plugin_sha=plugin_sha,
+            game=selected_game,
+            source_lang=payload.source_lang,
+            target_lang=payload.target_lang,
+        )
+    except Exception:
+        if created and project_root.exists():
+            shutil.rmtree(project_root)
+        raise
+
+    return {
+        "ok": True,
+        "project": project_name,
+        "project_root": str(project_root),
+        "game": selected_game,
+        "detected_candidates": candidates,
+        "form_version": header.form_version,
+        "source_plugin_path": str(plugin),
+        "plugin_type": plugin.suffix.upper().lstrip("."),
+        "is_esl": header.is_esl,
+        "is_localized": header.is_localized,
+        "strings": strings_status,
+        "units_extracted": inserted,
+        "signature_distribution": dict(Counter(unit.signature for unit in units)),
+    }
+
+
+def _read_tes4_header_for_import(plugin: Path) -> TES4Header:
+    walker = TES4FamilyWalker(plugin)
+    next(walker.walk(), None)
+    if walker.header is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "无法读取 TES4 文件头，请确认这是 Bethesda 插件文件。")
+    return walker.header
+
+
+def _localized_strings_status(plugin: Path, localized: bool, source_lang: str) -> dict[str, Any]:
+    slug = "english" if source_lang.casefold() == "en" else source_lang.casefold()
+    found = find_strings_files(plugin, slug)
+    required = ["STRINGS", "DLSTRINGS", "ILSTRINGS"] if localized else []
+    return {
+        "localized": localized,
+        "language_slug": slug,
+        "found": {kind: str(path) for kind, path in found.items()},
+        "missing": [kind for kind in required if kind not in found],
+        "required": required,
+    }
 
 
 def _list_projects() -> list[dict[str, Any]]:
@@ -3639,6 +4438,9 @@ def _planned_batches(project: str | None, *, limit: int = 80) -> list[dict[str, 
                     "glossary_subset": [
                         item for item in (batch.get("glossary_subset") or []) if isinstance(item, dict)
                     ],
+                    "glossary_evidence": [
+                        item for item in (batch.get("glossary_evidence") or []) if isinstance(item, dict)
+                    ],
                     "do_not_translate": [
                         str(item) for item in (batch.get("do_not_translate") or []) if str(item)
                     ],
@@ -3782,7 +4584,97 @@ def _glossary_scope_message(scope: str) -> str:
     return "这里放玩家自己的翻译偏好。新增后，下一次计划会把这些术语交给 AI 参考。"
 
 
-def _glossary_entries(*, scope: str, search: str | None = None) -> list[GlossaryEntry]:
+def _glossary_project_context(project: str | None) -> dict[str, str | None]:
+    if not project:
+        return {"project": None, "game": None, "target_lang": "zh-cn", "mod_slug": None}
+    project_root = paths.project_root(project)
+    data = _project_toml_data(project_root)
+    raw_project: object = data.get("project")
+    project_data: dict[str, Any] = raw_project if isinstance(raw_project, dict) else {}
+    game = str(project_data.get("game") or "").strip() or None
+    target_lang = str(project_data.get("target_lang") or "zh-cn").strip() or "zh-cn"
+    source_plugin_path = str(project_data.get("source_plugin_path") or "").strip()
+    mod_slug = Path(source_plugin_path).stem if source_plugin_path else None
+    return {"project": project, "game": game, "target_lang": target_lang, "mod_slug": mod_slug}
+
+
+def _sync_bundled_game_kb(game: str | None) -> list[str]:
+    if not game:
+        return []
+    bundled_root = _bundled_kb_packs_root()
+    if bundled_root is None:
+        return []
+    notes: list[str] = []
+    for source_dir in sorted(child for child in bundled_root.iterdir() if child.is_dir()):
+        manifest = _read_json_dict(source_dir / "manifest.json")
+        manifest_games = _manifest_games(manifest)
+        if game not in manifest_games:
+            continue
+        if not (_manifest_domains(manifest) & {"glossary", "localization", "translation"}):
+            continue
+        if not (source_dir / "kb.sqlite").is_file():
+            continue
+        dest_dir = paths.kb_packs_root() / source_dir.name
+        source_manifest = (source_dir / "manifest.json").read_text(encoding="utf-8") if (source_dir / "manifest.json").exists() else ""
+        dest_manifest = (dest_dir / "manifest.json").read_text(encoding="utf-8") if (dest_dir / "manifest.json").exists() else ""
+        if dest_dir.exists() and source_manifest == dest_manifest:
+            record_count = manifest.get("recordCount")
+            count_text = f"{record_count} 条" if isinstance(record_count, int) else "已安装"
+            notes.append(f"已连接 {game} 本体术语库：{count_text}。")
+            continue
+        tmp_dir = dest_dir.with_name(f".{dest_dir.name}.tmp")
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+        shutil.copytree(source_dir, tmp_dir)
+        if dest_dir.exists():
+            shutil.rmtree(dest_dir)
+        tmp_dir.rename(dest_dir)
+        record_count = manifest.get("recordCount")
+        count_text = f"{record_count} 条" if isinstance(record_count, int) else "已同步"
+        notes.append(f"已同步 {game} 本体术语库：{count_text}。")
+    return notes
+
+
+def _manifest_games(manifest: dict[str, Any]) -> set[str]:
+    games = manifest.get("games")
+    if isinstance(games, list):
+        return {str(item).strip() for item in games if str(item).strip()}
+    game = str(manifest.get("game") or "").strip()
+    return {game} if game else set()
+
+
+def _manifest_domains(manifest: dict[str, Any]) -> set[str]:
+    domains = manifest.get("domains")
+    if isinstance(domains, list):
+        return {str(item).strip() for item in domains if str(item).strip()}
+    return set()
+
+
+def _bundled_kb_packs_root() -> Path | None:
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "knowledge" / "bgs-kb" / "packs"
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def _read_json_dict(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _glossary_entries(
+    *,
+    scope: str,
+    search: str | None = None,
+    game: str | None = None,
+    target_lang: str | None = None,
+    mod_slug: str | None = None,
+    limit: int = 500,
+) -> list[GlossaryEntry]:
     reader = KBGlossaryReader()
     try:
         dbs = [*reader.pack_dbs, *reader.user_pack_dbs]
@@ -3791,33 +4683,91 @@ def _glossary_entries(*, scope: str, search: str | None = None) -> list[Glossary
     needle = (search or "").strip().casefold()
     deduped: dict[str, GlossaryEntry] = {}
     for pack_id, db_path in dbs:
-        for entry in _read_glossary_pack_entries(pack_id, db_path):
-            if entry.scope != scope:
-                continue
-            if needle:
-                haystack = " ".join(
-                    [entry.source, entry.target, *entry.source_aliases, *entry.target_aliases, entry.notes or ""]
-                ).casefold()
-                if needle not in haystack:
-                    continue
+        remaining = max(limit - len(deduped), 0)
+        if remaining <= 0:
+            break
+        for entry in _read_glossary_pack_entries(
+            pack_id,
+            db_path,
+            scope=scope,
+            search=needle,
+            game=game,
+            target_lang=target_lang,
+            mod_slug=mod_slug,
+            limit=remaining,
+        ):
             deduped[entry.record_id] = entry
     return sorted(deduped.values(), key=lambda entry: (entry.source.casefold(), entry.record_id))
 
 
-def _read_glossary_pack_entries(pack_id: str, db_path: Path) -> list[GlossaryEntry]:
+def _read_glossary_pack_entries(
+    pack_id: str,
+    db_path: Path,
+    *,
+    scope: str,
+    search: str,
+    game: str | None,
+    target_lang: str | None,
+    mod_slug: str | None,
+    limit: int,
+) -> list[GlossaryEntry]:
     if not db_path.exists():
         return []
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
+        where = ["r.kind = 'glossary-entry'", "ge.scope = ?"]
+        params: list[Any] = [scope]
+        if target_lang:
+            where.append("LOWER(ge.target_lang) = LOWER(?)")
+            params.append(target_lang)
+        if scope == "mod":
+            if mod_slug:
+                where.append("ge.scope_key = ?")
+                params.append(mod_slug)
+            else:
+                where.append("ge.scope_key IS NULL")
+        if game:
+            where.append(
+                """
+                (
+                    NOT EXISTS (SELECT 1 FROM record_games rg_any WHERE rg_any.record_id = ge.record_id)
+                    OR EXISTS (
+                        SELECT 1 FROM record_games rg
+                        WHERE rg.record_id = ge.record_id AND rg.game = ?
+                    )
+                )
+                """
+            )
+            params.append(game)
+        if search:
+            like = f"%{search}%"
+            where.append(
+                """
+                (
+                    LOWER(ge.source) LIKE ?
+                    OR LOWER(ge.target) LIKE ?
+                    OR LOWER(COALESCE(ge.notes, '')) LIKE ?
+                    OR EXISTS (
+                        SELECT 1 FROM glossary_aliases ga
+                        WHERE ga.record_id = ge.record_id AND LOWER(ga.alias) LIKE ?
+                    )
+                )
+                """
+            )
+            params.extend([like, like, like, like])
+        params.append(limit)
         rows = conn.execute(
-            """
+            f"""
             SELECT ge.*, r.pack_id AS row_pack_id
             FROM glossary_entries ge
             JOIN records r ON r.id = ge.record_id
-            WHERE r.kind = 'glossary-entry'
+            WHERE {' AND '.join(where)}
             ORDER BY ge.source
+            LIMIT ?
             """
+            ,
+            params,
         ).fetchall()
         entries: list[GlossaryEntry] = []
         for row in rows:

@@ -21,6 +21,12 @@ def test_starfield() -> None:
     assert detect_game_from_form_version(560) == ["Starfield"]
 
 
+def test_starfield_master_hint_handles_creation_club_form_versions() -> None:
+    from bgs_translator.parsers.form_versions import detect_game_from_header
+
+    assert detect_game_from_header(4096, ["starfield.esm", "sfbgs004.esm"]) == ["Starfield"]
+
+
 def test_unknown() -> None:
     from bgs_translator.parsers.form_versions import detect_game_from_form_version
 

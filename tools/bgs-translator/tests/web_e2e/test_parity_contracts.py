@@ -1,7 +1,10 @@
 """Contract tests for web-GUI parity affordances."""
 
+# ruff: noqa: RUF001
+
 from __future__ import annotations
 
+import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -351,6 +354,72 @@ def test_planned_batch_labels_are_player_readable(tmp_path: Path, monkeypatch) -
     assert planned[0]["item_count"] == 2
 
 
+def test_planned_batch_keeps_glossary_evidence_for_prompt_explanation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.web import app as web_app
+
+    plan_dir = paths.project_root("ryos-zhcn") / "batches" / "plan-evidence"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "plan.json").write_text(
+        json.dumps(
+            {
+                "plan_id": "plan-evidence",
+                "sample_system_prompt": "RYOS prompt",
+                "batches": [
+                    {
+                        "batch_id": "batch-1",
+                        "items": [{"id": "I1"}],
+                        "glossary_evidence": [
+                            {
+                                "source": "UC",
+                                "target": "联殖",
+                                "scope": "player",
+                                "matched_by": "player_rule",
+                                "matched_text": "UC",
+                                "included": True,
+                                "excluded_reason": None,
+                            },
+                            {
+                                "source": "United Colonies",
+                                "target": "联合殖民地",
+                                "scope": "vanilla",
+                                "matched_by": "source_exact",
+                                "matched_text": "United Colonies",
+                                "included": False,
+                                "excluded_reason": "dedupe_source:player-uc",
+                            },
+                            {
+                                "source": "New Atlantis Terrormorph",
+                                "target": "新亚特兰蒂斯城骇变兽",
+                                "scope": "vanilla",
+                                "matched_by": "rag",
+                                "matched_text": "new atlantis",
+                                "included": False,
+                                "excluded_reason": "budget_cap",
+                            },
+                        ],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    planned = web_app._planned_batches("ryos-zhcn")
+    html = web_app._format_glossary_panel_html(planned[0]["glossary_evidence"], [])
+
+    assert planned[0]["glossary_evidence"][0]["source"] == "UC"
+    assert "已注入提示词（1）" in html
+    assert "被去重或覆盖（1）" in html
+    assert "因预算省略（1）" in html
+    assert "因为这是你设置的固定翻译偏好" in html
+    assert "提示词空间有限" in html
+
+
 def test_prompt_live_preview_label_is_not_raw_ids(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
     from bgs_translator.web import app as web_app
@@ -369,6 +438,10 @@ def test_prompt_live_preview_label_is_not_raw_ids(tmp_path: Path, monkeypatch) -
     assert "select.dataset.runId" in script
     assert "确认失败" in script
     assert "已发送确认" in script
+    assert "msg.glossary_evidence" in script
+    assert "已注入提示词" in script
+    assert "被去重或覆盖" in script
+    assert "因预算省略" in script
 
 
 def test_shell_status_warns_about_running_cost_and_uses_player_labels(
@@ -708,6 +781,8 @@ def test_glossary_html_explains_terms_for_ai_in_plain_language(tmp_path: Path, m
     assert "避免把缩写乱翻" in html
     assert "glossaryIntro" in script
     assert "data.message ? `${glossaryIntro}${data.message}`" in script
+    assert "activeProject" in script
+    assert "params.set('project', activeProject)" in script
 
 
 def test_project_html_explains_sst_and_reload_safely(tmp_path: Path, monkeypatch) -> None:
@@ -746,11 +821,16 @@ def test_project_html_explains_sst_and_reload_safely(tmp_path: Path, monkeypatch
     assert "不会修改原始 MOD 文件" in html
     assert "SST 是给 xTranslator 导入的翻译文件" in html
     assert "不是 MOD 本体" in html
+    assert "导入新的 MOD 文件" in html
+    assert "field-import-plugin-path" in html
     script = web_app._project_script("ryos-zhcn")
     assert "导出命令完成\uff0c但没有生成 SST 文件" in script
     assert "正在重新读取项目状态" in script
     assert "/reload" in script
     assert "文件指纹匹配" in script
+    assert "/api/projects/import" in script
+    assert "missing_strings" in script
+    assert "ambiguous_game" in script
 
 
 def test_project_reload_api_reads_source_plugin_status(tmp_path: Path, monkeypatch) -> None:

@@ -2,7 +2,7 @@
 
 Date: 2026-06-09
 
-Scope: these are follow-up design and feature items raised during manual user testing after the browser GUI cut-over. They are intentionally not implemented in the current stabilization pass.
+Scope: these are follow-up design and feature items raised during manual user testing after the browser GUI cut-over.
 
 ## Manual Testing Findings To Preserve
 
@@ -17,6 +17,8 @@ Scope: these are follow-up design and feature items raised during manual user te
 
 ### 1. Import Translation Project From Plugin File
 
+Status 2026-06-09: implemented for loose `.esp/.esm/.esl` files that the parser can read directly.
+
 Add a GUI flow to import a new translation project from `.esp`, `.esl`, or `.esm`.
 
 Expected behavior:
@@ -28,11 +30,14 @@ Expected behavior:
 
 Open design questions:
 
-- Which game-detection signal is canonical when plugin headers are ambiguous?
+- Creation Club Starfield plugins with localized text packed inside `.ba2` archives still need BA2 Strings extraction support. Current GUI correctly blocks and explains missing loose `STRINGS/DLSTRINGS/ILSTRINGS`.
+- Game detection now prefers root master hints such as `Starfield.esm`, then falls back to TES4 header form-version ranges.
 - Whether imports should copy the plugin into the project or reference the original path.
 - How to handle MO2/VFS paths versus ordinary filesystem paths.
 
 ### 2. Glossary And Do-Not-Translate Hit Mechanism
+
+Status 2026-06-09: implemented as visible glossary evidence for prompt previews and planned batches.
 
 The current hit behavior is not transparent enough for ordinary players.
 
@@ -44,12 +49,14 @@ Current rough behavior:
 
 Needed design:
 
-- Show why a term was included: exact source hit, alias hit, player global preference, DNT global rule, or manually pinned.
-- Expose this explanation in Prompt preview without dumping internal implementation names.
-- Decide whether player/DNT global rules should always appear or be capped/ranked.
-- Add tests using RYOS/adwryos batches where one batch hits known Starfield terms and another does not.
+- Show why a term was included: exact source hit, alias hit, player global preference, DNT global rule, or RAG-like source match.
+- Player and DNT scopes now use the same evidence/dedupe path as vanilla/mod terminology.
+- Retrieval is bounded by term and prompt character budgets; excluded terms are marked with an evidence reason instead of silently overflowing prompt panels.
+- Remaining UX work: make the explanation friendlier in long historical batches without exposing internal match labels.
 
 ### 3. RAG-Style Vanilla Lore/Terminology Retrieval
+
+Status 2026-06-09: first lexical/RAG-style retrieval pass implemented with deterministic caps and dedupe.
 
 Design a retrieval mechanism for detecting when a mod text references vanilla concepts and passing the right game-term context into the system prompt.
 
@@ -63,11 +70,13 @@ Goals:
 Open design questions:
 
 - Whether the KB should store embeddings, token n-grams, aliases, or all three.
-- Whether retrieval should happen per item, per batch, or per plan.
-- How to prevent common words from pulling irrelevant lore.
-- How to show ordinary players why a term was included.
+- Whether embeddings are worth adding after the lexical candidate path.
+- How much short lore explanation should accompany canonical translations without bloating prompts.
+- How to tune stop-word/noise filters after more real mod batches.
 
 ### 4. Quick Translate For One Entry
+
+Status 2026-06-09: implemented in Entries with `快速翻译当前条目`.
 
 Add an Entries-tab button to translate the currently selected entry using the active AI provider.
 
@@ -84,8 +93,12 @@ Prompt direction:
 
 - "You are translating a mod for {game}. Translate this one entry into {target_language}. Preserve placeholders, tags, names that should remain untranslated, and JSON-safe formatting."
 - Reuse the existing placeholder and validation rules where possible.
+- Real OpenRouter-Opus4.6 browser verification translated `Portable Landing Pad Trigger` to `便携式着陆平台触发器`.
+- Empty provider responses are not written. For OpenRouter/Claude `json_schema` empty `items`, the quick path retries the same provider/model with `json_object` before failing.
 
 ### 5. Select Entries And Submit To Batch Translation Queue
+
+Status 2026-06-09: implemented as GUI selection artifacts plus CLI queue consumption.
 
 Add bulk selection to Entries and a button `提交到批量翻译队列`.
 
@@ -96,10 +109,9 @@ Expected behavior:
 - UI explains that the AI agent still needs to assemble the system prompt through the CLI and, when preview is enabled, ask the user to approve the generated prompt before dispatch.
 - Selection must not directly send hidden work to the provider.
 
-Open design questions:
+Implemented behavior:
 
-- Queue file format and location under the project.
-- How the CLI consumes selected rows.
-- Whether selected rows should become a new plan source, a plan filter, or a separate queue table.
-- How to show queued rows and remove them.
-
+- Queue files live under `batches/selection-queue/<queue-id>.json`.
+- `xtl batch plan <project> --queue <queue-id> ...` consumes selected row ids and builds a normal plan.json/system prompt.
+- GUI submission does not call the provider. It shows the next CLI command and explains that prompt preview still applies.
+- Remaining UX work: list old queue requests and allow deleting stale requests from the GUI.
