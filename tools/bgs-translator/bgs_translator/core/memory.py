@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from collections.abc import Iterable, Sequence
@@ -49,7 +50,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_units_natural
     ON units(plugin, formid, signature, field, index_n);
 
 CREATE TABLE IF NOT EXISTS batches (
-    batch_id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
     run_id TEXT NOT NULL,
     plan_id TEXT NOT NULL,
     profile_snapshot_json TEXT NOT NULL,
@@ -62,7 +63,8 @@ CREATE TABLE IF NOT EXISTS batches (
     cost_usd REAL,
     cost_exact BOOLEAN,
     retry_count INTEGER DEFAULT 0,
-    notes TEXT
+    notes TEXT,
+    PRIMARY KEY (run_id, batch_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_batches_run ON batches(run_id);
@@ -79,6 +81,18 @@ CREATE TABLE IF NOT EXISTS runs (
     cost_total_usd REAL,
     cost_exact BOOLEAN
 );
+
+CREATE TABLE IF NOT EXISTS events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    batch_id TEXT,
+    kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    emitted_at TEXT NOT NULL DEFAULT (datetime('now', 'utc'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_run_emitted ON events (run_id, event_id);
+CREATE INDEX IF NOT EXISTS idx_events_kind ON events (kind);
 """
 
 
@@ -90,11 +104,64 @@ def open_memory_db(project_root: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(memory_dir / "memory.sqlite")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA_SQL)
+    _ensure_batches_composite_key(conn)
     version_count = conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0]
     if version_count == 0:
         conn.execute("INSERT INTO schema_version VALUES (1)")
     conn.commit()
     return conn
+
+
+def _ensure_batches_composite_key(conn: sqlite3.Connection) -> None:
+    """Migrate legacy ``batches(batch_id PRIMARY KEY)`` to per-run keys."""
+
+    rows = conn.execute("PRAGMA table_info(batches)").fetchall()
+    if not rows:
+        return
+    pk_columns = [str(row[1]) for row in rows if int(row[5]) > 0]
+    if pk_columns == ["run_id", "batch_id"]:
+        return
+    if pk_columns != ["batch_id"]:
+        return
+    conn.execute("ALTER TABLE batches RENAME TO batches_legacy_single_key")
+    conn.execute(
+        """
+        CREATE TABLE batches (
+            batch_id TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            plan_id TEXT NOT NULL,
+            profile_snapshot_json TEXT NOT NULL,
+            item_count INTEGER NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            status TEXT NOT NULL,
+            tokens_in INTEGER,
+            tokens_out INTEGER,
+            cost_usd REAL,
+            cost_exact BOOLEAN,
+            retry_count INTEGER DEFAULT 0,
+            notes TEXT,
+            PRIMARY KEY (run_id, batch_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO batches (
+            batch_id, run_id, plan_id, profile_snapshot_json, item_count,
+            started_at, completed_at, status, tokens_in, tokens_out, cost_usd,
+            cost_exact, retry_count, notes
+        )
+        SELECT batch_id, run_id, plan_id, profile_snapshot_json, item_count,
+               started_at, completed_at, status, tokens_in, tokens_out, cost_usd,
+               cost_exact, retry_count, notes
+        FROM batches_legacy_single_key
+        """
+    )
+    conn.execute("DROP TABLE batches_legacy_single_key")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_batches_run ON batches(run_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_batches_status ON batches(status)")
+    conn.commit()
 
 
 def insert_units(conn: sqlite3.Connection, units: Iterable[TranslationUnit]) -> int:
@@ -275,12 +342,14 @@ def update_batch(
     conn: sqlite3.Connection,
     batch_id: str,
     *,
+    run_id: str,
     status: str,
     finished_at: str | None,
     tokens_in: int | None,
     tokens_out: int | None,
     cost_usd: float | None,
     cost_exact: bool = False,
+    retry_count: int = 0,
 ) -> None:
     """Update one batch lifecycle row."""
 
@@ -288,15 +357,78 @@ def update_batch(
         """
         UPDATE batches SET
             completed_at = ?, status = ?, tokens_in = ?, tokens_out = ?,
-            cost_usd = ?, cost_exact = ?
-        WHERE batch_id = ?
+            cost_usd = ?, cost_exact = ?, retry_count = ?
+        WHERE run_id = ? AND batch_id = ?
         """,
-        (finished_at, status, tokens_in, tokens_out, cost_usd, 1 if cost_exact else 0, batch_id),
+        (
+            finished_at,
+            status,
+            tokens_in,
+            tokens_out,
+            cost_usd,
+            1 if cost_exact else 0,
+            retry_count,
+            run_id,
+            batch_id,
+        ),
     )
     if cursor.rowcount != 1:
         conn.rollback()
-        raise ValueError(f"No memory.sqlite batch row updated for batch_id={batch_id!r}")
+        raise ValueError(f"No memory.sqlite batch row updated for run_id={run_id!r} batch_id={batch_id!r}")
     conn.commit()
+
+
+def insert_event(conn: sqlite3.Connection, event: Any) -> int:
+    """Persist one GUI event and return its autoincrement id."""
+
+    payload = getattr(event, "payload", {}) or {}
+    cursor = conn.execute(
+        """
+        INSERT INTO events (run_id, batch_id, kind, payload_json, emitted_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            getattr(event, "run_id", None) or "",
+            getattr(event, "batch_id", None),
+            str(getattr(event, "kind", "")),
+            _json_dumps(payload),
+            getattr(event, "timestamp", datetime.now(UTC)).isoformat(),
+        ),
+    )
+    conn.commit()
+    event_id = cursor.lastrowid
+    if event_id is None:
+        raise sqlite3.DatabaseError("SQLite did not return an event row id")
+    return int(event_id)
+
+
+def fetch_events_for_run(
+    conn: sqlite3.Connection,
+    run_id: str,
+    since_event_id: int = 0,
+) -> list[dict[str, Any]]:
+    """Return persisted events for one run after ``since_event_id``."""
+
+    rows = conn.execute(
+        """
+        SELECT event_id, run_id, batch_id, kind, payload_json, emitted_at
+        FROM events
+        WHERE run_id = ? AND event_id > ?
+        ORDER BY event_id ASC
+        """,
+        (run_id, since_event_id),
+    ).fetchall()
+    return [
+        {
+            "event_id": int(row[0]),
+            "run_id": str(row[1]),
+            "batch_id": row[2],
+            "kind": str(row[3]),
+            "payload": _json_loads(str(row[4])),
+            "emitted_at": str(row[5]),
+        }
+        for row in rows
+    ]
 
 
 def get_unit_counts_by_signature(conn: sqlite3.Connection) -> dict[str, int]:
@@ -480,6 +612,17 @@ def list_recent_runs(conn: sqlite3.Connection, limit: int = 20) -> list[sqlite3.
     return list(rows)
 
 
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _json_loads(value: str) -> Any:
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+
+
 def _normalized_filter_values(values: Sequence[str] | None, *, upper: bool) -> list[str]:
     if not values:
         return []
@@ -514,9 +657,11 @@ def _row_to_dict(row: sqlite3.Row | tuple[Any, ...]) -> dict[str, Any]:
 
 __all__ = [
     "count_units",
+    "fetch_events_for_run",
     "get_unit_by_row_id",
     "get_unit_counts_by_signature",
     "insert_batch",
+    "insert_event",
     "insert_run",
     "insert_units",
     "list_recent_runs",

@@ -32,6 +32,16 @@ class FakeReader:
             entries.append(entry("brand.skse", "SKSE", "SKSE", "brand", scope="do_not_translate"))
         return entries
 
+    def query_user_scope_entries(
+        self,
+        target_lang: str,
+        game: str,
+        *,
+        scopes: set[str],
+    ) -> list[GlossaryEntry]:
+        del target_lang, game, scopes
+        return []
+
 
 def unit(source: str, sig: str = "WEAP", field: str = "FULL") -> TranslationUnit:
     return TranslationUnit("Test.esp", 1, 1, "EDID", sig, field, source=source)

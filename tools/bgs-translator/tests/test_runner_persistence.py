@@ -48,6 +48,31 @@ class _KnownTranslationClient:
         pass
 
 
+class _RetryThenSuccessClient:
+    profile = _KnownTranslationClient.profile
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def translate_batch(self, batch: Batch, system_prompt: str) -> LLMResponse:
+        del batch, system_prompt
+        self.calls += 1
+        if self.calls == 1:
+            return LLMResponse(
+                {"I1": ""},
+                TokenUsage(input_tokens=10, output_tokens=0, total_tokens=10),
+                via="synthetic",
+            )
+        return LLMResponse(
+            {"I1": "Bonjour"},
+            TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+            via="synthetic",
+        )
+
+    async def aclose(self) -> None:
+        pass
+
+
 @pytest.fixture
 def translator_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
@@ -83,6 +108,58 @@ def test_runner_writes_audit_artifacts(translator_home: Path) -> None:
     assert (run_dir / "responses" / "batch-1.raw.json").exists()
     assert (run_dir / "responses" / "batch-1.normalized.json").exists()
     assert results["translated_units"][0]["dest"] == "Bonjour"
+
+
+def test_runner_preserves_batch_rows_across_repeated_plan_runs(translator_home: Path) -> None:
+    plan, project_root = _seeded_plan(translator_home)
+    runner = _runner(plan, _KnownTranslationClient("Bonjour"))
+
+    asyncio.run(runner.run("run-one"))
+    asyncio.run(runner.run("run-two"))
+
+    conn = sqlite3.connect(project_root / "memory" / "memory.sqlite")
+    rows = conn.execute(
+        """
+        SELECT run_id, batch_id, status
+        FROM batches
+        WHERE batch_id = 'batch-1'
+        ORDER BY run_id
+        """
+    ).fetchall()
+    conn.close()
+
+    assert rows == [("run-one", "batch-1", "complete"), ("run-two", "batch-1", "complete")]
+
+
+def test_retry_success_marks_batch_complete(translator_home: Path) -> None:
+    from bgs_translator.core.event_publisher import reset_publishers_for_tests
+    from bgs_translator.core.memory import fetch_events_for_run
+
+    reset_publishers_for_tests()
+    plan, project_root = _seeded_plan(translator_home)
+    client = _RetryThenSuccessClient()
+    runner = _runner(plan, client, max_retries=1)
+
+    result = asyncio.run(runner.run("run-retry-success"))
+
+    conn = sqlite3.connect(project_root / "memory" / "memory.sqlite")
+    try:
+        row = conn.execute(
+            "SELECT status, retry_count FROM batches WHERE run_id = ? AND batch_id = ?",
+            ("run-retry-success", "batch-1"),
+        ).fetchone()
+        events = fetch_events_for_run(conn, "run-retry-success", 0)
+    finally:
+        conn.close()
+    event_kinds = [event["kind"] for event in events]
+
+    assert client.calls == 2
+    assert result.succeeded == 1
+    assert result.retried == 1
+    assert result.manual_review == 0
+    assert row == ("complete", 1)
+    assert "batch.complete" in event_kinds
+    assert "batch.failed" not in event_kinds
 
 
 def test_runner_succeeded_count_only_after_persist(
@@ -177,9 +254,16 @@ def _runner(
     client: Any,
     *,
     pricing: Pricing | None = None,
+    max_retries: int = 2,
 ) -> BatchRunner:
     profile = getattr(client, "profile", _KnownTranslationClient.profile)
-    return BatchRunner(plan, client, RateTracker(profile), CostTracker(profile, pricing=pricing))
+    return BatchRunner(
+        plan,
+        client,
+        RateTracker(profile),
+        CostTracker(profile, pricing=pricing),
+        max_retries=max_retries,
+    )
 
 
 def _openrouter_client(monkeypatch: pytest.MonkeyPatch, *, cost: float | None) -> Any:

@@ -119,10 +119,10 @@ Add a new phase between Phase 0 and Phase 1 (or fold into Phase 1 if scope budge
 This was identified in the handoff as backend-only and the oracle confirmed "not solved by UI rewrite". Cut-over §6.2 makes it a prerequisite. So fix it before Phase 4 lands Glossary parity tests.
 
 Tasks:
-- [ ] **1A.1** Diagnose `GlossaryComposer.collect_for_batch` in `bgs_translator/kb/glossary.py`. Verify it reads all 4 scopes (vanilla / mod / player / do_not_translate) and that the user's player + DNT KB pack registrations actually resolve.
-- [ ] **1A.2** Compare actual plan `glossary_subset` vs expected entries from `bgs_kb_query` against the user's registered packs. Identify the dropping step.
-- [ ] **1A.3** Fix the collector. Add unit tests in `tests/kb/test_glossary_collector.py` covering all 4 scopes + mixed-pack cases.
-- [ ] **1A.4** Re-plan a real batch with the fix; verify glossary_subset is no longer 1-entry-only.
+- [x] **1A.1** Diagnose `GlossaryComposer.collect_for_batch` in `bgs_translator/kb/glossary.py`. Verified path registration was correct; the dropping step was source-only matching for user-pack `player` and `do_not_translate` overlays.
+- [x] **1A.2** Compare actual plan `glossary_subset` vs expected entries from the user's registered packs. Current user pack has `FC`, `Starfield`, and `UC`; old plans carried only source-hit `UC`.
+- [x] **1A.3** Fix the collector. Added focused tests in `test_glossary_composer.py`, `test_kb_reader.py`, and Web API -> CLI plan coverage in `test_smoke.py`.
+- [x] **1A.4** Re-plan a real batch with the fix; plan `62b417b6-8510-4e58-8e00-90f2930dc8d1` has 24 batches, each with 3 glossary entries and DNT `FC`.
 - [ ] **1A.5** Commit: `fix(kb): glossary collector includes all scopes (closes Bug B)`.
 
 Acceptance: a plan against `ryos-zhcn` shows ≥ 3 entries in `glossary_subset` per batch (or matches the user's registered entry count, whichever is larger).

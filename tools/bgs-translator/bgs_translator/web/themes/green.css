@@ -1,0 +1,16 @@
+.theme-green {
+  --xtl-bg: #020805;
+  --xtl-bg-2: #07150c;
+  --xtl-panel: #0b1d11;
+  --xtl-panel-2: #102719;
+  --xtl-line: #2e8b49;
+  --xtl-line-soft: #1b5630;
+  --xtl-text: #8dff9b;
+  --xtl-strong: #5df277;
+  --xtl-muted: #6db879;
+  --xtl-dim: #3f7448;
+  --xtl-good: #c9ff8f;
+  --xtl-info: #79d7d9;
+  --xtl-danger: #ff8b6d;
+  --xtl-ink: #020805;
+}

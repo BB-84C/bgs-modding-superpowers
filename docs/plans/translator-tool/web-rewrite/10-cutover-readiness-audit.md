@@ -1,0 +1,52 @@
+# bgs-translator Web Rewrite — Cut-over Readiness Audit
+
+Date: 2026-06-09
+
+Scope: Phase 11 cut-over. User approved shipping cut-over on 2026-06-09. Phase 12 Tk deletion is explicitly out of current scope and still requires separate authorization.
+
+## Summary
+
+The browser GUI is functionally broad enough for Phase 11 cut-over: all seven top-level tabs exist, the live preview path works over HTTP/WS, Batches reads sqlite/events, and the RYOS/OpenRouter live run produced real artifacts. `xtl gui` now defaults to the browser panel. Tk stays available through `xtl gui --backend tk`; deletion is not in the current work scope.
+
+## 00-spec §6 Readiness
+
+| Gate | Current state | Evidence | Verdict |
+|---|---|---|---|
+| All 7 tabs implemented | Project, Entries, Batches, Prompt, Profiles, Glossary, Logs routes exist. | `09-tk-to-web-mapping.md`; `tests/web_e2e/test_parity_contracts.py` | Ready |
+| Every Tk-version action has web equivalent | User flows are mapped; close/export is implemented through Project export/open buttons plus browser close-risk warning instead of a native Tk two-stage modal. | `09-tk-to-web-mapping.md`; Project Browser QA | Ready with browser constraints |
+| Every Tk-version modal has web equivalent | Glossary editor, profile/key forms, and browser-constrained close/export warning exist. | `09-tk-to-web-mapping.md`; Project Browser QA | Ready with browser constraints |
+| Theme switching works | Amber/green/mono selectors and API covered. | web_e2e theme/language tests; Browser QA in handoff | Ready |
+| Language switching works | zh-cn/en selector and PO loader covered. | web_e2e tests; Browser QA in handoff | Ready |
+| API key UX 7 invariant | Key env/location is read-only/auto-derived; key value is the only secret input. | Profiles tests and Browser QA in handoff | Ready |
+| Glossary scope gating | Vanilla/mod read-only; player/DNT writable. | Glossary API/UI tests and Browser QA | Ready |
+| Entries Bug D closed on web | Source and destination panels exist in web Entries detail. | Entries API/UI tests and Browser QA | Ready |
+| web_e2e covers required flows | 44 web_e2e tests exist, including full synthetic HTTP preview, blind-context UX regression contracts, Batches running-run preference, finished-run stop-button disable behavior, Prompt empty-state disablement, and persistent Glossary player guidance. | `py -3.12 -m pytest tools/bgs-translator/tests/web_e2e -q` -> 44 passed / 3 warnings | Ready for Phase 9 |
+| All web_e2e pass | Latest selected run passed. | Included in 83 passed, 3 warnings selected regression set | Ready for Phase 9 |
+| Selected post-fix regression set | After the in-app Browser layout fix, live-render evidence update, blind-context UX follow-up, and Phase 11 cut-over default flip, the selected web rewrite regression set passed: web_e2e, GUI launcher default tests, runner persistence, profile CLI/API, batch plan CLI, KB reader, glossary composer, batcher, and event publisher. Ruff and mypy are clean. | `py -3.12 -m pytest ... -q` => 83 passed / 3 warnings; `ruff check ...` => clean; `py -3.12 -m mypy bgs_translator` => clean across 120 source files | Ready |
+| Real live LLM web run | Real OpenRouter runs completed against web GUI; required run files are copied into the phase artifact bundle. | `.opencode/artifacts/web-rewrite-acceptance/phase-10/SUMMARY.md`, `READBACK.md`, `run-artifacts/`, `sqlite-readback.json` | Mostly ready |
+| Cost-update provider tolerance | Local OpenRouter response `usage.cost` is exact and persisted. Independent OpenRouter-side readback now queries the official `GET /api/v1/generation` endpoint for every saved `gen-*` id in the Phase 10 live runs; OpenRouter `total_cost` sums exactly match local `usage.cost` sums for both runs (`delta = 0.0`). | `.opencode/artifacts/web-rewrite-acceptance/phase-10/openrouter-generation-readback/SUMMARY.md`; `generation-readback.json`; `READBACK.md` | Ready |
+| Cross-process event topology | CLI process events persisted to sqlite and showed in Browser Batches during live run. | `READBACK.md`; Browser QA in handoff | Ready |
+| Preserved browser evidence for live Batches rendering | In-app Browser screenshot sequence shows Batches moving from running to completed for real OpenRouter run `rn_8b27744611c1`; structured readback has matching sqlite batches/events and exact local provider cost. This evidence was captured before the later layout overflow correction, which has separate final probes. | `.opencode/artifacts/web-rewrite-acceptance/phase-11/live-render-iab/SUMMARY.md`; `iab-batches-00.png`..`09.png`; `iab-live-run-readback.json`; layout correction under `phase-11/layout-overflow/` | Ready |
+| Bug B glossary subset backend issue | Fixed: user-pack `player` and `do_not_translate` overlays merge into every batch as high-priority user preferences; vanilla/mod remain source-matched. Real RYOS re-plan `62b417b6-8510-4e58-8e00-90f2930dc8d1` produced 24 batches with all 3 registered user entries in every batch. | `HANDOFF-POST-LIVE-TEST.md`; `test_glossary_composer.py`; `test_kb_reader.py`; `test_smoke.py` | Ready |
+| First-byte navigation ≤ 200ms | Measured across `/project`, `/batches`, `/glossary`, `/logs`; max sample was 36.829 ms. | `.opencode/artifacts/web-rewrite-acceptance/phase-11/SUMMARY.md`, `perf-readback.json` | Ready on this machine |
+| Event-to-render latency ≤ 300ms | Measured with real Batches page, sqlite event insert, WebSocket push, and DOM readback. Backend emit-to-DOM was 232.525 ms; WS receive-to-render was 7.4 ms. | `.opencode/artifacts/web-rewrite-acceptance/phase-11/SUMMARY.md`, `perf-readback.json` | Ready on this machine |
+| Desktop layout overflow guard | User found Batches/status UI overflow in the in-app Browser. First pass removed the shell's fixed 64rem floor and tightened Batches table/progress sizing. Second pass fixed the Batches parent workbench fixed `rem` column floors. Follow-up after user review replaced forced two-column percentage workbenches with desktop `auto-fit` grids, so narrow desktop panes stack panels vertically instead of crushing text/UI. Final shell follow-up made the global status bar and tab strip wrap instead of clipping in the Codex in-app Browser pane. A cross-page in-app Browser audit then checked all seven top-level pages at an 832px desktop-pane width with no sampled horizontal overflow. The cut-over UX follow-up rechecked `/batches`, `/prompt`, `/profiles`, and `/glossary` at the same 832px desktop-pane width; all had `docScrollWidth == innerWidth` and no sampled horizontal overflow. | `.opencode/artifacts/web-rewrite-acceptance/phase-11/layout-overflow/SUMMARY.md`; `.opencode/artifacts/web-rewrite-acceptance/phase-11/cross-page-layout/SUMMARY.md`; `.opencode/artifacts/web-rewrite-acceptance/phase-11/blind-ux-followup/SUMMARY.md`; `cross-page-overflow-readback.json`; `iab-*.metrics.json`; `tests/web_e2e/test_parity_contracts.py`; `py -3.12 -m pytest tools/bgs-translator/tests/web_e2e -q` -> 44 passed / 3 warnings | Ready on tested desktop widths |
+| Ordinary-player UX gates | Blind-context sub-agent review initially blocked user trial on P0 UX issues. Follow-up fixed running/cost status clarity, Project stop-task path, Prompt current-vs-history separation, approve-all cost confirmation, Entries internal-ID exposure/overflow, Entries dangerous-action confirmations, Profiles advanced-setting wording, and Glossary "AI agent" wording. Second blind-context pass found no new P0 and only Batches P1 issues; follow-up defaults to a running task when one exists, disables stop for finished runs, explains stop scope, and hides run/batch IDs from default labels while retaining hover traces. Final cut-over follow-up added a global `查看/停止运行中任务` danger-state action, moved Batches `请求停止` before the run selector, replaced primary `批次` wording with `文本组`, disabled Prompt send controls when only history is shown, removed visible `内部 ID`, and preserved OpenRouter/Glossary guidance after page hydration. | `.opencode/artifacts/web-rewrite-acceptance/phase-11/blind-ux-followup/SUMMARY.md`; `iab-batches-after-blind-ux-followup.png`; `iab-prompt-empty-state-after-blind-ux-followup.png`; `iab-profiles-after-blind-ux-followup.png`; `iab-glossary-after-blind-ux-followup.png`; `iab-*.metrics.json` | Ready for cut-over trial |
+| Browser memory after 4h ≤ 500MB | User explicitly moved this into a separate PowerShell monitor and out of current result-verification scope. A new independent monitor started at `2026-06-09T02:04:17Z` and writes to `phase-11/browser-memory-4h/run-cutover-2026-06-08-220417/`. | `heartbeat.json`; `samples.csv`; monitor launcher PID `93108` | External background monitor; not blocking current cut-over scope |
+| No stutter reports in 10-batch run | Local synthetic 10-batch run used the real web preview HTTP path with 10 approvals, 10 complete batch rows, 10 `batch.complete` sqlite events, and Batches API max latency 211.702 ms. This is stronger than a user-report proxy, but it is synthetic/local and does not replace long-session memory evidence. | `.opencode/artifacts/web-rewrite-acceptance/phase-11/ten-batch-synthetic/SUMMARY.md`; `ten-batch-readback.json` | Ready for synthetic 10-batch path |
+| User signs off cut-over | User approved cut-over: "cut-over可以ship". | Chat on 2026-06-09 | Ready |
+| `xtl gui` opens browser by default | Default backend changed to `web`; no-backend launch on port 7848 returned NiceGUI healthz. | `.opencode/artifacts/web-rewrite-acceptance/phase-11/cutover-default/SUMMARY.md`; `tests/cli/test_gui_launcher.py::test_gui_defaults_to_web_backend` | Ready |
+| `xtl gui --backend tk` remains opt-in | Default flip preserves explicit Tk routing; unit test verifies `backend="tk"` calls the Tk launcher path. | `tests/cli/test_gui_launcher.py::test_gui_keeps_tk_backend_opt_in` | Ready |
+| Tk-removal reviewed by oracle | Not applicable. User explicitly said Tk deletion is not in current construction/goal scope. | Chat on 2026-06-09 | Deferred out of current scope |
+| One workday/release after cut-over | Not applicable to current scope. Tk deletion remains separate future work. | Chat on 2026-06-09 | Deferred out of current scope |
+
+## Phase 11 Inputs Still Needed
+
+None for the current cut-over scope.
+
+## Phase 12 Inputs Still Needed
+
+Phase 12 is out of current scope per user instruction. Future Tk deletion still requires:
+
+1. Explicit user message approving Tk deletion.
+2. Tk-removal diff plus final oracle/read-only reviewer pass.

@@ -29,6 +29,8 @@ This is the single most load-bearing clause. **Tk is not a long-term parallel su
 
 The Tk removal commit's title must be: `refactor(gui): remove Tk control panel; web is the only surface`. It is the marker of migration completion.
 
+**2026-06-09 scope note:** Phase 11 cut-over is authorized and ships `xtl gui` as the browser default while keeping `xtl gui --backend tk` as an opt-in fallback. The project owner explicitly moved Tk deletion out of the current construction/goal scope. Do not delete Tk, Tk tests, `core/ipc.py`, or `--backend tk` as part of this Phase 11 cut-over.
+
 ## 3. Non-goals
 
 These are out of scope and stay that way through this rewrite:
@@ -54,7 +56,7 @@ The web GUI must offer functional equivalents of all seven Tk tabs. "Functional 
 | Batches | Live run/batch progress (driven by event stream + sqlite reads), per-batch status, per-batch tokens/cost, Cancel-run action |
 | Prompt | System prompt preview, Approve / Approve-all-remaining / Discard actions per pending preview, glossary-subset side panel, DNT side panel, preview-required toggle |
 | Profiles | Profile list, Add/Edit profile dialog, Set-API-key dialog (read-only env var name, value-only input), Probe action, base-URL auto-strip helper, Activate action |
-| Glossary | Per-scope tabs (vanilla, mod, player, DNT), Add-entry dialog (player/DNT only; vanilla/mod show "use AI agent" message), filterable per-scope table |
+| Glossary | Per-scope tabs (vanilla, mod, player, DNT), Add-entry dialog (player/DNT only; vanilla/mod say the tool automatically maintains those read-only layers), filterable per-scope table |
 | Logs | Recent-events stream, per-run log file viewer |
 
 Each tab is implemented as one `@ui.page` route or one module under `bgs_translator/web/tabs/`. See `02-phases.md` for per-tab file targets.
@@ -207,6 +209,8 @@ Tk **may not** be deleted until **all** of the following hold simultaneously, de
 - [ ] One full release cycle (or one full user workday, whichever is shorter) elapses between cut-over and removal so the user can flag regressions on `--backend tk` fallback.
 
 If **any** criterion above fails, Tk stays.
+
+**2026-06-09 scope note:** The four-hour browser memory check is running as a separate PowerShell monitor. Reviewing that result is outside the current cut-over scope unless the project owner brings it back in.
 
 ## 7. Anti-goals — what NOT to do
 

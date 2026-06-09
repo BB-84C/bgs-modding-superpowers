@@ -54,6 +54,47 @@ def test_batch_plan_cli_persists_plan(tmp_path: Path, monkeypatch: pytest.Monkey
     assert plan_json["total_items"] == 1
 
 
+def test_batch_plan_splits_lore_world_and_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bgs_translator.cli.app import app
+    from bgs_translator.core.memory import insert_units, open_memory_db
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    project_root = tmp_path / "translator" / "projects" / "demo"
+    conn = open_memory_db(project_root)
+    insert_units(conn, [TranslationUnit("A.esp", 1, 1, "A", "MESG", "FULL", source="Start")])
+    conn.close()
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "batch",
+            "plan",
+            "demo",
+            "--register",
+            "system_message",
+            "--target-lang",
+            "zh-cn",
+            "--profile",
+            "fake",
+            "--game-lore-world",
+            "World Header Only",
+            "--game-lore-summary",
+            "Detailed lore paragraph only.",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    envelope = json.loads(result.output)
+    plan_json = json.loads(Path(envelope["data"]["plan_path"]).read_text(encoding="utf-8"))
+    prompt = plan_json["sample_system_prompt"]
+    assert "World Header Only" in prompt
+    assert "Detailed lore paragraph only." in prompt
+    assert prompt.count("World Header Only") == 1
+
+
 def test_batch_plan_queries_real_glossary_reader(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_fixture_pack: GlossaryPackFactory
 ) -> None:

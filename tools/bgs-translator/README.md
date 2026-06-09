@@ -61,17 +61,23 @@ Run `xtl --help` or any subcommand's `--help` for the current option surface.
 - `xtl batch plan|run|status|cancel|logs` — batch planning, execution, status, cancellation, and logs.
 - `xtl edit entry|bulk|status|revert` — manual translation-memory edits.
 - `xtl validate project|sst` — project and SST validation.
-- `xtl gui` — Tk control panel.
+- `xtl gui` — browser control panel.
 
 ## GUI
 
-Launch the Tk control panel with:
+Launch the browser control panel with:
 
 ```powershell
 xtl gui
 ```
 
-The panel is for configuration and monitoring: provider profiles, prompt preview, batch progress, cancellation, cost tracking, glossary controls, and export checks. Screenshot description: a compact Tk window with tabs for Projects, Profiles, Batches, Glossary, and Logs, using the configured amber/green/mono terminal theme.
+The panel is for configuration and monitoring: AI service accounts, prompt preview, batch progress, cancellation, cost tracking, glossary controls, and export checks. It uses the amber/green/mono terminal theme in a local browser page.
+
+The old Tk panel is still available as an opt-in fallback during cut-over:
+
+```powershell
+xtl gui --backend tk
+```
 
 ## Documentation
 

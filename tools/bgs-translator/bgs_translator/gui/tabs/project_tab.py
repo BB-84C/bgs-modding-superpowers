@@ -295,7 +295,7 @@ class ProjectTab(ttk.Frame):
                 parent=self,
             )
             return
-        cmd = [sys.executable, "-m", "bgs_translator.cli.app", "project", "export", self._project_name]
+        cmd = [sys.executable, "-m", "bgs_translator", "project", "export", self._project_name]
         try:
             result = subprocess.run(
                 cmd,

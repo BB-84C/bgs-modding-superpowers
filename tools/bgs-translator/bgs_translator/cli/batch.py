@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sqlite3
 import sys
 import tomllib
@@ -22,6 +23,9 @@ from bgs_translator.config.profiles import ProviderProfile, get_active_profile, 
 from bgs_translator.config.settings import load_settings
 from bgs_translator.core import runtime_pid
 from bgs_translator.core.client import request_preview
+from bgs_translator.core.event_publisher import get_publisher
+from bgs_translator.core.event_queue import GuiEvent
+from bgs_translator.core.web_ipc_client import discover_gui, request_preview_http
 from bgs_translator.kb.glossary import GlossaryComposer
 from bgs_translator.kb.reader import KBGlossaryReader
 from bgs_translator.observability.cost_tracker import CostTracker
@@ -46,7 +50,17 @@ def plan_batch(
     register: str = typer.Option(..., "--register"),
     target_lang: str = typer.Option(..., "--target-lang"),
     profile: str = typer.Option(..., "--profile"),
-    game_lore: str = typer.Option("", "--game-lore"),
+    game_lore_world: str = typer.Option(
+        "",
+        "--game-lore-world",
+        help="Short world/title label for the prompt header, e.g. Starfield 2330 Settled Systems.",
+    ),
+    game_lore_summary: str = typer.Option(
+        "",
+        "--game-lore-summary",
+        "--game-lore",
+        help="Long game lore/context paragraph for the prompt body. --game-lore is a compatibility alias.",
+    ),
     mod_name: str = typer.Option("", "--mod-name"),
     mod_theme: str = typer.Option("", "--mod-theme"),
     style: str = typer.Option("", "--style"),
@@ -78,8 +92,8 @@ def plan_batch(
             glossary_composer=GlossaryComposer(KBGlossaryReader()),
             game=game,
             batch_size=batch_size,
-            game_lore_world=game_lore or game,
-            game_context_lore_summary=game_lore or game,
+            game_lore_world=game_lore_world or game,
+            game_context_lore_summary=game_lore_summary,
             mod_context_name=mod_name or project,
             mod_context_theme=mod_theme,
             style_directives=style,
@@ -137,7 +151,7 @@ def run_batch(
         profile = get_active_profile(cfg) if cfg.active is not None else cfg.profiles[plan.profile_name]
         client = build_client_for(profile)
     if _preview_enabled_for_session():
-        client = _PreviewingLLMClient(client, profile)
+        client = _PreviewingLLMClient(client, profile, project=project, run_id=run_id)
     runner = BatchRunner(plan, client, RateTracker(profile), CostTracker(profile))
     result = asyncio.run(runner.run(run_id))
     _emit_success({"run_id": run_id, "plan_id": plan.plan_id, "dry_run": dry_run, "summary": asdict(result)})
@@ -203,9 +217,11 @@ def _read_project_game(project_root: Path) -> str:
 class _PreviewingLLMClient:
     """LLM client wrapper that performs GUI prompt approval before dispatch."""
 
-    def __init__(self, inner: Any, profile: ProviderProfile) -> None:
+    def __init__(self, inner: Any, profile: ProviderProfile, *, project: str, run_id: str) -> None:
         self._inner = inner
         self.profile = profile
+        self._project = project
+        self._run_id = run_id
         self._approve_all_remaining = False
 
     async def translate_batch(self, batch: Batch, system_prompt: str) -> LLMResponse:
@@ -221,6 +237,12 @@ class _PreviewingLLMClient:
             elif op == "discarded":
                 return _discarded_response(batch)
             elif op in {"no_gui", "timeout", "transport_unavailable"}:
+                if load_settings().behavior.prompt_preview_required:
+                    raise RuntimeError(
+                        f"prompt_preview_required=true but GUI is unreachable (op={op}). "
+                        "Start the GUI (`xtl gui`) or set "
+                        "behavior.prompt_preview_required=false."
+                    )
                 log.info("Using original prompt for batch %s after preview op=%s", batch.batch_id, op)
                 prompt = system_prompt
         return cast(LLMResponse, await self._inner.translate_batch(batch, prompt))
@@ -231,6 +253,33 @@ class _PreviewingLLMClient:
             await close()
 
     def _request_preview(self, batch: Batch, system_prompt: str) -> dict[str, Any]:
+        backend = _preview_backend()
+        discovered = discover_gui()
+        get_publisher(self._project).emit(
+            GuiEvent(
+                kind="prompt.preview_request",
+                run_id=self._run_id,
+                batch_id=batch.batch_id,
+                payload={
+                    "backend": backend,
+                    "has_web_gui": discovered is not None,
+                    "item_count": len(batch.items),
+                    "prompt_chars": len(system_prompt),
+                    "prompt_preview_required": load_settings().behavior.prompt_preview_required,
+                },
+            )
+        )
+        if backend == "web" or (backend == "auto" and discovered is not None):
+            return request_preview_http(
+                project=self._project,
+                run_id=self._run_id,
+                batch_id=batch.batch_id,
+                system_prompt=system_prompt,
+                items=_items_payload(batch),
+                glossary_subset=_dict_list(batch.glossary_subset),
+                do_not_translate=batch.do_not_translate,
+                timeout=300.0,
+            )
         try:
             return request_preview(
                 batch.batch_id,
@@ -262,14 +311,27 @@ class _PreviewingLLMClient:
 
 def _preview_enabled_for_session() -> bool:
     settings = load_settings()
-    if not settings.behavior.prompt_preview_required:
-        return False
+    if settings.behavior.prompt_preview_required:
+        return True
+    if _preview_backend() == "web":
+        return discover_gui() is not None
     alive, _pid = runtime_pid.is_gui_alive()
     return alive
 
 
+def _preview_backend() -> str:
+    return os.environ.get("BGS_TRANSLATOR_PREVIEW_BACKEND", "auto").lower()
+
+
 def _items_payload(batch: Batch) -> list[dict[str, object]]:
     payload = _to_jsonable(batch.items)
+    if not isinstance(payload, list):
+        return []
+    return [cast(dict[str, object], item) for item in payload if isinstance(item, dict)]
+
+
+def _dict_list(values: list[Any]) -> list[dict[str, object]]:
+    payload = _to_jsonable(values)
     if not isinstance(payload, list):
         return []
     return [cast(dict[str, object], item) for item in payload if isinstance(item, dict)]

@@ -240,7 +240,7 @@ class CloseHandler:
 
     @staticmethod
     def _export_project_subprocess(project: str) -> None:
-        cmd = [sys.executable, "-m", "bgs_translator.cli.app", "project", "export", project]
+        cmd = [sys.executable, "-m", "bgs_translator", "project", "export", project]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout or "xtl project export failed")[-2000:])

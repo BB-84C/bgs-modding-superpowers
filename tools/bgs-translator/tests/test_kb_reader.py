@@ -63,6 +63,57 @@ def test_reader_user_pack_overrides_canonical_pack(
     assert entries[0].pack_id == "translator-overrides-en-zhcn"
 
 
+def test_reader_global_user_scope_entries_only_come_from_user_packs(
+    tmp_path: Path, make_fixture_pack: PackFactory
+) -> None:
+    from bgs_translator.kb.reader import KBGlossaryReader
+
+    make_fixture_pack(
+        "canonical",
+        [
+            {
+                "record_id": "canonical-dnt",
+                "source": "CanonicalOnly",
+                "target": "CanonicalOnly",
+                "scope": "do_not_translate",
+            }
+        ],
+    )
+    make_fixture_pack(
+        "translator-overrides-en-zhcn",
+        [
+            {
+                "record_id": "user-dnt",
+                "source": "FC",
+                "target": "FC",
+                "scope": "do_not_translate",
+            },
+            {
+                "record_id": "user-player",
+                "source": "Starfield",
+                "target": "星空",
+                "scope": "player",
+            },
+        ],
+        is_user_pack=True,
+    )
+
+    reader = KBGlossaryReader(kb_root=tmp_path, user_packs_root=tmp_path / "user-packs")
+    try:
+        entries = reader.query_user_scope_entries(
+            "zh-cn",
+            "Starfield",
+            scopes={"player", "do_not_translate"},
+        )
+    finally:
+        reader.close()
+
+    assert [(entry.source, entry.scope) for entry in entries] == [
+        ("FC", "do_not_translate"),
+        ("Starfield", "player"),
+    ]
+
+
 def test_reader_mod_entries_require_matching_mod_slug(
     tmp_path: Path, make_fixture_pack: PackFactory
 ) -> None:

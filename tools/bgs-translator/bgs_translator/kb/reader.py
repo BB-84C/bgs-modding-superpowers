@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Collection
 from pathlib import Path
 
 from bgs_translator.config import paths
@@ -91,6 +92,44 @@ class KBGlossaryReader:
             key=lambda entry: (-_scope_sort_weight(entry.scope), entry.source.casefold(), entry.record_id),
         )
 
+    def query_user_scope_entries(
+        self,
+        target_lang: str,
+        game: str,
+        *,
+        scopes: Collection[str],
+    ) -> list[GlossaryEntry]:
+        """Return user-pack entries for scopes that behave as player preferences.
+
+        Canonical vanilla/mod packs can be large, so the normal batch collector
+        keeps them source-matched. User-maintained player and do-not-translate
+        overlays are intentionally small and high priority; loading them as
+        global preferences keeps the next plan aligned with what the user just
+        added in the GUI.
+        """
+        normalized_scopes = {scope for scope in scopes if scope}
+        if not normalized_scopes:
+            return []
+
+        deduped: dict[str, GlossaryEntry] = {}
+        for pack_id, db_path in self.user_pack_dbs:
+            for entry in self._query_pack(
+                pack_id,
+                db_path,
+                [],
+                target_lang,
+                game,
+                mod_slug=None,
+                require_source_match=False,
+            ):
+                if entry.scope in normalized_scopes:
+                    deduped[entry.record_id] = entry
+
+        return sorted(
+            deduped.values(),
+            key=lambda entry: (-_scope_sort_weight(entry.scope), entry.source.casefold(), entry.record_id),
+        )
+
     def _query_pack(
         self,
         pack_id: str,
@@ -100,6 +139,7 @@ class KBGlossaryReader:
         game: str,
         *,
         mod_slug: str | None,
+        require_source_match: bool = True,
     ) -> list[GlossaryEntry]:
         try:
             conn = self._conn(db_path)
@@ -156,7 +196,7 @@ class KBGlossaryReader:
                 pack_id=str(row["row_pack_id"] or pack_id),
                 games=games,
             )
-            if _entry_matches_source_strings(entry, source_strings):
+            if not require_source_match or _entry_matches_source_strings(entry, source_strings):
                 entries.append(entry)
 
         return entries

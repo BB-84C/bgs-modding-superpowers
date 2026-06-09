@@ -54,6 +54,14 @@ class GlossaryComposer:
             game,
             mod_slug=mod_slug,
         )
+        entries_by_id = {entry.record_id: entry for entry in entries}
+        for entry in self.reader.query_user_scope_entries(
+            target_lang,
+            game,
+            scopes={"player", "do_not_translate"},
+        ):
+            entries_by_id[entry.record_id] = entry
+        entries = list(entries_by_id.values())
 
         dnt_entries = [entry for entry in entries if entry.scope == "do_not_translate"]
         other_entries = [entry for entry in entries if entry.scope != "do_not_translate"]

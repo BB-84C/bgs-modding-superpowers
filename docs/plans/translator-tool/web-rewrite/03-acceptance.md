@@ -98,8 +98,8 @@ This phase's acceptance is the architectural keystone. If this fails, the rewrit
 
 | Item | Acceptance | Pass criterion |
 |---|---|---|
-| **UX 1 vanilla** | Switch Glossary tab to scope=`vanilla`. | Add button disabled; "use AI agent" message shown. |
-| **UX 1 mod** | Switch to scope=`mod`. | Add button disabled; "use AI agent" message shown. |
+| **UX 1 vanilla** | Switch Glossary tab to scope=`vanilla`. | Add button disabled; player-facing message says the tool automatically maintains this read-only layer. |
+| **UX 1 mod** | Switch to scope=`mod`. | Add button disabled; player-facing message says the tool automatically maintains this read-only layer. |
 | **UX 1 player** | Switch to scope=`player`. | Add button enabled. |
 | **UX 1 dnt** | Switch to scope=`dnt`. | Add button enabled. |
 | **UX 2** | Click Add on player scope. | Dialog shows each field with helper text below per spec. |
@@ -240,7 +240,7 @@ def test_glossary_scope_vanilla_disables_add(page: Page):
     page.get_by_test_id("tab-glossary-vanilla").click()
     add_btn = page.get_by_test_id("btn-add-glossary-entry")
     expect(add_btn).to_be_disabled()
-    expect(page.get_by_test_id("status-glossary-empty-vanilla")).to_contain_text("use AI agent")
+    expect(page.get_by_test_id("status-glossary-empty-vanilla")).to_contain_text("tool automatically")
 ```
 
 Test ID resolution is configured via `pytest-playwright`'s `testid_attribute=data-marker`.

@@ -636,7 +636,7 @@ Glossary management with scope-aware Add gating (UX 1) and field helpers (UX 2).
 - [ ] **7.1** `web/api/glossary.py`:
 
   - `GET /api/glossary?scope=<>` — list entries per scope.
-  - `POST /api/glossary` — add entry (player/DNT only; vanilla/mod return 403 with "use AI agent" message).
+  - `POST /api/glossary` — add entry (player/DNT only; vanilla/mod return 403 with a player-facing "tool automatically maintains this layer" message).
   - `POST /api/glossary/{record_id}` — edit.
   - `DELETE /api/glossary/{record_id}` — remove (player/DNT only).
 
@@ -840,22 +840,23 @@ Flip default of `xtl gui` from `tk` to `web`. Tk becomes opt-in for one release.
 
 ### Tasks
 
-- [ ] **11.1** Run final Tk-vs-web parity check using `00-spec.md` §6 checklist. Block if any item fails.
+- [x] **11.1** Run final Tk-vs-web parity check using `00-spec.md` §6 checklist. Block if any item fails.
 
-- [ ] **11.2** Get explicit user signoff in chat ("ship cut-over").
+- [x] **11.2** Get explicit user signoff in chat ("ship cut-over").
 
-- [ ] **11.3** Change default backend:
+- [x] **11.3** Change default backend:
 
   ```python
   # cli/gui_launcher.py
   def launch_gui(... backend: str = "web", ...) -> None:  # changed default
   ```
 
-- [ ] **11.4** Update `tools/bgs-translator/README.md`:
+- [x] **11.4** Update `tools/bgs-translator/README.md`:
 
-  - "The Tk backend is deprecated as of this release. Use `--backend tk` if you need the old surface; it will be removed in the next release."
+  - `xtl gui` opens the browser control panel.
+  - `xtl gui --backend tk` remains an opt-in fallback. Tk deletion is outside the current cut-over scope.
 
-- [ ] **11.5** Update `docs/plans/translator-tool/AMENDMENTS.md` with the cut-over date and link.
+- [x] **11.5** Update `docs/plans/translator-tool/AMENDMENTS.md` with the cut-over date and link.
 
 - [ ] **11.6** Commit:
 
@@ -868,6 +869,7 @@ Flip default of `xtl gui` from `tk` to `web`. Tk becomes opt-in for one release.
 - User has signed off.
 - `xtl gui` opens browser.
 - `xtl gui --backend tk` still works.
+- Tk deletion is deferred out of the current Phase 11 cut-over scope.
 
 ---
 

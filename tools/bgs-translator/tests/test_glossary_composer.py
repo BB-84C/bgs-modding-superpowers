@@ -43,6 +43,57 @@ def test_collect_for_batch_returns_matching_vanilla_and_dnt_entries(
     assert [entry.source for entry in subset.entries_by_scope["do_not_translate"]] == ["EnaiSiaion"]
 
 
+def test_collect_for_batch_includes_user_player_and_dnt_overrides_even_without_source_hit(
+    tmp_path: Path, make_fixture_pack: PackFactory
+) -> None:
+    from bgs_translator.kb.glossary import GlossaryComposer
+    from bgs_translator.kb.reader import KBGlossaryReader
+
+    make_fixture_pack(
+        "canonical",
+        [
+            {"record_id": "uc", "source": "UC", "target": "联殖", "category": "faction"},
+            {
+                "record_id": "global-canon-dnt",
+                "source": "UnrelatedGlobalCanonTerm",
+                "target": "UnrelatedGlobalCanonTerm",
+                "scope": "do_not_translate",
+            },
+        ],
+    )
+    make_fixture_pack(
+        "translator-overrides-en-zhcn",
+        [
+            {
+                "record_id": "player-starfield",
+                "source": "Starfield",
+                "target": "星空",
+                "scope": "player",
+                "confidence": "canonical",
+            },
+            {
+                "record_id": "dnt-fc",
+                "source": "FC",
+                "target": "FC",
+                "scope": "do_not_translate",
+                "category": "brand",
+            },
+        ],
+        is_user_pack=True,
+    )
+    reader = KBGlossaryReader(kb_root=tmp_path, user_packs_root=tmp_path / "user-packs")
+    try:
+        subset = GlossaryComposer(reader).collect_for_batch(
+            ["This source mentions only UC."], "zh-cn", "Starfield"
+        )
+    finally:
+        reader.close()
+
+    assert [entry.source for entry in subset.entries_by_scope["vanilla"]] == ["UC"]
+    assert [entry.source for entry in subset.entries_by_scope["player"]] == ["Starfield"]
+    assert [entry.source for entry in subset.entries_by_scope["do_not_translate"]] == ["FC"]
+
+
 def test_collect_for_batch_caps_non_dnt_entries(
     tmp_path: Path, make_fixture_pack: PackFactory
 ) -> None:

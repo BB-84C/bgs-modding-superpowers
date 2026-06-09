@@ -16,6 +16,7 @@ import tomli_w
 from bgs_translator.config import paths
 from bgs_translator.config.pricing import estimate_cost
 from bgs_translator.core import event_queue as gui_event_queue
+from bgs_translator.core.event_publisher import get_publisher
 from bgs_translator.core.memory import (
     insert_batch,
     insert_run,
@@ -105,6 +106,7 @@ class BatchRunner:
         self.rate_tracker = rate_tracker
         self.cost_tracker = cost_tracker
         self.max_retries = max_retries
+        self._publisher = get_publisher(plan.project)
 
     async def run(
         self,
@@ -290,6 +292,7 @@ class BatchRunner:
                     update_batch(
                         memory_conn,
                         batch.batch_id,
+                        run_id=run_id,
                         status="cancelled",
                         finished_at=finished_at,
                         tokens_in=None,
@@ -323,12 +326,14 @@ class BatchRunner:
                 update_batch(
                     memory_conn,
                     batch.batch_id,
+                    run_id=run_id,
                     status=batch_status,
                     finished_at=finished_at,
                     tokens_in=outcome.tokens_in,
                     tokens_out=outcome.tokens_out,
                     cost_usd=outcome.cost_usd,
                     cost_exact=outcome.cost_exact,
+                    retry_count=outcome.retried,
                 )
             self._emit_gui_event(
                 "batch.complete" if batch_status == "complete" else "batch.failed",
@@ -556,7 +561,11 @@ class BatchRunner:
     def _batch_status(self, outcome: _BatchOutcome) -> str:
         if outcome.cancelled:
             return "cancelled"
-        if outcome.manual_review or outcome.failures:
+        if outcome.manual_review:
+            return "failed"
+        if outcome.succeeded:
+            return "complete"
+        if outcome.failures:
             return "failed"
         return "complete"
 
@@ -607,7 +616,7 @@ class BatchRunner:
         payload: dict[str, Any] | None = None,
     ) -> None:
         try:
-            gui_event_queue.get_bridge().emit(
+            self._publisher.emit(
                 gui_event_queue.GuiEvent(
                     kind=kind,
                     run_id=run_id,
