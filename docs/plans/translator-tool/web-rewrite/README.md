@@ -44,7 +44,7 @@ Phase 8:  Logs tab + theme + i18n (0.5d)
 Phase 9:  Playwright parity suite (1d)
 Phase 10: Live LLM acceptance, real OpenRouter run (0.5d)
 Phase 11: Cut-over: --backend web becomes default (0.25d)  ← user signoff received 2026-06-09
-Phase 12: Delete Tk tree (0.5d)                            ← out of current scope; separate user authorization required
+Phase 12: Delete Tk tree (0.5d)                            ← authorized and executed 2026-06-10
 ```
 
 Total: **~9.25 dev-days** raw, **~12 dev-days** with rework buffer.
@@ -58,7 +58,7 @@ These backend modules ship through the rewrite verbatim:
 - `bgs_translator/core/memory.py` (extended with `events` table — additive)
 - `bgs_translator/kb/`, `parsers/`, `output/`, `sst/`, `config/`, `observability/`
 - All Pydantic models: `BatchPlan`, `Batch`, `MaskedUnit`, `GlossaryEntry`, `ProviderProfile`, `GuiEvent`
-- `bgs_translator/gui/i18n/*.po` (loader becomes server-side gettext)
+- Web-side zh-cn/en labels and theme strings (server-rendered HTML + JS).
 
 ## What gets deleted at Phase 12
 
@@ -89,9 +89,9 @@ A mix is fine: inline for 1+3+10+11+12, subagent for 2+4-9.
 
 ## When this plan is "done"
 
-The current cut-over scope completes when **Phase 11 acceptance** passes: `xtl gui` opens the browser panel by default, `xtl gui --backend tk` remains available, and the user has signed off.
+The cut-over scope completes when **Phase 12 acceptance** passes: `xtl gui` opens the browser panel, the Tk tree and named-pipe IPC are deleted, and the user has signed off.
 
-The larger migration completes only if a future, separately-authorized **Phase 12 acceptance** passes:
+Phase 12 acceptance:
 
 - Tk tree deleted.
 - `git grep tkinter` returns zero hits in `tools/bgs-translator/`.
@@ -128,6 +128,7 @@ That commit is the proof of completion. Per `00-spec.md` §9, it's the tertiary 
 | 2026-06-08 | Bug B fixed: user-pack player/DNT glossary entries now merge into every batch as user preferences while vanilla/mod remain source-matched. Real RYOS re-plan `62b417b6-8510-4e58-8e00-90f2930dc8d1` produced 24 batches with `FC`, `Starfield`, and `UC` present in every batch glossary subset. |
 | 2026-06-08 | Phase 11 perf/readback slice: route links now force full document navigation, page scripts run through NiceGUI client hooks, Batches exposes hidden perf metrics, and `.opencode/artifacts/web-rewrite-acceptance/phase-11/` records first-byte max 36.829 ms plus Batches event render 232.525 ms emit-to-DOM / 7.4 ms WS-to-render. |
 | 2026-06-09 | Phase 11 in-app Browser live-render evidence preserved: real OpenRouter run `rn_8b27744611c1` completed 2/2 with exact local provider cost `$0.00134068`; `phase-11/live-render-iab/` contains screenshots from running to complete plus structured sqlite/event readback. |
+| 2026-06-10 | Phase 12 authorized by user goal: Tk GUI source/tests, named-pipe IPC, `EventQueueBridge`, `pywin32`, and `--backend tk` fallback were removed; the browser panel is now the only GUI surface. |
 | 2026-06-08 | Phase 11 in-app Browser layout correction: removed the browser shell's fixed 64rem minimum width, changed the status bar to wrap, and tightened Batches table/progress sizing. Evidence under `.opencode/artifacts/web-rewrite-acceptance/phase-11/layout-overflow/` shows default in-app width and 1024x768 desktop probes with no horizontal/element overflow. |
 | 2026-06-09 | Phase 11 synthetic 10-batch readback preserved: local web preview HTTP path completed 10 approvals / 10 batches / 10 `batch.complete` events in 15539.4 ms; Batches API max latency was 211.702 ms. Four-hour browser memory remains a separate unproven gate. |
 | 2026-06-09 | Blind-context UX follow-up: Bernoulli blocked trial on P0 ordinary-player UX risks, then status/cost clarity, Prompt current-vs-history separation, approve-all confirmation, Entries wording/overflow/internal-ID exposure, dangerous-action confirmations, and Glossary "AI agent" wording were fixed. In-app Browser evidence is under `phase-11/blind-ux-followup/`. |

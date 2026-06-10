@@ -29,16 +29,19 @@ def test_batch_run_requests_gui_preview_when_required(
     captured_requests: list[dict[str, Any]] = []
     captured_prompts: list[str] = []
 
-    def fake_is_gui_alive() -> tuple[bool, int | None]:
-        return True, 1234
+    def fake_discover_gui() -> tuple[str, str]:
+        return ("http://127.0.0.1:7847", "secret")
 
-    def fake_request_preview(
-        batch_id: str, prompt: str, items: list[dict[str, object]], timeout: float = 300.0
-    ) -> dict[str, str]:
+    def fake_request_preview_http(**kwargs: Any) -> dict[str, str]:
         captured_requests.append(
-            {"batch_id": batch_id, "prompt": prompt, "items": items, "timeout": timeout}
+            {
+                "batch_id": kwargs["batch_id"],
+                "prompt": kwargs["system_prompt"],
+                "items": kwargs["items"],
+                "timeout": kwargs["timeout"],
+            }
         )
-        return {"op": "approved", "prompt": prompt + "\nEDITED BY GUI"}
+        return {"op": "approved", "prompt": str(kwargs["system_prompt"]) + "\nEDITED BY GUI"}
 
     original_translate = SyntheticLLMClient.translate_batch
 
@@ -48,8 +51,8 @@ def test_batch_run_requests_gui_preview_when_required(
         captured_prompts.append(system_prompt)
         return await original_translate(self, batch, system_prompt)
 
-    monkeypatch.setattr("bgs_translator.cli.batch.runtime_pid.is_gui_alive", fake_is_gui_alive)
-    monkeypatch.setattr("bgs_translator.cli.batch.request_preview", fake_request_preview)
+    monkeypatch.setattr("bgs_translator.cli.batch.discover_gui", fake_discover_gui)
+    monkeypatch.setattr("bgs_translator.cli.batch.request_preview_http", fake_request_preview_http)
     monkeypatch.setattr(SyntheticLLMClient, "translate_batch", capture_translate)
 
     runner = CliRunner()
@@ -95,54 +98,34 @@ def test_preview_no_gui_emits_warning(tmp_path: Path, monkeypatch: pytest.Monkey
     save_settings(Settings.model_validate({"behavior": {"prompt_preview_required": True}}))
     plan_id = _create_preview_plan(tmp_path, monkeypatch)
 
-    def fake_is_gui_alive() -> tuple[bool, int | None]:
-        return True, 1234
+    def fake_discover_gui() -> None:
+        return None
 
-    def fake_request_preview(
-        batch_id: str, prompt: str, items: list[dict[str, object]], timeout: float = 300.0
-    ) -> dict[str, str]:
-        del batch_id, prompt, items, timeout
-        raise FileNotFoundError("pipe missing")
-
-    monkeypatch.setattr("bgs_translator.cli.batch.runtime_pid.is_gui_alive", fake_is_gui_alive)
-    monkeypatch.setattr("bgs_translator.cli.batch.request_preview", fake_request_preview)
+    monkeypatch.setattr("bgs_translator.cli.batch.discover_gui", fake_discover_gui)
 
     result = CliRunner().invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run"])
 
     assert result.exit_code != 0
-    assert "preview skipped" in result.stderr
-    assert "GUI not reachable" in result.stderr
     assert "prompt_preview_required=true" in result.output
+    assert '"abandoned": 1' in result.output
 
 
-def test_preview_transport_unavailable_emits_warning(
+def test_unsupported_preview_backend_blocks_required_preview(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from bgs_translator.cli.app import app
     from bgs_translator.config.settings import Settings, save_settings
 
     monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    monkeypatch.setenv("BGS_TRANSLATOR_PREVIEW_BACKEND", "ipc")
     save_settings(Settings.model_validate({"behavior": {"prompt_preview_required": True}}))
     plan_id = _create_preview_plan(tmp_path, monkeypatch)
-
-    def fake_is_gui_alive() -> tuple[bool, int | None]:
-        return True, 1234
-
-    def fake_request_preview(
-        batch_id: str, prompt: str, items: list[dict[str, object]], timeout: float = 300.0
-    ) -> dict[str, str]:
-        del batch_id, prompt, items, timeout
-        raise RuntimeError("pywin32 missing")
-
-    monkeypatch.setattr("bgs_translator.cli.batch.runtime_pid.is_gui_alive", fake_is_gui_alive)
-    monkeypatch.setattr("bgs_translator.cli.batch.request_preview", fake_request_preview)
 
     result = CliRunner().invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run"])
 
     assert result.exit_code != 0
-    assert "transport missing" in result.stderr
-    assert "install pywin32" in result.stderr
     assert "prompt_preview_required=true" in result.output
+    assert '"abandoned": 1' in result.output
 
 
 def _create_preview_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:

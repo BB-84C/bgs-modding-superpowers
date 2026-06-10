@@ -79,13 +79,20 @@ For local development, restart the browser GUI with the reusable PowerShell harn
 powershell -ExecutionPolicy Bypass -File .\scripts\restart-web-gui.ps1 -Port 7847
 ```
 
-The old Tk panel is still available as an opt-in fallback during cut-over:
+The browser panel is the only supported GUI:
 
 ```powershell
-xtl gui --backend tk
+xtl gui
 ```
 
 ## Documentation
+
+User guides:
+
+```text
+D:\awesome-bgs-mod-master\tools\bgs-translator\USER-GUIDE.zh-cn.md
+D:\awesome-bgs-mod-master\tools\bgs-translator\USER-GUIDE.en.md
+```
 
 The product requirements and chunk plans live in:
 

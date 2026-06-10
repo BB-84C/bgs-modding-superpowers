@@ -60,6 +60,7 @@ class UniversalFallbackSchema:
 
 UNIVERSAL_FALLBACK_SCHEMA = UniversalFallbackSchema()
 LIST_KINDS: dict[int, str] = {0: "STRINGS", 1: "DLSTRINGS", 2: "ILSTRINGS"}
+ORPHAN_FIELD_BY_LIST_INDEX: dict[int, str] = {0: "STRS", 1: "DLST", 2: "ILST"}
 
 
 def extract_translation_units(
@@ -78,47 +79,51 @@ def extract_translation_units(
         encoding_chain=encoding_chain,
         strings_files=strings_files,
     )
+    referenced_string_ids: set[tuple[int, int]] = set()
 
     for record in walker.walk():
         fields = active_schema.get_translatable_subrecords(record.sig)
         if not fields:
             continue
         edid = _record_edid(record, encoding_chain)
-        counts = Counter(field.subrecord_sig for field in fields if field.multi_value)
+        field_by_sig = {field.subrecord_sig: field for field in fields}
         matching_counts = Counter(
-            subrecord.sig for subrecord in record.subrecords if subrecord.sig in counts
+            subrecord.sig for subrecord in record.subrecords if subrecord.sig in field_by_sig
         )
         seen_multi: Counter[str] = Counter()
         for subrecord in record.subrecords:
-            for field in fields:
-                if subrecord.sig != field.subrecord_sig:
-                    continue
-                source, strid = _extract_source(
-                    subrecord,
-                    field,
-                    encoding_chain,
-                    bool(walker.header and walker.header.is_localized),
-                    strings_files,
-                )
-                if source is None or source == "":
-                    continue
-                index_n = seen_multi[subrecord.sig] if field.multi_value else 0
-                index_max = max(matching_counts[subrecord.sig] - 1, 0) if field.multi_value else 0
-                if field.multi_value:
-                    seen_multi[subrecord.sig] += 1
-                yield TranslationUnit(
-                    plugin=plugin_path.name,
-                    formid=record.formid,
-                    formid_sanitized=record.formid & 0x00FFFFFF,
-                    edid=edid,
-                    signature=record.sig,
-                    field=field.subrecord_sig,
-                    index_n=index_n,
-                    index_max=index_max,
-                    source=source,
-                    list_index=field.list_index,
-                    strid=strid,
-                )
+            field = field_by_sig.get(subrecord.sig)
+            if field is None:
+                continue
+            source, strid = _extract_source(
+                subrecord,
+                field,
+                encoding_chain,
+                bool(walker.header and walker.header.is_localized),
+                strings_files,
+            )
+            if source is None or source == "":
+                continue
+            if bool(walker.header and walker.header.is_localized):
+                referenced_string_ids.add((field.list_index, strid))
+            index_n = seen_multi[subrecord.sig]
+            index_max = max(matching_counts[subrecord.sig] - 1, 0)
+            seen_multi[subrecord.sig] += 1
+            yield TranslationUnit(
+                plugin=plugin_path.name,
+                formid=record.formid,
+                formid_sanitized=record.formid & 0x00FFFFFF,
+                edid=edid,
+                signature=record.sig,
+                field=field.subrecord_sig,
+                index_n=index_n,
+                index_max=index_max,
+                source=source,
+                list_index=field.list_index,
+                strid=strid,
+            )
+    if bool(walker.header and walker.header.is_localized):
+        yield from _orphan_localized_strings(plugin_path, strings_files, referenced_string_ids)
 
 
 def extract_tes3_translation_units(
@@ -165,6 +170,45 @@ def _load_strings_files(
     for list_kind, source in find_strings_sources(plugin_path, game=game).items():
         loaded[list_kind] = read_strings_source(source, encoding_chain)
     return loaded
+
+
+def _orphan_localized_strings(
+    plugin_path: Path,
+    strings_files: dict[str, StringsFile],
+    referenced_string_ids: set[tuple[int, int]],
+) -> Iterator[TranslationUnit]:
+    """Yield localized string-table rows xTranslator keeps as orphan strings.
+
+    xTranslator keeps entries present in STRINGS/DLSTRINGS/ILSTRINGS even when
+    no parsed record field references them. Keeping the same rows in XTL avoids
+    GUI/SST count drift against xTranslator's Strings+EspLayout mode.
+    """
+
+    kind_to_index = {kind: index for index, kind in LIST_KINDS.items()}
+    for kind, strings_file in strings_files.items():
+        list_index = kind_to_index.get(kind)
+        if list_index is None:
+            continue
+        field = ORPHAN_FIELD_BY_LIST_INDEX[list_index]
+        for strid, source in sorted(strings_file.entries.items()):
+            if (list_index, strid) in referenced_string_ids:
+                continue
+            if source is None or source == "":
+                continue
+            pseudo_formid = (list_index << 24) | (strid & 0x00FFFFFF)
+            yield TranslationUnit(
+                plugin=plugin_path.name,
+                formid=pseudo_formid,
+                formid_sanitized=strid & 0x00FFFFFF,
+                edid=f"orphan:{kind}:{strid}",
+                signature="ORPH",
+                field=field,
+                index_n=0,
+                index_max=0,
+                source=source,
+                list_index=list_index,
+                strid=strid,
+            )
 
 
 def _record_edid(record: Record, encoding_chain: list[str]) -> str | None:

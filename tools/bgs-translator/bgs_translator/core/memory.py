@@ -176,7 +176,12 @@ def _ensure_units_run_id_column(conn: sqlite3.Connection) -> None:
 
 
 def insert_units(conn: sqlite3.Connection, units: Iterable[TranslationUnit]) -> int:
-    """Bulk insert translation units as untranslated rows, ignoring duplicates."""
+    """Bulk insert translation units as untranslated rows.
+
+    Existing rows keep their translation/status data, but parser-derived
+    metadata is refreshed so a source rescan can repair SST pointer fields
+    such as ``index_max`` after schema coverage changes.
+    """
 
     inserted = 0
     now = datetime.now(UTC).isoformat()
@@ -212,7 +217,40 @@ def insert_units(conn: sqlite3.Connection, units: Iterable[TranslationUnit]) -> 
                 now,
             ),
         )
-        inserted += cursor.rowcount
+        if cursor.rowcount:
+            inserted += 1
+            continue
+        conn.execute(
+            """
+            UPDATE units SET
+                formid_sanitized = ?,
+                edid = ?,
+                index_max = ?,
+                source = ?,
+                list_index = ?,
+                strid = ?,
+                updated_at = ?
+            WHERE plugin = ?
+              AND formid = ?
+              AND signature = ?
+              AND field = ?
+              AND index_n = ?
+            """,
+            (
+                unit.formid_sanitized,
+                unit.edid,
+                unit.index_max,
+                unit.source,
+                unit.list_index,
+                unit.strid,
+                now,
+                unit.plugin,
+                unit.formid,
+                unit.signature,
+                unit.field,
+                unit.index_n,
+            ),
+        )
     conn.commit()
     return inserted
 
@@ -424,7 +462,9 @@ def update_batch(
     )
     if cursor.rowcount != 1:
         conn.rollback()
-        raise ValueError(f"No memory.sqlite batch row updated for run_id={run_id!r} batch_id={batch_id!r}")
+        raise ValueError(
+            f"No memory.sqlite batch row updated for run_id={run_id!r} batch_id={batch_id!r}"
+        )
     conn.commit()
 
 
@@ -600,9 +640,13 @@ def select_units_filtered(
         needle = f"%{search.strip().lower()}%"
         clauses.append(
             "(lower(coalesce(edid, '')) LIKE ? OR lower(source) LIKE ? "
-            "OR lower(coalesce(dest, '')) LIKE ? OR lower(row_id) LIKE ?)"
+            "OR lower(coalesce(dest, '')) LIKE ? OR lower(row_id) LIKE ? "
+            "OR lower(printf('%08X', formid)) LIKE ? "
+            "OR lower(printf('%06X', formid_sanitized)) LIKE ? "
+            "OR CAST(strid AS TEXT) LIKE ?)"
         )
-        params.extend([needle, needle, needle, needle])
+        strid_needle = f"%{search.strip()}%"
+        params.extend([needle, needle, needle, needle, needle, needle, strid_needle])
 
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     limit_clause = ""

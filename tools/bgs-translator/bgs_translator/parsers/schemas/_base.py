@@ -6,6 +6,7 @@ Each schema loads a committed YAML manifest once per process and exposes the
 
 from __future__ import annotations
 
+import re
 from functools import cache
 from pathlib import Path
 from typing import Any
@@ -38,11 +39,22 @@ class YAMLBackedSchema(GameSchema):
         self.manifest_name = manifest_name
         self._manifest = load_yaml_manifest(manifest_name)
         self._records = self._build_records(self._manifest)
+        self._recorddefs = load_xtranslator_recorddefs(manifest_name)
 
     def get_translatable_subrecords(self, record_sig: str) -> list[TranslatableField]:
         """Return the configured translatable fields for ``record_sig``."""
 
-        return list(self._records.get(record_sig.upper(), []))
+        record_sig = record_sig.upper()
+        if self._recorddefs:
+            exact = list(self._recorddefs.get(record_sig, []))
+            exact_field_sigs = {field.subrecord_sig for field in exact}
+            fallback = [
+                field
+                for field in self._recorddefs.get("****", [])
+                if field.subrecord_sig not in exact_field_sigs
+            ]
+            return exact + fallback
+        return list(self._records.get(record_sig, []))
 
     @property
     def form_version_range(self) -> tuple[int, int]:
@@ -84,4 +96,48 @@ class YAMLBackedSchema(GameSchema):
         return records
 
 
-__all__ = ["YAMLBackedSchema", "load_yaml_manifest"]
+@cache
+def load_xtranslator_recorddefs(name: str) -> dict[str, list[TranslatableField]]:
+    """Load an optional xTranslator-style ``Def_`` manifest.
+
+    xTranslator does not rely on a fully expanded per-record field manifest. Its
+    ``_recorddefs.txt`` files define exact record-field pairs plus a ``****``
+    fallback for generic localized fields such as FULL/DESC/ATTX. Mirroring that
+    behavior keeps newly introduced record signatures from being silently lost
+    when a game plugin references them through normal localized string tables.
+    """
+
+    path = _DATA_DIR / f"{name}_recorddefs.txt"
+    if not path.exists():
+        return {}
+
+    records: dict[str, dict[str, TranslatableField]] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("//", 1)[0].strip()
+        if not line or line.startswith("#") or not line.startswith("Def_:"):
+            continue
+        raw_def = line[len("Def_:") :]
+        parts = raw_def.split("=", 2)
+        if len(parts) != 3:
+            continue
+        field_sig, record_sig, list_spec = (part.strip().upper() for part in parts)
+        if "?" in list_spec:
+            continue
+        match = re.match(r"([0-2])", list_spec)
+        if match is None:
+            continue
+        record_fields = records.setdefault(record_sig, {})
+        record_fields.setdefault(
+            field_sig,
+            TranslatableField(
+                subrecord_sig=field_sig,
+                list_index=int(match.group(1)),
+                multi_value=True,
+                byte_budget=65520,
+                notes=f"xtranslator:{list_spec}",
+            ),
+        )
+    return {record_sig: list(fields.values()) for record_sig, fields in records.items()}
+
+
+__all__ = ["YAMLBackedSchema", "load_xtranslator_recorddefs", "load_yaml_manifest"]

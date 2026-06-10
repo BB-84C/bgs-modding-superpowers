@@ -588,9 +588,6 @@ def test_entries_html_uses_player_facing_filter_labels(tmp_path: Path, monkeypat
     assert "疯狂模式：提交当前筛选全部" in html
     assert 'data-marker="panel-entry-context"' in html
     assert "xtl-selection-status" in html
-    assert "已选择 0 / 当前列表 0 个显示组" in html
-    assert "按住 Shift 点击复选框" in html
-    assert "提交队列只会接收未翻译条目" in html
     assert "条目编号" in script
     assert "lastSelectionAnchorRowId" in script
     assert "function setSelectionRange" in script
@@ -612,6 +609,68 @@ def test_entries_html_uses_player_facing_filter_labels(tmp_path: Path, monkeypat
     assert "标记为不需要翻译" in script
     assert "这会清空当前译文" in script
     assert "不会修改原始 MOD 文件" in script
+
+
+def test_entries_html_builds_signature_filters_from_project_memory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.core.memory import insert_units, open_memory_db
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+    from bgs_translator.web import app as web_app
+
+    project_root = paths.project_root("dynamic-filters")
+    conn = open_memory_db(project_root)
+    try:
+        insert_units(
+            conn,
+            [
+                TranslationUnit(
+                    "Example.esm",
+                    0x01000001,
+                    0x01000001,
+                    "GameplayOption",
+                    "GPOF",
+                    "DNAM",
+                    source="Determines a gameplay option.",
+                ),
+                TranslationUnit(
+                    "Example.esm",
+                    0x01000002,
+                    0x01000002,
+                    "LoadScreen",
+                    "LSCR",
+                    "DESC",
+                    source="Loading tip",
+                ),
+                TranslationUnit(
+                    "Example.esm",
+                    0x01000003,
+                    0x01000003,
+                    "PlacedRef",
+                    "REFR",
+                    "FULL",
+                    source="Placed marker",
+                ),
+            ],
+        )
+    finally:
+        conn.close()
+
+    html = web_app._entries_html("dynamic-filters")
+
+    assert 'value="GPOF"' in html
+    assert "游戏设置选项 (GPOF)" in html
+    assert 'value="LSCR"' in html
+    assert "载入画面提示 (LSCR)" in html
+    assert 'value="REFR"' in html
+    assert "放置对象、地点标记或引用名称 (REFR)" in html
+    assert 'value="DNAM"' in html
+    assert "说明/显示文本 (DNAM)" in html
+    assert "已选择 0 / 当前列表 0 个显示组" in html
+    assert "按住 Shift 点击复选框" in html
+    assert "提交队列只会接收未翻译条目" in html
 
 
 def test_entries_bulk_status_api_updates_partial_rows(tmp_path: Path, monkeypatch) -> None:
@@ -1149,7 +1208,7 @@ def test_project_home_shows_signature_status_statistics(tmp_path: Path, monkeypa
     html = web_app._project_html("ryos-zhcn")
     assert 'data-marker="panel-project-signature-stats"' in html
     assert "Record Signature 统计" in html
-    assert "菜单、提示消息、开始选项" in html
+    assert "菜单/消息、提示文本、开始选项" in html
     assert "<b>MESG</b>" in html
     assert "<b>BOOK</b>" in html
 

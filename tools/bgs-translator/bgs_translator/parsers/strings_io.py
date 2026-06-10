@@ -6,11 +6,12 @@ import struct
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import BinaryIO, Literal, cast
 
 from bgs_translator.parsers.encoding import decode_with_chain
 
 StringsListKind = Literal["STRINGS", "DLSTRINGS", "ILSTRINGS"]
+STRING_LIST_KINDS: tuple[StringsListKind, ...] = ("STRINGS", "DLSTRINGS", "ILSTRINGS")
 
 
 @dataclass
@@ -56,13 +57,15 @@ _ARCHIVE_PATTERNS_BY_GAME: dict[str, tuple[str, ...]] = {
 }
 
 
-def find_strings_files(plugin_path: Path, target_lang_code: str = "english") -> dict[str, Path]:
+def find_strings_files(
+    plugin_path: Path, target_lang_code: str = "english"
+) -> dict[StringsListKind, Path]:
     """Locate sibling localized STRINGS-family files for ``plugin_path``."""
 
     strings_dir = plugin_path.parent / "Strings"
     stem = plugin_path.stem
-    found: dict[str, Path] = {}
-    for list_kind in ("STRINGS", "DLSTRINGS", "ILSTRINGS"):
+    found: dict[StringsListKind, Path] = {}
+    for list_kind in STRING_LIST_KINDS:
         candidate = strings_dir / f"{stem}_{target_lang_code}.{list_kind}"
         if candidate.exists():
             found[list_kind] = candidate
@@ -74,15 +77,15 @@ def find_strings_sources(
     target_lang_code: str = "english",
     *,
     game: str | None = None,
-) -> dict[str, StringsSource]:
+) -> dict[StringsListKind, StringsSource]:
     """Locate loose or BA2-backed localized STRINGS-family sources."""
 
     language_candidates = _language_slug_candidates(target_lang_code)
-    found: dict[str, StringsSource] = {}
+    found: dict[StringsListKind, StringsSource] = {}
     for language_slug in language_candidates:
         for kind, path in find_strings_files(plugin_path, language_slug).items():
             found.setdefault(kind, StringsSource(path=path, list_kind=kind))
-    missing = [kind for kind in ("STRINGS", "DLSTRINGS", "ILSTRINGS") if kind not in found]
+    missing = [kind for kind in STRING_LIST_KINDS if kind not in found]
     if missing:
         found.update(
             _find_archive_strings_sources(plugin_path, language_candidates, missing, game=game)
@@ -93,7 +96,7 @@ def find_strings_sources(
 def _kind_from_suffix(path: Path) -> StringsListKind:
     suffix = path.suffix.upper().lstrip(".")
     if suffix in {"STRINGS", "DLSTRINGS", "ILSTRINGS"}:
-        return suffix  # type: ignore[return-value]
+        return cast(StringsListKind, suffix)
     raise ValueError(f"Unsupported STRINGS-family suffix: {path.suffix}")
 
 
@@ -241,7 +244,7 @@ class BA2Archive:
         return entries
 
 
-def _read_ba2_name(stream) -> str:
+def _read_ba2_name(stream: BinaryIO) -> str:
     raw_length = stream.read(2)
     if len(raw_length) < 2:
         return ""
@@ -252,17 +255,17 @@ def _read_ba2_name(stream) -> str:
 def _find_archive_strings_sources(
     plugin_path: Path,
     target_lang_codes: list[str],
-    missing: list[str],
+    missing: list[StringsListKind],
     *,
     game: str | None,
-) -> dict[str, StringsSource]:
-    found: dict[str, StringsSource] = {}
+) -> dict[StringsListKind, StringsSource]:
+    found: dict[StringsListKind, StringsSource] = {}
     stem = plugin_path.stem
     needed = set(missing)
     members = [
         (kind, f"strings/{stem}_{target_lang_code}.{kind.lower()}")
         for target_lang_code in target_lang_codes
-        for kind in ("STRINGS", "DLSTRINGS", "ILSTRINGS")
+        for kind in STRING_LIST_KINDS
         if kind in needed
     ]
     for archive_path in _candidate_archives(plugin_path, game=game):

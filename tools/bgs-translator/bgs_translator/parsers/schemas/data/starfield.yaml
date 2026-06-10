@@ -260,7 +260,7 @@ records:
   - subrecord_sig: BPTN
     list_index: 0
     byte_budget: 65520
-    multi_value: false
+    multi_value: true
     notes: ''
   - subrecord_sig: HULL
     list_index: 0
@@ -1276,7 +1276,7 @@ records:
     multi_value: false
     notes: ''
   - subrecord_sig: CNAM
-    list_index: 0
+    list_index: 1
     byte_budget: 65520
     multi_value: true
     notes: ''
@@ -1624,7 +1624,7 @@ records:
   - subrecord_sig: UNAM
     list_index: 0
     byte_budget: 65520
-    multi_value: false
+    multi_value: true
     notes: ''
   TODD:
   - subrecord_sig: HULL
@@ -1688,7 +1688,7 @@ records:
   - subrecord_sig: FULL
     list_index: 0
     byte_budget: 65520
-    multi_value: false
+    multi_value: true
     notes: ''
   - subrecord_sig: HULL
     list_index: 0

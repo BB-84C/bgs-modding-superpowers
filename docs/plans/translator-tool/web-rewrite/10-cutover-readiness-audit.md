@@ -1,12 +1,12 @@
 # bgs-translator Web Rewrite — Cut-over Readiness Audit
 
-Date: 2026-06-09
+Date: 2026-06-09, updated 2026-06-10
 
-Scope: Phase 11 cut-over. User approved shipping cut-over on 2026-06-09. Phase 12 Tk deletion is explicitly out of current scope and still requires separate authorization.
+Scope: Phase 11/12 cut-over. User approved shipping cut-over on 2026-06-09 and later authorized deleting the Tk GUI as part of the final web-only cut-over.
 
 ## Summary
 
-The browser GUI is functionally broad enough for Phase 11 cut-over: all seven top-level tabs exist, the live preview path works over HTTP/WS, Batches reads sqlite/events, and the RYOS/OpenRouter live run produced real artifacts. `xtl gui` now defaults to the browser panel. Tk stays available through `xtl gui --backend tk`; deletion is not in the current work scope.
+The browser GUI is the only supported control panel: all seven top-level tabs exist, the live preview path works over HTTP/WS, Batches reads sqlite/events, and real OpenRouter runs produced artifacts. `xtl gui` opens the browser panel; `--backend` has been removed because the Tk source tree and named-pipe IPC have been removed.
 
 ## 00-spec §6 Readiness
 
@@ -36,17 +36,14 @@ The browser GUI is functionally broad enough for Phase 11 cut-over: all seven to
 | No stutter reports in 10-batch run | Local synthetic 10-batch run used the real web preview HTTP path with 10 approvals, 10 complete batch rows, 10 `batch.complete` sqlite events, and Batches API max latency 211.702 ms. This is stronger than a user-report proxy, but it is synthetic/local and does not replace long-session memory evidence. | `.opencode/artifacts/web-rewrite-acceptance/phase-11/ten-batch-synthetic/SUMMARY.md`; `ten-batch-readback.json` | Ready for synthetic 10-batch path |
 | User signs off cut-over | User approved cut-over: "cut-over可以ship". | Chat on 2026-06-09 | Ready |
 | `xtl gui` opens browser by default | Default backend changed to `web`; no-backend launch on port 7848 returned NiceGUI healthz. | `.opencode/artifacts/web-rewrite-acceptance/phase-11/cutover-default/SUMMARY.md`; `tests/cli/test_gui_launcher.py::test_gui_defaults_to_web_backend` | Ready |
-| `xtl gui --backend tk` remains opt-in | Default flip preserves explicit Tk routing; unit test verifies `backend="tk"` calls the Tk launcher path. | `tests/cli/test_gui_launcher.py::test_gui_keeps_tk_backend_opt_in` | Ready |
-| Tk-removal reviewed by oracle | Not applicable. User explicitly said Tk deletion is not in current construction/goal scope. | Chat on 2026-06-09 | Deferred out of current scope |
-| One workday/release after cut-over | Not applicable to current scope. Tk deletion remains separate future work. | Chat on 2026-06-09 | Deferred out of current scope |
+| `xtl gui --backend tk` behavior | The backend option no longer exists; web is the only GUI. | `tests/cli/test_gui_launcher.py::test_gui_backend_option_is_removed` | Ready |
+| Tk-removal reviewed | User authorized final web-only cut-over in the active goal; old Tk fallback was removed instead of maintained. | Chat on 2026-06-10 | Ready |
+| One workday/release after cut-over | Waived by current user goal; product direction is web-only and rollback to Tk is no longer supported. | Chat on 2026-06-10 | Ready |
 
 ## Phase 11 Inputs Still Needed
 
 None for the current cut-over scope.
 
-## Phase 12 Inputs Still Needed
+## Phase 12 Closeout
 
-Phase 12 is out of current scope per user instruction. Future Tk deletion still requires:
-
-1. Explicit user message approving Tk deletion.
-2. Tk-removal diff plus final oracle/read-only reviewer pass.
+Phase 12 deletes the Tk tree, Tk widget tests, named-pipe IPC server/client, the Tk event bridge, and the `pywin32` dependency. The remaining GUI event type is `GuiEvent`, persisted and consumed by the web event path.

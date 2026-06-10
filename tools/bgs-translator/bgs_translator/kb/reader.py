@@ -10,6 +10,11 @@ from pathlib import Path
 
 from bgs_translator.config import paths
 from bgs_translator.kb.models import GlossaryEntry
+from bgs_translator.kb.terminology_sources import (
+    extract_record_signature_field,
+    is_terminology_source_record,
+    is_terminology_term_text,
+)
 
 _SOURCE_PREFILTER_CHUNK_SIZE = 400
 _LARGE_GLOSSARY_PACK_THRESHOLD = 50_000
@@ -59,11 +64,11 @@ class KBGlossaryReader:
         self._discover()
         self._conns: dict[Path, sqlite3.Connection] = {}
         self._candidate_cache: dict[
-            tuple[str, Path, str, str, str | None, tuple[str, ...] | None],
+            tuple[str, Path, str, str, str | None, tuple[str, ...] | None, bool],
             list[GlossaryEntry],
         ] = {}
         self._glossary_count_cache: dict[Path, int] = {}
-        self._large_pack_entries_cache: dict[tuple[Path, str, str], list[GlossaryEntry]] = {}
+        self._large_pack_entries_cache: dict[tuple[Path, str, str, bool], list[GlossaryEntry]] = {}
 
     def _discover(self) -> None:
         """Scan installed and user pack roots for ``kb.sqlite`` files."""
@@ -199,6 +204,7 @@ class KBGlossaryReader:
                 mod_slug=mod_slug,
                 source_prefilter_terms=prefilter_terms,
                 source_exact_forms=exact_forms if root_kind == "canonical" else None,
+                terminology_source_only=root_kind == "canonical",
             )
             for entry in cached:
                 deduped[entry.record_id] = entry
@@ -219,11 +225,20 @@ class KBGlossaryReader:
         mod_slug: str | None,
         source_prefilter_terms: tuple[str, ...] | None,
         source_exact_forms: tuple[str, ...] | None = None,
+        terminology_source_only: bool = False,
     ) -> list[GlossaryEntry]:
         deduped: dict[str, GlossaryEntry] = {}
         for chunk in _chunks(source_exact_forms or (), _SOURCE_PREFILTER_CHUNK_SIZE):
-            key = (f"{root_kind}:exact", db_path, target_lang.casefold(), game, mod_slug, chunk)
-            cached = self._candidate_cache.get(key)
+            exact_key = (
+                f"{root_kind}:exact",
+                db_path,
+                target_lang.casefold(),
+                game,
+                mod_slug,
+                chunk,
+                terminology_source_only,
+            )
+            cached = self._candidate_cache.get(exact_key)
             if cached is None:
                 cached = self._query_pack(
                     pack_id,
@@ -235,8 +250,9 @@ class KBGlossaryReader:
                     require_source_match=False,
                     alias_mode="bulk",
                     source_exact_forms=chunk,
+                    terminology_source_only=terminology_source_only,
                 )
-                self._candidate_cache[key] = cached
+                self._candidate_cache[exact_key] = cached
             for entry in cached:
                 deduped[entry.record_id] = entry
         if self._is_large_glossary_pack(db_path):
@@ -248,18 +264,27 @@ class KBGlossaryReader:
                 game,
                 mod_slug=mod_slug,
                 source_prefilter_terms=source_prefilter_terms,
+                terminology_source_only=terminology_source_only,
             ):
                 deduped[entry.record_id] = entry
             return list(deduped.values())
 
-        chunks = (
-            _chunks(source_prefilter_terms, _SOURCE_PREFILTER_CHUNK_SIZE)
-            if source_prefilter_terms
-            else [None]
-        )
-        for chunk in chunks:
-            key = (f"{root_kind}:prefilter", db_path, target_lang.casefold(), game, mod_slug, chunk)
-            cached = self._candidate_cache.get(key)
+        chunks: list[tuple[str, ...] | None]
+        if source_prefilter_terms:
+            chunks = list(_chunks(source_prefilter_terms, _SOURCE_PREFILTER_CHUNK_SIZE))
+        else:
+            chunks = [None]
+        for prefilter_chunk in chunks:
+            prefilter_key = (
+                f"{root_kind}:prefilter",
+                db_path,
+                target_lang.casefold(),
+                game,
+                mod_slug,
+                prefilter_chunk,
+                terminology_source_only,
+            )
+            cached = self._candidate_cache.get(prefilter_key)
             if cached is None:
                 cached = self._query_pack(
                     pack_id,
@@ -270,9 +295,10 @@ class KBGlossaryReader:
                     mod_slug=mod_slug,
                     require_source_match=False,
                     alias_mode="bulk",
-                    source_prefilter_terms=chunk,
+                    source_prefilter_terms=prefilter_chunk,
+                    terminology_source_only=terminology_source_only,
                 )
-                self._candidate_cache[key] = cached
+                self._candidate_cache[prefilter_key] = cached
             for entry in cached:
                 deduped[entry.record_id] = entry
         return list(deduped.values())
@@ -287,6 +313,7 @@ class KBGlossaryReader:
         *,
         mod_slug: str | None,
         source_prefilter_terms: tuple[str, ...] | None,
+        terminology_source_only: bool,
     ) -> list[GlossaryEntry]:
         if not source_prefilter_terms:
             return []
@@ -297,6 +324,7 @@ class KBGlossaryReader:
             game,
             mod_slug,
             source_prefilter_terms,
+            terminology_source_only,
         )
         cached = self._candidate_cache.get(key)
         if cached is not None:
@@ -304,7 +332,14 @@ class KBGlossaryReader:
         source_terms = set(source_prefilter_terms)
         cached = [
             entry
-            for entry in self._large_pack_entries(pack_id, db_path, target_lang, game, mod_slug=mod_slug)
+            for entry in self._large_pack_entries(
+                pack_id,
+                db_path,
+                target_lang,
+                game,
+                mod_slug=mod_slug,
+                terminology_source_only=terminology_source_only,
+            )
             if _entry_source_related_to_terms(entry.source, source_terms)
         ]
         self._candidate_cache[key] = cached
@@ -323,6 +358,7 @@ class KBGlossaryReader:
         alias_mode: str = "per-record",
         source_prefilter_terms: tuple[str, ...] | None = None,
         source_exact_forms: tuple[str, ...] | None = None,
+        terminology_source_only: bool = False,
     ) -> list[GlossaryEntry]:
         try:
             conn = self._conn(db_path)
@@ -369,6 +405,7 @@ class KBGlossaryReader:
                     ge.category,
                     ge.confidence,
                     ge.notes,
+                    r.body_md,
                     r.pack_id AS row_pack_id
                 FROM glossary_entries ge
                 JOIN records r ON r.id = ge.record_id
@@ -388,6 +425,15 @@ class KBGlossaryReader:
         for row in rows:
             if row["scope"] == "mod" and (not mod_slug or row["scope_key"] != mod_slug):
                 continue
+            if terminology_source_only and row["scope"] == "vanilla":
+                source_record = extract_record_signature_field(
+                    body_md=str(row["body_md"] or ""),
+                    notes=str(row["notes"] or ""),
+                )
+                if source_record is not None and not is_terminology_source_record(*source_record):
+                    continue
+                if not is_terminology_term_text(str(row["source"] or "")):
+                    continue
 
             record_id = str(row["record_id"])
             if alias_mode == "bulk":
@@ -464,8 +510,9 @@ class KBGlossaryReader:
         game: str,
         *,
         mod_slug: str | None,
+        terminology_source_only: bool = False,
     ) -> list[GlossaryEntry]:
-        cache_key = (db_path, target_lang.casefold(), game)
+        cache_key = (db_path, target_lang.casefold(), game, terminology_source_only)
         cached = self._large_pack_entries_cache.get(cache_key)
         if cached is not None:
             entries = cached
@@ -488,6 +535,7 @@ class KBGlossaryReader:
                             ge.category,
                             ge.confidence,
                             ge.notes,
+                            r.body_md,
                             r.pack_id AS row_pack_id
                         FROM glossary_entries ge
                         JOIN records r ON r.id = ge.record_id
@@ -513,6 +561,17 @@ class KBGlossaryReader:
                     games_map = self._games_map(db_path)
                     entries = []
                     for row in rows:
+                        if terminology_source_only and row["scope"] == "vanilla":
+                            source_record = extract_record_signature_field(
+                                body_md=str(row["body_md"] or ""),
+                                notes=str(row["notes"] or ""),
+                            )
+                            if source_record is not None and not is_terminology_source_record(
+                                *source_record
+                            ):
+                                continue
+                            if not is_terminology_term_text(str(row["source"] or "")):
+                                continue
                         record_id = str(row["record_id"])
                         source_aliases = alias_map.get(record_id, {}).get("source", [])
                         target_aliases = alias_map.get(record_id, {}).get("target", [])
@@ -674,8 +733,10 @@ def _candidate_exact_forms(source_strings: list[str], limit: int) -> list[str]:
         if len(tokens) > 12:
             continue
         for width in (2, 3, 4):
-            for index in range(0, max(0, len(tokens) - width + 1)):
-                forms.append(" ".join(tokens[index : index + width]))
+            forms.extend(
+                " ".join(tokens[index : index + width])
+                for index in range(0, max(0, len(tokens) - width + 1))
+            )
     deduped = list(dict.fromkeys(form for form in forms if form and len(form) >= 2))
     return deduped[:limit]
 
@@ -699,7 +760,7 @@ def _entry_candidate_terms(source: str) -> set[str]:
     if raw_tokens & _READER_STOP_WORDS:
         return set()
     terms = {token for token in raw_tokens if len(token) >= 3 and token not in _READER_STOP_WORDS}
-    if len(terms) < 2 or len(terms) > 6:
+    if len(terms) > 6:
         return set()
     return terms
 

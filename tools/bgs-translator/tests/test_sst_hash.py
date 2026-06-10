@@ -12,12 +12,17 @@ from bgs_translator.sst.hash import (
 )
 
 
-def test_sanitize_formid_strips_master_byte() -> None:
-    assert sanitize_formid(0x02000800) == 0x00000800
-    assert sanitize_formid(0xFF123456) == 0x00123456
+def test_sanitize_formid_matches_xtranslator_default_master_byte() -> None:
+    assert sanitize_formid(0x02000800) == 0x01000800
+    assert sanitize_formid(0xFF123456) == 0x01123456
     assert sanitize_formid(0x00000000) == 0x00000000
     # Idempotent
-    assert sanitize_formid(sanitize_formid(0x02000800)) == 0x00000800
+    assert sanitize_formid(sanitize_formid(0x02000800)) == 0x01000800
+
+
+def test_sanitize_formid_matches_xtranslator_light_and_medium_masters() -> None:
+    assert sanitize_formid(0xFE123456) == 0xFE001456
+    assert sanitize_formid(0xFD123456) == 0xFD013456
 
 
 def test_string_hash_empty_is_offset_basis() -> None:
@@ -53,11 +58,11 @@ def test_string_hash_takes_low_byte_of_codepoint() -> None:
     assert string_hash("\u0161") == string_hash("a")
 
 
-def test_format_no_edid_key_uses_lowercase_eight_hex() -> None:
+def test_format_no_edid_key_uses_uppercase_eight_hex() -> None:
     assert format_no_edid_key(0) == "[00000000]"
-    assert format_no_edid_key(0x0000ABCD) == "[0000abcd]"
-    # Master byte is stripped before formatting.
-    assert format_no_edid_key(0x02000800) == "[00000800]"
+    assert format_no_edid_key(0x0000ABCD) == "[0000ABCD]"
+    # xTranslator normalizes the master byte to 01 before formatting.
+    assert format_no_edid_key(0x02000800) == "[01000800]"
 
 
 def test_compute_rhash_with_edid_uses_edid() -> None:
@@ -66,7 +71,11 @@ def test_compute_rhash_with_edid_uses_edid() -> None:
 
 def test_compute_rhash_without_edid_uses_bracketed_sanitized_formid() -> None:
     rhash = compute_rhash(None, 0x02000800)
-    assert rhash == string_hash("[00000800]")
+    assert rhash == string_hash("[01000800]")
+
+
+def test_compute_rhash_without_edid_matches_xtranslator_info_records() -> None:
+    assert compute_rhash(None, 0x0102B842) == string_hash("[0102B842]")
 
 
 def test_compute_rhash_empty_edid_falls_back_to_bracketed_form() -> None:

@@ -231,6 +231,190 @@ def test_reader_large_pack_keeps_related_rag_candidates(
     assert [entry.record_id for entry in entries] == ["l10n.starfield.laser-turret"]
 
 
+def test_reader_large_pack_filters_non_terminology_vanilla_sources(
+    tmp_path: Path, make_fixture_pack: PackFactory
+) -> None:
+    from bgs_translator.kb.reader import KBGlossaryReader
+
+    make_fixture_pack(
+        "bgs-l10n-starfield-zhhans",
+        [
+            {
+                "record_id": "l10n.starfield.info-sentence",
+                "source": "Armistice Archives Terrormorph",
+                "target": "停战协议档案库骇变兽",
+                "category": "lore_term",
+                "games": ["Starfield"],
+                "body_md": "- Record: `INFO:NAM1`",
+            },
+            {
+                "record_id": "l10n.starfield.location-term",
+                "source": "Armistice Archives",
+                "target": "停战协议档案库",
+                "category": "place",
+                "games": ["Starfield"],
+                "body_md": "- Record: `LCTN:FULL`",
+            },
+        ],
+    )
+    db_path = tmp_path / "packs" / "bgs-l10n-starfield-zhhans" / "kb.sqlite"
+
+    reader = KBGlossaryReader(
+        kb_root=tmp_path,
+        user_packs_root=tmp_path / "user-packs",
+        candidate_source_term_limit=20,
+    )
+    reader._glossary_count_cache[db_path] = 50_001
+    try:
+        entries = reader.query_candidate_entries(
+            "zh-cn",
+            "Starfield",
+            source_strings=["Report a Terrormorph near the Armistice Archives."],
+        )
+    finally:
+        reader.close()
+
+    assert [entry.record_id for entry in entries] == ["l10n.starfield.location-term"]
+
+
+def test_reader_vanilla_terminology_filter_uses_signature_field_buckets(
+    tmp_path: Path, make_fixture_pack: PackFactory
+) -> None:
+    from bgs_translator.kb.reader import KBGlossaryReader
+
+    make_fixture_pack(
+        "bgs-l10n-starfield-zhhans",
+        [
+            {
+                "record_id": "l10n.starfield.quest-title",
+                "source": "Bounty Target",
+                "target": "悬赏目标",
+                "category": "lore_term",
+                "games": ["Starfield"],
+                "body_md": "- Record: `QUST:FULL`",
+            },
+            {
+                "record_id": "l10n.starfield.quest-log",
+                "source": "Bounty Target is hiding near New Atlantis",
+                "target": "悬赏目标藏在新亚特兰蒂斯城附近",
+                "category": "lore_term",
+                "games": ["Starfield"],
+                "body_md": "- Record: `QUST:CNAM`",
+            },
+            {
+                "record_id": "l10n.starfield.gbfm-structure",
+                "source": "Nova Galactic Hab",
+                "target": "新星银河生活舱",
+                "category": "item",
+                "games": ["Starfield"],
+                "body_md": "- Record: `GBFM:FULL`",
+            },
+            {
+                "record_id": "l10n.starfield.gbfm-hull",
+                "source": "ECS-001",
+                "target": "地球殖民飞船-001",
+                "category": "item",
+                "games": ["Starfield"],
+                "body_md": "- Record: `GBFM:HULL`",
+            },
+            {
+                "record_id": "l10n.starfield.innr-legendary",
+                "source": "Analyzer's",
+                "target": "[分析师]",
+                "category": "item",
+                "games": ["Starfield"],
+                "body_md": "- Record: `INNR:WNAM`",
+            },
+            {
+                "record_id": "l10n.starfield.innr-star",
+                "source": "*",
+                "target": "*",
+                "category": "item",
+                "games": ["Starfield"],
+                "body_md": "- Record: `INNR:WNAM`",
+            },
+            {
+                "record_id": "l10n.starfield.planet-data",
+                "source": "New Atlantis",
+                "target": "新亚特兰蒂斯城",
+                "category": "place",
+                "games": ["Starfield"],
+                "body_md": "- Record: `PNDT:FULL`",
+            },
+            {
+                "record_id": "l10n.starfield.placeholder",
+                "source": "<Alias=TargetLocation>",
+                "target": "<Alias=TargetLocation>",
+                "category": "lore_term",
+                "games": ["Starfield"],
+                "body_md": "- Record: `QUST:QMDT`",
+            },
+        ],
+    )
+    db_path = tmp_path / "packs" / "bgs-l10n-starfield-zhhans" / "kb.sqlite"
+
+    reader = KBGlossaryReader(
+        kb_root=tmp_path,
+        user_packs_root=tmp_path / "user-packs",
+        candidate_source_term_limit=20,
+    )
+    reader._glossary_count_cache[db_path] = 50_001
+    try:
+        entries = reader.query_candidate_entries(
+            "zh-cn",
+            "Starfield",
+            source_strings=[
+                "Find the Bounty Target near New Atlantis.",
+                "Install the Nova Galactic Hab with Analyzer's equipment.",
+            ],
+        )
+    finally:
+        reader.close()
+
+    assert [entry.record_id for entry in entries] == [
+        "l10n.starfield.innr-legendary",
+        "l10n.starfield.quest-title",
+        "l10n.starfield.gbfm-structure",
+    ]
+
+
+def test_reader_large_pack_keeps_user_overrides_even_when_source_record_is_dialogue(
+    tmp_path: Path, make_fixture_pack: PackFactory
+) -> None:
+    from bgs_translator.kb.reader import KBGlossaryReader
+
+    make_fixture_pack(
+        "translator-overrides-en-zhcn",
+        [
+            {
+                "record_id": "user.armistice",
+                "source": "Armistice Archives Terrormorph",
+                "target": "停战协议档案库骇变兽",
+                "scope": "player",
+                "games": ["Starfield"],
+                "body_md": "- Record: `INFO:NAM1`",
+            },
+        ],
+        is_user_pack=True,
+    )
+
+    reader = KBGlossaryReader(
+        kb_root=tmp_path,
+        user_packs_root=tmp_path / "user-packs",
+        candidate_source_term_limit=20,
+    )
+    try:
+        entries = reader.query_candidate_entries(
+            "zh-cn",
+            "Starfield",
+            source_strings=["Report a Terrormorph near the Armistice Archives."],
+        )
+    finally:
+        reader.close()
+
+    assert [entry.record_id for entry in entries] == ["user.armistice"]
+
+
 def test_reader_skips_missing_kb_sqlite(tmp_path: Path) -> None:
     from bgs_translator.kb.reader import KBGlossaryReader
 

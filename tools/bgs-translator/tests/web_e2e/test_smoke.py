@@ -872,6 +872,22 @@ def test_entries_api_filters_and_saves_manual_edit(tmp_path: Path, monkeypatch) 
     assert len(entries.json()) == 1
     assert entries.json()[0]["row_id"] == row_id
 
+    formid_entries = client.get(
+        "/api/projects/ryos-zhcn/entries?search=00000001",
+        headers=headers,
+    )
+    assert formid_entries.status_code == 200
+    assert len(formid_entries.json()) == 1
+    assert formid_entries.json()[0]["row_id"] == row_id
+
+    short_formid_entries = client.get(
+        "/api/projects/ryos-zhcn/entries?search=000001",
+        headers=headers,
+    )
+    assert short_formid_entries.status_code == 200
+    assert len(short_formid_entries.json()) == 1
+    assert short_formid_entries.json()[0]["row_id"] == row_id
+
     saved = client.post(
         f"/api/projects/ryos-zhcn/entries/{row_id}",
         headers=headers,

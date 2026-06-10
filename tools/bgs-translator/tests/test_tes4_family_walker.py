@@ -40,11 +40,10 @@ def test_walks_minimal_plugin(tmp_path: Path) -> None:
 
     records = list(TES4FamilyWalker(plugin).walk())
 
-    assert len(records) == 1
-    assert records[0].sig == "WEAP"
-    assert records[0].formid == 0x01020304
-    assert records[0].subrecords[0].sig == "FULL"
-    assert records[0].subrecords[0].data == b"Test Sword\x00"
+    assert [record.sig for record in records] == ["TES4", "WEAP"]
+    assert records[1].formid == 0x01020304
+    assert records[1].subrecords[0].sig == "FULL"
+    assert records[1].subrecords[0].data == b"Test Sword\x00"
 
 
 def test_xxxx_overflow(tmp_path: Path) -> None:
@@ -57,7 +56,7 @@ def test_xxxx_overflow(tmp_path: Path) -> None:
     plugin = tmp_path / "Overflow.esm"
     plugin.write_bytes(plugin_bytes(child=record(b"WEAP", data)))
 
-    parsed = next(TES4FamilyWalker(plugin).walk())
+    parsed = next(record for record in TES4FamilyWalker(plugin).walk() if record.sig == "WEAP")
 
     assert parsed.subrecords[0].sig == "DESC"
     assert parsed.subrecords[0].data == payload
@@ -71,7 +70,7 @@ def test_compressed_record(tmp_path: Path) -> None:
     plugin = tmp_path / "Compressed.esm"
     plugin.write_bytes(plugin_bytes(child=record(b"WEAP", compressed, flags=0x40000)))
 
-    parsed = next(TES4FamilyWalker(plugin).walk())
+    parsed = next(record for record in TES4FamilyWalker(plugin).walk() if record.sig == "WEAP")
 
     assert parsed.is_compressed is True
     assert parsed.subrecords[0].data == b"Compressed\x00"

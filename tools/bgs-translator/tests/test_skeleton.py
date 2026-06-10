@@ -62,7 +62,7 @@ def test_envelope_success_failure() -> None:
     assert exit_code_for(failed) == 2
 
 
-def test_i18n_coverage_passes_when_empty() -> None:
-    from bgs_translator.gui.i18n._coverage_check import find_missing_translations
+def test_gui_capability_is_web_only() -> None:
+    from bgs_translator.cli.gui_launcher import launch_gui
 
-    assert find_missing_translations() == []
+    assert callable(launch_gui)

@@ -21,6 +21,7 @@ from bgs_translator.config.profiles import (
     normalize_base_url,
     resolve_api_key,
     save_profiles,
+    write_env_var,
 )
 from bgs_translator.parsers.tes4_family import TranslationUnit
 from bgs_translator.pipeline.batcher import Batch
@@ -162,6 +163,13 @@ def edit_profile(
     base_url: str | None = typer.Option(None, "--base-url"),
     model: str | None = typer.Option(None, "--model"),
     cost_cap_usd: float | None = typer.Option(None, "--cost-cap-usd"),
+    max_concurrency: int | None = typer.Option(None, "--max-concurrency"),
+    rate_limit_rpm: int | None = typer.Option(None, "--rate-limit-rpm"),
+    rate_limit_tpm: int | None = typer.Option(None, "--rate-limit-tpm"),
+    json_mode: Literal["json_object", "json_schema"] | None = typer.Option(None, "--json-mode"),
+    require_parameters: bool | None = typer.Option(None, "--require-parameters/--no-require-parameters"),
+    prompt_caching: bool | None = typer.Option(None, "--prompt-caching/--no-prompt-caching"),
+    notes: str | None = typer.Option(None, "--notes"),
 ) -> None:
     """Edit profile fields via flags, or open profiles.toml in $EDITOR."""
 
@@ -187,7 +195,29 @@ def edit_profile(
     if cost_cap_usd is not None:
         profile.cost_cap_usd = cost_cap_usd
         changed = True
+    if max_concurrency is not None:
+        profile.max_concurrency = max_concurrency
+        changed = True
+    if rate_limit_rpm is not None:
+        profile.rate_limit_rpm = rate_limit_rpm
+        changed = True
+    if rate_limit_tpm is not None:
+        profile.rate_limit_tpm = rate_limit_tpm
+        changed = True
+    if json_mode is not None:
+        profile.json_mode = json_mode
+        changed = True
+    if require_parameters is not None:
+        profile.require_parameters = require_parameters
+        changed = True
+    if prompt_caching is not None:
+        profile.prompt_caching = prompt_caching
+        changed = True
+    if notes is not None:
+        profile.notes = notes
+        changed = True
     if changed:
+        cfg.profiles[name] = ProviderProfile.model_validate(profile.model_dump(mode="python"))
         save_profiles(cfg)
         _emit_success({"profile": name, "edited": True})
         return
@@ -197,6 +227,26 @@ def edit_profile(
     assert editor is not None
     subprocess.run([editor, str(paths.profiles_toml_path())], check=False)
     _emit_success({"profile": name, "editor": editor})
+
+
+@profile_app.command("set-key")
+def set_profile_key(name: str) -> None:
+    """Store a profile API key in profiles/.env via hidden prompt/stdin."""
+
+    cfg = load_profiles()
+    profile = cfg.profiles.get(name)
+    if profile is None:
+        _emit_failure("profile_not_found", f"Profile {name!r} does not exist.", {})
+    assert profile is not None
+    key = typer.prompt(
+        f"API key for {name} ({profile.api_key_env})",
+        hide_input=True,
+        confirmation_prompt=False,
+    )
+    if not str(key).strip():
+        _emit_failure("invalid_argument", "API key cannot be empty.", {})
+    write_env_var(paths.profiles_env_path(), profile.api_key_env, str(key).strip())
+    _emit_success({"profile": name, "api_key_env": profile.api_key_env, "path": str(paths.profiles_env_path())})
 
 
 @profile_app.command("probe")

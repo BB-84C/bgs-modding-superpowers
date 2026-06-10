@@ -126,6 +126,7 @@ class BatchRunner:
         self._prepare_run_dir(run_dir)
         memory_path = paths.project_root(self.plan.project) / "memory" / "memory.sqlite"
         memory_conn = sqlite3.connect(memory_path) if memory_path.exists() else None
+        run_row_inserted = memory_conn is not None
         started_at = datetime.now(UTC).isoformat()
         if memory_conn is not None:
             insert_run(
@@ -212,7 +213,7 @@ class BatchRunner:
             else ("failed" if result.manual_review or result.cancelled else "complete")
         )
         finished_at = datetime.now(UTC).isoformat()
-        memory_conn = sqlite3.connect(memory_path) if memory_path.exists() else None
+        memory_conn = sqlite3.connect(memory_path) if run_row_inserted else None
         try:
             if memory_conn is not None:
                 update_run(
@@ -796,8 +797,8 @@ class BatchRunner:
             translated_row_ids = row_ids if row_ids else [row_id or ""]
             if not persisted_any and row_id:
                 translated_row_ids = [row_id]
-            for translated_row_id in translated_row_ids:
-                translated_units.append(
+            translated_units.extend(
+                [
                     TranslatedUnit(
                         row_id=translated_row_id,
                         unit=item.unit,
@@ -810,7 +811,9 @@ class BatchRunner:
                         retry_count=attempt,
                         last_batch_id=batch.batch_id,
                     )
-                )
+                    for translated_row_id in translated_row_ids
+                ]
+            )
         if persist_failures:
             return _BatchOutcome(
                 manual_review=len(persist_failures),

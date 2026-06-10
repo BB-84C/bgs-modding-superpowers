@@ -1,9 +1,9 @@
+# ruff: noqa: RUF001
 """Human-readable BGS record signature explanations for prompt context."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
-
 
 SIGNATURE_EXPLANATIONS: dict[str, str] = {
     "TES4": "插件文件头/主记录信息，通常是插件名、作者、描述等元数据。",

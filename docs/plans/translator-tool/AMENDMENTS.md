@@ -267,25 +267,23 @@ This mitigation is not a recommendation to run reasoning models by default; it p
 
 ---
 
-## §7. GUI cut-over: browser panel is default, Tk remains opt-in
+## §7. GUI cut-over: browser panel is the only GUI
 
-**Source**: `docs/plans/translator-tool/web-rewrite/` Phase 11 cut-over, user signoff on 2026-06-09.
+**Source**: `docs/plans/translator-tool/web-rewrite/` Phase 11/12 cut-over, user signoff on 2026-06-09 and web-only authorization on 2026-06-10.
 
-The browser-rendered control panel is now the default GUI surface:
+The browser-rendered control panel is now the only supported GUI surface:
 
 ```powershell
 xtl gui
 ```
 
-The old Tk panel remains available as an explicit fallback:
+The old Tk panel, named-pipe IPC preview transport, Tk event bridge, and backend selector have been removed. This is expected to fail because `--backend` is no longer a supported option:
 
 ```powershell
 xtl gui --backend tk
 ```
 
-Tk deletion is not part of the current cut-over scope. Treat any Tk removal, Tk-test deletion, `core/ipc.py` deletion, or `--backend tk` removal as a separate future workstream requiring explicit user authorization.
-
-The `00-spec.md` §6.3 four-hour browser memory check is being monitored by a separate PowerShell process. Its result review is not part of the current cut-over scope and must not block this Phase 11 default flip unless the user explicitly brings that gate back into scope.
+The `00-spec.md` §6.3 four-hour browser memory check was monitored by a separate PowerShell process. Its result review is not part of this web-only cut-over scope unless the user explicitly brings that gate back into scope.
 
 ---
 
@@ -308,3 +306,4 @@ When closing a chunk, audit the chunk's discovered amendments and decide whether
 - **2026-06-07** Initial AMENDMENTS file from Chunk A spike findings (Amendments 1–5).
 - **2026-06-08** Added §6 reasoning-model empty-completion risk and mitigation notes.
 - **2026-06-09** Added §7 GUI cut-over amendment: `xtl gui` defaults to browser; Tk remains opt-in; Tk deletion and 4-hour memory result review are out of current scope.
+- **2026-06-10** Updated §7: Tk has been removed; browser is the only GUI surface.

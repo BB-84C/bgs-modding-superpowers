@@ -21,10 +21,6 @@ def launch_gui(
         str | None,
         typer.Option("--language", help="Override the GUI language (en, zh-cn)"),
     ] = None,
-    backend: Annotated[
-        str,
-        typer.Option("--backend", help="GUI backend: tk or web"),
-    ] = "web",
     port: Annotated[
         int | None,
         typer.Option("--port", help="Web GUI localhost port"),
@@ -40,18 +36,9 @@ def launch_gui(
 ) -> None:
     """Launch the control panel."""
 
-    if backend == "web":
-        from bgs_translator.web.app import launch_web
+    from bgs_translator.web.app import launch_web
 
-        launch_web(theme=theme, language=language, port=port, no_open=no_open, native=native)
-        return
-    if backend != "tk":
-        raise typer.BadParameter("backend must be 'tk' or 'web'")
-
-    # Import inside the function so ``--help`` does not pull in Tk/NiceGUI.
-    from bgs_translator.gui.app import launch
-
-    launch(theme=theme, language=language)
+    launch_web(theme=theme, language=language, port=port, no_open=no_open, native=native)
 
 
 __all__ = ["launch_gui"]

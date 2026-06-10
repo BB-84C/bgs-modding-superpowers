@@ -97,7 +97,9 @@ _PAGE_ROUTES = {
 
 
 @fastapi_app.middleware("http")
-async def html_page_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+async def html_page_middleware(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     """Serve control-panel pages as ordinary HTML so inline page scripts execute."""
 
     active = _PAGE_ROUTES.get(request.url.path)
@@ -322,7 +324,9 @@ async def request_preview(
         return await asyncio.wait_for(future, timeout=payload.timeout_seconds)
     except TimeoutError:
         _PENDING_PREVIEWS.pop(key, None)
-        await broadcast_ws({"kind": "preview.timeout", "run_id": payload.run_id, "batch_id": payload.batch_id})
+        await broadcast_ws(
+            {"kind": "preview.timeout", "run_id": payload.run_id, "batch_id": payload.batch_id}
+        )
         return {"op": "timeout"}
 
 
@@ -343,7 +347,9 @@ async def respond_preview(
     if payload.op == "approve_all":
         _APPROVE_ALL_RUNS.add(request.run_id)
     future.set_result(payload.model_dump())
-    await broadcast_ws({"kind": "preview.closed", "run_id": run_id, "batch_id": batch_id, "op": payload.op})
+    await broadcast_ws(
+        {"kind": "preview.closed", "run_id": run_id, "batch_id": batch_id, "op": payload.op}
+    )
     return {"ok": True}
 
 
@@ -415,14 +421,17 @@ def api_project(project: str, _auth: None = Depends(require_shared_secret)) -> d
 
 
 @fastapi_app.post("/api/projects/{project}/reload")
-def api_project_reload(project: str, _auth: None = Depends(require_shared_secret)) -> dict[str, Any]:
+def api_project_reload(
+    project: str, _auth: None = Depends(require_shared_secret)
+) -> dict[str, Any]:
     """Re-read project metadata, source-plugin status, parser cache, and sqlite-derived counts."""
 
     project_root = paths.project_root(project)
     if not (project_root / "project.toml").exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"project not found: {project}")
     data = _project_toml_data(project_root)
-    project_data = data.get("project") if isinstance(data.get("project"), dict) else {}
+    raw_project_data = data.get("project")
+    project_data = raw_project_data if isinstance(raw_project_data, dict) else {}
     plugin_path = Path(str(project_data.get("source_plugin_path") or ""))
     game = str(project_data.get("game") or "")
     inserted = 0
@@ -490,11 +499,15 @@ def api_bulk_update_project_entries_status(
 ) -> dict[str, Any]:
     """Persist a manual status update for selected entries."""
 
-    return _bulk_update_entries_status(project, payload.row_ids, payload.status, reason=payload.reason)
+    return _bulk_update_entries_status(
+        project, payload.row_ids, payload.status, reason=payload.reason
+    )
 
 
 @fastapi_app.get("/api/projects/{project}/entries/{row_id}")
-def api_project_entry(project: str, row_id: str, _auth: None = Depends(require_shared_secret)) -> dict[str, Any]:
+def api_project_entry(
+    project: str, row_id: str, _auth: None = Depends(require_shared_secret)
+) -> dict[str, Any]:
     """Return one translation entry by row id."""
 
     conn = _open_project_db(project)
@@ -519,7 +532,9 @@ def api_update_project_entry(
     allowed_statuses = {"untranslated", "translated", "partial", "locked"}
     new_status = payload.status.strip().lower()
     if new_status not in allowed_statuses:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"status must be one of {sorted(allowed_statuses)}")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"status must be one of {sorted(allowed_statuses)}"
+        )
 
     from bgs_translator.cli.edit import _append_audit, _apply_edit, _get_unit
 
@@ -532,7 +547,9 @@ def api_update_project_entry(
         conn.execute("BEGIN")
         after = _apply_edit(conn, row_id, dest=payload.dest, status=new_status)
         conn.commit()
-        _append_audit(project_root, row_id=row_id, before=before, after=after, reason=payload.reason)
+        _append_audit(
+            project_root, row_id=row_id, before=before, after=after, reason=payload.reason
+        )
     except sqlite3.Error as exc:
         conn.rollback()
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
@@ -668,12 +685,16 @@ def api_project_open_exports(
 
 
 @fastapi_app.get("/api/projects/{project}/runs")
-def api_project_runs(project: str, _auth: None = Depends(require_shared_secret)) -> list[dict[str, Any]]:
+def api_project_runs(
+    project: str, _auth: None = Depends(require_shared_secret)
+) -> list[dict[str, Any]]:
     """Return recent runs for one project."""
 
     conn = _open_project_db(project)
     try:
-        return _annotate_run_rows(project, conn, [_sqlite_row_dict(row) for row in list_recent_runs(conn, limit=30)])
+        return _annotate_run_rows(
+            project, conn, [_sqlite_row_dict(row) for row in list_recent_runs(conn, limit=30)]
+        )
     finally:
         conn.close()
 
@@ -733,8 +754,12 @@ def api_discard_run_translations(
         if run is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"run not found: {run_id}")
         status_value = str(run[0] or "")
-        if status_value in {"running", "queued"} or any(payload.run_id == run_id for payload in _pending_previews(project)):
-            raise HTTPException(status.HTTP_409_CONFLICT, "这个任务还在运行或等待确认，请先停止任务。")
+        if status_value in {"running", "queued"} or any(
+            payload.run_id == run_id for payload in _pending_previews(project)
+        ):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "这个任务还在运行或等待确认，请先停止任务。"
+            )
         discarded_count = discard_run_translations(conn, run_id)
     finally:
         conn.close()
@@ -800,12 +825,17 @@ def api_profiles(_auth: None = Depends(require_shared_secret)) -> dict[str, Any]
     cfg = _load_profiles_for_api()
     return {
         "active": cfg.active,
-        "profiles": [_profile_payload(profile, active=name == cfg.active) for name, profile in sorted(cfg.profiles.items())],
+        "profiles": [
+            _profile_payload(profile, active=name == cfg.active)
+            for name, profile in sorted(cfg.profiles.items())
+        ],
     }
 
 
 @fastapi_app.post("/api/profiles")
-def api_save_profile(payload: ProfileSave, _auth: None = Depends(require_shared_secret)) -> dict[str, Any]:
+def api_save_profile(
+    payload: ProfileSave, _auth: None = Depends(require_shared_secret)
+) -> dict[str, Any]:
     """Add or edit a provider profile from the browser form."""
 
     cfg = _load_profiles_for_api()
@@ -882,7 +912,11 @@ async def api_probe_profile(name: str, _auth: None = Depends(require_shared_secr
     except ProfileMissingKeyError as exc:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"code": "missing_api_key", "message": str(exc), "api_key_env": profile.api_key_env},
+            content={
+                "code": "missing_api_key",
+                "message": str(exc),
+                "api_key_env": profile.api_key_env,
+            },
         )
     try:
         from bgs_translator.cli.profile import _probe_provider
@@ -937,7 +971,9 @@ def api_glossary(
 
 
 @fastapi_app.post("/api/glossary")
-def api_add_glossary(payload: GlossarySave, _auth: None = Depends(require_shared_secret)) -> dict[str, Any]:
+def api_add_glossary(
+    payload: GlossarySave, _auth: None = Depends(require_shared_secret)
+) -> dict[str, Any]:
     """Add a writable player / do-not-translate glossary entry."""
 
     entry = _save_glossary_entry(payload)
@@ -958,16 +994,22 @@ def api_edit_glossary(
 
 
 @fastapi_app.delete("/api/glossary/{record_id}")
-def api_delete_glossary(record_id: str, _auth: None = Depends(require_shared_secret)) -> dict[str, Any]:
+def api_delete_glossary(
+    record_id: str, _auth: None = Depends(require_shared_secret)
+) -> dict[str, Any]:
     """Remove a writable glossary entry from the user override pack."""
 
     if not _delete_user_glossary_entry(record_id):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"writable glossary entry not found: {record_id}")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"writable glossary entry not found: {record_id}"
+        )
     return {"ok": True, "removed": record_id}
 
 
 @fastapi_app.post("/api/settings/behavior/prompt_preview_required")
-def api_preview_required(value: bool, _auth: None = Depends(require_shared_secret)) -> dict[str, bool]:
+def api_preview_required(
+    value: bool, _auth: None = Depends(require_shared_secret)
+) -> dict[str, bool]:
     """Persist prompt preview requirement."""
 
     settings = update_setting("behavior.prompt_preview_required", value)
@@ -1012,7 +1054,9 @@ def api_theme(payload: ThemeSave, _auth: None = Depends(require_shared_secret)) 
 
 
 @fastapi_app.post("/api/language")
-def api_language(payload: LanguageSave, _auth: None = Depends(require_shared_secret)) -> dict[str, str]:
+def api_language(
+    payload: LanguageSave, _auth: None = Depends(require_shared_secret)
+) -> dict[str, str]:
     """Persist UI language selection."""
 
     try:
@@ -1129,7 +1173,9 @@ def _render_page(active: str) -> None:
 
 def _document_html(active: str, project: str | None = None) -> str:
     settings = load_settings()
-    css = "\n".join(_theme_file(name) for name in ("base.css", "amber.css", "green.css", "mono.css"))
+    css = "\n".join(
+        _theme_file(name) for name in ("base.css", "amber.css", "green.css", "mono.css")
+    )
     escaped_active = html.escape(active, quote=True)
     query = {"active": active}
     if project:
@@ -1210,7 +1256,11 @@ def _shell_html(active: str, project: str | None = None) -> str:
     status_kind = "orphaned" if "历史任务未正常收尾" in status_text else status_tone
     theme_options = "".join(
         f'<option value="{name}" {"selected" if settings.ui.theme == name else ""}>{label}</option>'
-        for name, label in [("amber", "琥珀 Amber"), ("green", "废土绿 Green"), ("mono", "黑白 Mono")]
+        for name, label in [
+            ("amber", "琥珀 Amber"),
+            ("green", "废土绿 Green"),
+            ("mono", "黑白 Mono"),
+        ]
     )
     status_action = (
         f'<a class="xtl-status-action danger" data-marker="link-running-tasks" href="{_page_href("batches", project)}">'
@@ -1241,7 +1291,7 @@ def _shell_html(active: str, project: str | None = None) -> str:
       <span class="xtl-status-separator">|</span>
       <label class="xtl-status-control"><span>{labels["theme"]}:</span><select class="xtl-status-select" data-marker="select-theme" id="xtl-theme-select">{theme_options}</select></label>
       <span class="xtl-status-separator">|</span>
-      <span class="xtl-status-{status_tone} xtl-status-summary" id="xtl-status-summary" data-status-kind="{_esc(status_kind)}" data-project="{_esc(project or '')}">状态: <b data-marker="status-gui-alive">{_esc(status_text)}</b>{status_action}</span>
+      <span class="xtl-status-{status_tone} xtl-status-summary" id="xtl-status-summary" data-status-kind="{_esc(status_kind)}" data-project="{_esc(project or "")}">状态: <b data-marker="status-gui-alive">{_esc(status_text)}</b>{status_action}</span>
     </div>
     <div class="xtl-shell">
       {_sidebar_html(active, project)}
@@ -1302,10 +1352,14 @@ def _tabs_html(active: str, project: str | None) -> str:
         ("glossary", labels["glossary"]),
         ("logs", labels["logs"]),
     ]
-    return '<nav class="xtl-tabs">' + "".join(
-        f'<a class="xtl-tab {"active" if key == active else ""}" href="{_page_href(key, project)}" data-marker="tab-{key}">{label}</a>'
-        for key, label in tabs
-    ) + "</nav>"
+    return (
+        '<nav class="xtl-tabs">'
+        + "".join(
+            f'<a class="xtl-tab {"active" if key == active else ""}" href="{_page_href(key, project)}" data-marker="tab-{key}">{label}</a>'
+            for key, label in tabs
+        )
+        + "</nav>"
+    )
 
 
 def _ui_labels(language: str) -> dict[str, str]:
@@ -1360,11 +1414,13 @@ def _project_html(project: str | None) -> str:
           <div class="xtl-empty">还没有项目。可以在左侧导入 ESP/ESM/ESL 来创建翻译项目。</div>
         </div>
         """
-    settings = load_settings()
     summary = _project_summary(project)
     source = summary["source"]
     plugins = source["memory_plugins"] or []
-    memory_plugins = "，".join(f'{item["name"]}（{item["count"]} 条）' for item in plugins) or "尚未读取到插件条目"
+    memory_plugins = (
+        "，".join(f"{item['name']}（{item['count']} 条）" for item in plugins)
+        or "尚未读取到插件条目"
+    )
     source_status = "源文件存在" if source["exists"] else "源文件不存在"
     if source["sha_status"] == "match":
         source_status += "，指纹匹配"
@@ -1472,7 +1528,7 @@ def _project_signature_stats_html(rows: list[dict[str, Any]]) -> str:
         signature = str(row.get("signature") or "未知")
         lines.append(
             "<tr>"
-            f"<td><b>{_esc(signature)}</b><div class=\"xtl-help\">{_esc(_signature_label(signature))}</div></td>"
+            f'<td><b>{_esc(signature)}</b><div class="xtl-help">{_esc(_signature_label(signature))}</div></td>'
             f"<td>{int(row.get('total') or 0)}</td>"
             f"<td>{int(row.get('translated') or 0)}</td>"
             f"<td>{int(row.get('pending_ai') or 0)}</td>"
@@ -1746,11 +1802,13 @@ def _entries_html(project: str | None) -> str:
     source = _esc(str(selected["source"])) if selected else ""
     dest = _esc(str(selected["dest"] or "")) if selected else ""
     status_value = _esc(str(selected["status"])) if selected else "untranslated"
+    signature_options = _entry_signature_options_html(project)
+    field_options = _entry_field_options_html(project)
     return f"""
     <div class="xtl-page-grid xtl-entries-page">
     <div class="xtl-toolbar" data-marker="panel-entries-filter">
-      <span class="xtl-label">文本类型</span><select class="xtl-select" data-marker="select-entries-sig" id="xtl-entries-sig"><option value="">全部</option><option value="MESG">菜单/消息（MESG）</option><option value="INFO">对话/信息（INFO）</option><option value="QUST">任务（QUST）</option><option value="BOOK">书籍/说明（BOOK）</option><option value="CELL">地点/区域（CELL）</option></select>
-      <span class="xtl-label">文本字段</span><select class="xtl-select" data-marker="select-entries-field" id="xtl-entries-field"><option value="">全部</option><option value="FULL">名称文本（FULL）</option><option value="DESC">说明文本（DESC）</option></select>
+      <span class="xtl-label">文本类型</span><select class="xtl-select" data-marker="select-entries-sig" id="xtl-entries-sig">{signature_options}</select>
+      <span class="xtl-label">文本字段</span><select class="xtl-select" data-marker="select-entries-field" id="xtl-entries-field">{field_options}</select>
       <span class="xtl-label">状态</span><select class="xtl-select" data-marker="select-entries-status" id="xtl-entries-status"><option value="">全部</option><option value="untranslated">未翻译</option><option value="translated">已翻译</option><option value="partial">需复查</option><option value="locked">锁定</option></select>
       <input class="xtl-input" data-marker="field-entries-search" id="xtl-entries-search" placeholder="搜索原文、译文或条目编号">
       <button class="xtl-btn" data-marker="btn-entries-select-all" id="xtl-entries-select-all">全选当前列表</button>
@@ -1815,12 +1873,19 @@ def _entries_html(project: str | None) -> str:
 def _batches_html(project: str | None) -> str:
     rows = _run_rows(project)
     selected_run = _preferred_run_id(rows)
-    selected_status = next((str(row.get("status") or "") for row in rows if str(row.get("run_id") or "") == selected_run), "")
+    selected_status = next(
+        (
+            str(row.get("status") or "")
+            for row in rows
+            if str(row.get("run_id") or "") == selected_run
+        ),
+        "",
+    )
     cancel_disabled = "disabled" if selected_status != "running" else ""
     discard_disabled = "disabled" if selected_status in {"", "running", "queued"} else ""
     options = "".join(
         f'<option value="{_esc(str(row["run_id"]))}" title="{_esc(str(row["run_id"]))}" {"selected" if str(row["run_id"]) == selected_run else ""}>'
-        f'{_esc(_run_option_label(row, index))}</option>'
+        f"{_esc(_run_option_label(row, index))}</option>"
         for index, row in enumerate(rows, start=1)
     )
     if not options:
@@ -1870,8 +1935,14 @@ def _prompt_html(project: str | None) -> str:
     planned = _planned_batches(project)
     pending = _pending_previews(project)
     current_preview = pending[-1] if pending else None
-    sample = current_preview.system_prompt if current_preview else (planned[0]["prompt"] if planned else _sample_prompt(project))
-    first_label = _preview_select_label(current_preview) if current_preview else "当前没有等待确认的批次"
+    sample = (
+        current_preview.system_prompt
+        if current_preview
+        else (planned[0]["prompt"] if planned else _sample_prompt(project))
+    )
+    first_label = (
+        _preview_select_label(current_preview) if current_preview else "当前没有等待确认的批次"
+    )
     select_disabled = "" if current_preview else "disabled"
     action_disabled = "" if current_preview else "disabled"
     preview_status = (
@@ -1887,17 +1958,29 @@ def _prompt_html(project: str | None) -> str:
     else:
         history_options = "<option>暂无历史预览</option>"
     options = f"<option>{_esc(first_label)}</option>"
-    first_glossary = _format_glossary_panel_html(
-        current_preview.glossary_evidence,
-        current_preview.glossary_subset,
-    ) if current_preview else (
+    first_glossary = (
         _format_glossary_panel_html(
-            planned[0].get("glossary_evidence", []),
-            planned[0]["glossary_subset"],
-        ) if planned else "<div class=\"xtl-empty\">预览后，这里会显示本次用到的专有名词。</div>"
+            current_preview.glossary_evidence,
+            current_preview.glossary_subset,
+        )
+        if current_preview
+        else (
+            _format_glossary_panel_html(
+                planned[0].get("glossary_evidence", []),
+                planned[0]["glossary_subset"],
+            )
+            if planned
+            else '<div class="xtl-empty">预览后，这里会显示本次用到的专有名词。</div>'
+        )
     )
-    first_dnt = _format_dnt_panel(current_preview.do_not_translate) if current_preview else (
-        _format_dnt_panel(planned[0]["do_not_translate"]) if planned else "这里会列出人名、地名、缩写等不应翻译的词。"
+    first_dnt = (
+        _format_dnt_panel(current_preview.do_not_translate)
+        if current_preview
+        else (
+            _format_dnt_panel(planned[0]["do_not_translate"])
+            if planned
+            else "这里会列出人名、地名、缩写等不应翻译的词。"
+        )
     )
     lines = "\n".join(str(i) for i in range(1, max(22, sample.count("\n") + 4)))
     checked = "checked" if settings.behavior.prompt_preview_required else ""
@@ -1994,7 +2077,8 @@ def _format_glossary_panel_html(
     omitted = [
         item
         for item in evidence
-        if not item.get("included") and not str(item.get("excluded_reason") or "").startswith("dedupe")
+        if not item.get("included")
+        and not str(item.get("excluded_reason") or "").startswith("dedupe")
     ]
     return "\n".join(
         [
@@ -2005,7 +2089,9 @@ def _format_glossary_panel_html(
     )
 
 
-def _evidence_section_html(title: str, items: list[dict[str, Any]], *, open_section: bool = False) -> str:
+def _evidence_section_html(
+    title: str, items: list[dict[str, Any]], *, open_section: bool = False
+) -> str:
     open_attr = " open" if open_section else ""
     if not items:
         body = '<div class="xtl-empty">没有项目。</div>'
@@ -2015,15 +2101,15 @@ def _evidence_section_html(title: str, items: list[dict[str, Any]], *, open_sect
                 "<li>"
                 f"<b>{_esc(item.get('source') or item.get('term') or '')}</b>"
                 f" -&gt; {_esc(item.get('target') or '')}"
-                f"<div class=\"xtl-help\">{_esc(_evidence_reason(item))}</div>"
+                f'<div class="xtl-help">{_esc(_evidence_reason(item))}</div>'
                 "</li>"
             )
             for item in items[:80]
         ]
         if len(items) > 80:
             rows.append(f'<li class="xtl-help">还有 {len(items) - 80} 条没有展开显示。</li>')
-        body = f"<ul class=\"xtl-evidence-list\">{''.join(rows)}</ul>"
-    return f"<details class=\"xtl-evidence-section\"{open_attr}><summary>{_esc(title)}（{len(items)}）</summary>{body}</details>"
+        body = f'<ul class="xtl-evidence-list">{"".join(rows)}</ul>'
+    return f'<details class="xtl-evidence-section"{open_attr}><summary>{_esc(title)}（{len(items)}）</summary>{body}</details>'
 
 
 def _evidence_reason(item: dict[str, Any]) -> str:
@@ -2201,7 +2287,7 @@ def _logs_html(project: str | None) -> str:
     if not lines:
         lines = '<tr><td colspan="3">暂无事件。</td></tr>'
     return f"""
-    <div class="xtl-workbench xtl-logs-workbench" data-project="{_esc(project or '')}">
+    <div class="xtl-workbench xtl-logs-workbench" data-project="{_esc(project or "")}">
       <div class="xtl-panel" data-marker="panel-log-stream">
         <div class="xtl-panel-title">翻译记录摘要</div>
         <div class="xtl-panel-body">
@@ -3753,10 +3839,14 @@ def _entries_script(project: str | None) -> str:
         QUST: '任务',
         BOOK: '书籍/说明',
         CELL: '地点/区域',
+        ORPH: '孤立字符串',
       };
       const fieldLabels = {
         FULL: '名称',
         DESC: '说明',
+        STRS: 'STRINGS',
+        DLST: 'DLSTRINGS',
+        ILST: 'ILSTRINGS',
       };
       const byId = id => document.getElementById(id);
       const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -3876,7 +3966,16 @@ def _entries_script(project: str | None) -> str:
         const body = document.querySelector('#xtl-entries-table tbody');
         if (!body) return;
         if (!entries.length) {
-          body.innerHTML = '<tr><td colspan="5">没有匹配的条目。换个筛选条件试试。</td></tr>';
+          const filters = currentEntryFilters();
+          const activeFilters = [];
+          if (filters.sig) activeFilters.push(`类型=${filters.sig}`);
+          if (filters.field) activeFilters.push(`字段=${filters.field}`);
+          if (filters.status) activeFilters.push(`状态=${statusLabels[filters.status] || filters.status}`);
+          if (filters.search.trim()) activeFilters.push(`搜索=${filters.search.trim()}`);
+          const hint = activeFilters.length
+            ? `当前筛选：${activeFilters.join('，')}。如果你在找某个 EDID/FormID，先清空类型、字段和状态筛选再搜。`
+            : '没有匹配的条目。';
+          body.innerHTML = `<tr><td colspan="5"><div class="xtl-empty-state"><span>${esc(hint)}</span><button type="button" class="xtl-btn" id="xtl-entries-clear-filters" data-marker="btn-entries-clear-filters">清空筛选</button></div></td></tr>`;
           updateSelectionStatus();
           return;
         }
@@ -4209,6 +4308,13 @@ def _entries_script(project: str | None) -> str:
           searchTimer = window.setTimeout(() => loadEntries(), 220);
         }
       });
+      document.addEventListener('click', event => {
+        if (!event.target || event.target.id !== 'xtl-entries-clear-filters') return;
+        if (byId('xtl-entries-sig')) byId('xtl-entries-sig').value = '';
+        if (byId('xtl-entries-field')) byId('xtl-entries-field').value = '';
+        if (byId('xtl-entries-status')) byId('xtl-entries-status').value = '';
+        loadEntries();
+      });
       loadEntries();
     })();
     </script>
@@ -4229,13 +4335,17 @@ def _bulk_update_entries_status(
 ) -> dict[str, Any]:
     from bgs_translator.cli.edit import _append_audit, _apply_edit, _get_unit
 
-    selected_ids = list(dict.fromkeys(item.strip() for item in row_ids if isinstance(item, str) and item.strip()))
+    selected_ids = list(
+        dict.fromkeys(item.strip() for item in row_ids if isinstance(item, str) and item.strip())
+    )
     if not selected_ids:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先勾选至少一个条目。")
     new_status = status_value.strip().lower()
     allowed_statuses = {"untranslated", "translated", "partial", "locked"}
     if new_status not in allowed_statuses:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"status must be one of {sorted(allowed_statuses)}")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"status must be one of {sorted(allowed_statuses)}"
+        )
 
     project_root = paths.project_root(project)
     conn = open_memory_db(project_root)
@@ -4256,12 +4366,21 @@ def _bulk_update_entries_status(
             else:
                 next_dest = str(current_dest or "").strip()
                 if not next_dest:
-                    skipped.append({"row_id": row_id, "reason": "没有译文，不能标记为已翻译或需复查"})
+                    skipped.append(
+                        {"row_id": row_id, "reason": "没有译文，不能标记为已翻译或需复查"}
+                    )
                     continue
             conn.execute("BEGIN")
             after = _apply_edit(conn, row_id, dest=next_dest, status=new_status)
             conn.commit()
-            _append_audit(project_root, row_id=row_id, before=before, after=after, reason=reason, operation="bulk-status")
+            _append_audit(
+                project_root,
+                row_id=row_id,
+                before=before,
+                after=after,
+                reason=reason,
+                operation="bulk-status",
+            )
             updated.append(after)
     except sqlite3.Error as exc:
         conn.rollback()
@@ -4286,7 +4405,9 @@ def _create_batch_queue(
     *,
     batch_size: int | None = None,
 ) -> dict[str, Any]:
-    selected_ids = list(dict.fromkeys(item.strip() for item in row_ids if isinstance(item, str) and item.strip()))
+    selected_ids = list(
+        dict.fromkeys(item.strip() for item in row_ids if isinstance(item, str) and item.strip())
+    )
     if not selected_ids:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先勾选至少一个条目。")
     normalized_batch_size = int(batch_size or 100)
@@ -4320,10 +4441,14 @@ def _create_batch_queue(
     found_ids = {str(row[0]) for row in rows}
     missing = [row_id for row_id in selected_ids if row_id not in found_ids]
     if missing:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"有 {len(missing)} 个勾选条目已经不存在，请刷新条目页。")
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"有 {len(missing)} 个勾选条目已经不存在，请刷新条目页。"
+        )
     untranslated = [row for row in rows if str(row[8]) == "untranslated"]
     if not untranslated:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "勾选的条目都不是“未翻译”状态，不会加入批量队列。")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "勾选的条目都不是“未翻译”状态，不会加入批量队列。"
+        )
     llm_skip_reasons = _queue_llm_skip_reasons(untranslated)
     llm_skipped_count = sum(llm_skip_reasons.values())
     translatable_rows = [row for row in untranslated if not _queue_row_skip_reason(row)]
@@ -4499,7 +4624,9 @@ async def _quick_translate_entry(project: str, row_id: str) -> dict[str, Any]:
     project_data = _project_toml_data(project_root)
     raw_project_block = project_data.get("project")
     project_block: dict[str, Any] = raw_project_block if isinstance(raw_project_block, dict) else {}
-    game = str(project_block.get("game") or "Bethesda Game Studios").strip() or "Bethesda Game Studios"
+    game = (
+        str(project_block.get("game") or "Bethesda Game Studios").strip() or "Bethesda Game Studios"
+    )
     target_lang = str(project_block.get("target_lang") or "zh-cn").strip() or "zh-cn"
     source_plugin = str(project_block.get("source_plugin_path") or "").strip()
     mod_name = Path(source_plugin).stem if source_plugin else project
@@ -4512,7 +4639,9 @@ async def _quick_translate_entry(project: str, row_id: str) -> dict[str, Any]:
         unit = _translation_unit_from_entry(before)
         masked = build_masked_unit(unit)
         if masked.skip_llm:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"这条文本不适合交给 AI 快速翻译：{masked.skip_reason}")
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, f"这条文本不适合交给 AI 快速翻译：{masked.skip_reason}"
+            )
         batch_id = f"quick-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{row_id[:8]}"
         batch = Batch(
             batch_id=batch_id,
@@ -4521,7 +4650,9 @@ async def _quick_translate_entry(project: str, row_id: str) -> dict[str, Any]:
             glossary_subset=[],
             do_not_translate=[],
         )
-        system_prompt = _quick_translate_prompt(game=game, mod_name=mod_name, target_lang=target_lang)
+        system_prompt = _quick_translate_prompt(
+            game=game, mod_name=mod_name, target_lang=target_lang
+        )
         response = await _quick_translate_with_profile(
             profile=profile,
             batch=batch,
@@ -4541,17 +4672,20 @@ async def _quick_translate_entry(project: str, row_id: str) -> dict[str, Any]:
         validation = validate_item(masked, dest_masked, [], ["utf-8"])
         dest = unmask_dest(dest_masked, masked.mask_map, masked.mcm_token_prefix)
         if not dest.strip():
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "AI 返回了空译文，已取消写入。请稍后重试。")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY, "AI 返回了空译文，已取消写入。请稍后重试。"
+            )
         if not validation.ok:
             reasons = "；".join(failure.reason for failure in validation.failures) or "校验未通过"
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"AI 返回内容未通过校验，已取消写入：{reasons}")
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY, f"AI 返回内容未通过校验，已取消写入：{reasons}"
+            )
         new_status = "translated" if not validation.failures else "partial"
         group_row_ids = _entry_translation_group_row_ids(conn, before)
         if row_id not in group_row_ids:
             group_row_ids.insert(0, row_id)
         before_by_row_id = {
-            target_row_id: _get_unit(conn, target_row_id)
-            for target_row_id in group_row_ids
+            target_row_id: _get_unit(conn, target_row_id) for target_row_id in group_row_ids
         }
         item_cost = None
         if response.cost_usd is not None and group_row_ids:
@@ -4573,7 +4707,9 @@ async def _quick_translate_entry(project: str, row_id: str) -> dict[str, Any]:
             )
         after = _get_unit(conn, row_id)
         if after is None:
-            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"entry disappeared: {row_id}")
+            raise HTTPException(
+                status.HTTP_500_INTERNAL_SERVER_ERROR, f"entry disappeared: {row_id}"
+            )
         for target_row_id in group_row_ids:
             target_after = _get_unit(conn, target_row_id)
             target_before = before_by_row_id.get(target_row_id)
@@ -4660,7 +4796,9 @@ def _translation_unit_from_entry(entry: dict[str, Any]) -> Any:
 
 
 def _quick_translate_prompt(*, game: str, mod_name: str, target_lang: str) -> str:
-    language = "简体中文" if target_lang.casefold() in {"zh-cn", "zhhans", "zh-hans"} else target_lang
+    language = (
+        "简体中文" if target_lang.casefold() in {"zh-cn", "zhhans", "zh-hans"} else target_lang
+    )
     return (
         f"你正在翻译 {game} 的 MOD「{mod_name}」。\n"
         f"把提供的英文文本翻译成{language}，面向普通玩家，表达自然、简洁。\n"
@@ -4685,7 +4823,9 @@ def _sparams_for_entry_status(status_value: str) -> int:
 def _import_project_from_plugin(payload: ProjectImportRequest) -> dict[str, Any]:
     project_name = payload.project_name.strip()
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{1,63}", project_name):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "项目名只能使用字母、数字、点、下划线和横线，长度 2-64。")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "项目名只能使用字母、数字、点、下划线和横线，长度 2-64。"
+        )
 
     plugin = Path(payload.plugin_path).expanduser()
     if plugin.suffix.casefold() not in {".esp", ".esm", ".esl"}:
@@ -4695,11 +4835,15 @@ def _import_project_from_plugin(payload: ProjectImportRequest) -> dict[str, Any]
 
     project_root = paths.project_root(project_name)
     if project_root.exists() and any(project_root.iterdir()):
-        raise HTTPException(status.HTTP_409_CONFLICT, f"项目 {project_name} 已存在，请换一个项目名。")
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"项目 {project_name} 已存在，请换一个项目名。"
+        )
 
     header = _read_tes4_header_for_import(plugin)
     candidates = detect_game_from_header(header.form_version, header.masters)
-    selected_game = payload.game.strip() if isinstance(payload.game, str) and payload.game.strip() else None
+    selected_game = (
+        payload.game.strip() if isinstance(payload.game, str) and payload.game.strip() else None
+    )
     if selected_game is None:
         if len(candidates) != 1:
             raise HTTPException(
@@ -4716,7 +4860,9 @@ def _import_project_from_plugin(payload: ProjectImportRequest) -> dict[str, Any]
     try:
         schema = get_schema_for_game(selected_game)
     except KeyError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"暂不支持这个游戏：{selected_game}") from exc
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"暂不支持这个游戏：{selected_game}"
+        ) from exc
 
     strings_status = _localized_strings_status(
         plugin, header.is_localized, payload.source_lang, selected_game
@@ -4808,7 +4954,9 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         timeout=300,
     )
     if completed.returncode != 0:
-        detail = completed.stderr.strip() or completed.stdout.strip() or "Windows 文件选择器启动失败。"
+        detail = (
+            completed.stderr.strip() or completed.stdout.strip() or "Windows 文件选择器启动失败。"
+        )
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail)
     lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
     if not lines:
@@ -4816,7 +4964,9 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
     try:
         data = json.loads(lines[-1])
     except json.JSONDecodeError as exc:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Windows 文件选择器返回了无法读取的结果。") from exc
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "Windows 文件选择器返回了无法读取的结果。"
+        ) from exc
     path = str(data.get("path") or "")
     if path and Path(path).suffix.casefold() not in {".esp", ".esm", ".esl"}:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请选择 .esm、.esp 或 .esl 文件。")
@@ -4831,7 +4981,10 @@ def _plugin_dialog_initial_dir(current_path: str) -> Path | None:
             return candidate.parent
         if candidate.is_dir():
             return candidate
-    for candidate in (Path("D:/Starfield MO2/mods"), Path("D:/awesome-bgs-mod-master/.artifacts/bgs-mod-plugins")):
+    for candidate in (
+        Path("D:/Starfield MO2/mods"),
+        Path("D:/awesome-bgs-mod-master/.artifacts/bgs-mod-plugins"),
+    ):
         if candidate.is_dir():
             return candidate
     return None
@@ -4841,7 +4994,9 @@ def _read_tes4_header_for_import(plugin: Path) -> TES4Header:
     walker = TES4FamilyWalker(plugin)
     next(walker.walk(), None)
     if walker.header is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "无法读取 TES4 文件头，请确认这是 Bethesda 插件文件。")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "无法读取 TES4 文件头，请确认这是 Bethesda 插件文件。"
+        )
     return walker.header
 
 
@@ -4870,7 +5025,8 @@ def _list_projects() -> list[dict[str, Any]]:
     return [
         {"name": item.name, "path": str(item)}
         for item in (sorted(root.iterdir()) if root.exists() else [])
-        if item.is_dir() and ((item / "project.toml").exists() or (item / "memory" / "memory.sqlite").exists())
+        if item.is_dir()
+        and ((item / "project.toml").exists() or (item / "memory" / "memory.sqlite").exists())
     ]
 
 
@@ -4979,7 +5135,9 @@ def _signature_status_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             "locked": int(counter["locked"]),
             "other": int(counter["other"]),
         }
-        for signature, counter in sorted(stats.items(), key=lambda item: (-int(item[1]["total"]), item[0].casefold()))
+        for signature, counter in sorted(
+            stats.items(), key=lambda item: (-int(item[1]["total"]), item[0].casefold())
+        )
         if int(counter["total"]) > 0
     ]
 
@@ -5001,7 +5159,9 @@ def _entry_row_skip_reason(row: sqlite3.Row | dict[str, Any]) -> str:
         return _masked_skip_reason(
             plugin=str(row["plugin"]),
             formid=int(row["formid"]),
-            formid_sanitized=int(row["formid_sanitized"] if row["formid_sanitized"] is not None else row["formid"]),
+            formid_sanitized=int(
+                row["formid_sanitized"] if row["formid_sanitized"] is not None else row["formid"]
+            ),
             edid=str(row["edid"] or ""),
             signature=str(row["signature"]),
             field=str(row["field"]),
@@ -5069,20 +5229,157 @@ def _masked_skip_reason(
     return masked.skip_reason if masked.skip_llm else ""
 
 
+_DEFAULT_ENTRY_SIGNATURE_FILTERS = [
+    "MESG",
+    "INFO",
+    "QUST",
+    "BOOK",
+    "CELL",
+    "WEAP",
+    "ARMO",
+    "NPC_",
+    "FACT",
+    "MISC",
+    "TERM",
+    "ORPH",
+]
+_DEFAULT_ENTRY_FIELD_FILTERS = ["FULL", "DESC", "NAM1", "NNAM", "CNAM", "STRS", "DLST", "ILST"]
+
+
 def _signature_label(signature: str) -> str:
     return {
-        "MESG": "菜单、提示消息、开始选项",
-        "INFO": "对话、NPC 信息",
-        "QUST": "任务名称或任务说明",
-        "BOOK": "书籍、说明文本、终端内容",
-        "CELL": "地点、区域名称",
-        "WEAP": "武器名称或说明",
+        "ACTI": "可激活物体",
+        "ALCH": "药剂、消耗品",
+        "AMMO": "弹药",
         "ARMO": "护甲、服装名称或说明",
-        "NPC_": "角色名称",
+        "AVIF": "技能、属性或数值效果",
+        "BOOK": "书籍、说明文本、终端内容",
+        "BPTD": "身体部位或部件数据",
+        "CELL": "地点、区域名称",
+        "COBJ": "制作配方或制造项目",
+        "CONT": "容器名称",
+        "DIAL": "对话主题",
+        "DOOR": "门、舱口或可进入对象",
+        "EXPL": "爆炸或效果名称",
         "FACT": "派系名称",
+        "FLST": "表单列表标题",
+        "GBFM": "游戏表单、飞船/部件相关名称",
+        "GMST": "游戏设置文本",
+        "GPOF": "游戏设置选项",
+        "GPOG": "游戏设置选项分组",
+        "IRES": "资源或材料名称",
+        "LCTN": "地点或位置记录",
+        "LSCR": "载入画面提示",
+        "MESG": "菜单/消息、提示文本、开始选项",
+        "MGEF": "魔法/能力效果名称或说明",
         "MISC": "杂项物品",
+        "NPC_": "角色名称",
+        "OMOD": "装备/物品改造名称",
+        "PERK": "技能、特长或效果说明",
+        "PKIN": "组合包或套装名称",
+        "PNDT": "星球、天体或行星数据",
+        "PROJ": "投射物或效果名称",
+        "QUST": "任务名称或任务说明",
+        "RACE": "种族或外观相关文本",
+        "REFR": "放置对象、地点标记或引用名称",
+        "REGN": "区域文本",
+        "SPEL": "能力、法术或状态名称",
+        "STDT": "星系/空间数据文本",
         "TERM": "终端菜单或终端文本",
+        "TMLM": "终端/菜单列表文本",
+        "WEAP": "武器名称或说明",
+        "WOOP": "词语或能力提示",
+        "ORPH": "xTranslator 保留的 orphan strings：存在于 STRINGS/DLSTRINGS/ILSTRINGS 文件中，但没有匹配到明确的 ESP/ESM/ESL record 字段",
     }.get(signature, "其它可翻译记录类型")
+
+
+def _field_label(field: str) -> str:
+    return {
+        "ATTX": "附加文本",
+        "BTXT": "按钮/菜单文本",
+        "CNAM": "任务日志、书籍内容或条件文本",
+        "DESC": "说明文本",
+        "DNAM": "说明/显示文本",
+        "ENAM": "附加名称文本",
+        "FNAM": "全名/显示名称",
+        "FULL": "名称文本",
+        "HULL": "船体/部件文本",
+        "INAM": "界面文本",
+        "ITXT": "选项文本",
+        "LNAM": "名称/标签文本",
+        "MNAM": "菜单/派系文本",
+        "NAM0": "名称文本",
+        "NAM1": "对话台词",
+        "NNAM": "名称、目标或分组文本",
+        "ONAM": "显示名称",
+        "QMDP": "任务目标父级标签",
+        "QMDS": "任务目标说明",
+        "QMDT": "任务目标标签",
+        "QMSU": "任务摘要",
+        "RDMP": "地图/区域文本",
+        "RESN": "选项枚举文本",
+        "RNAM": "结果/响应文本",
+        "SHRT": "短名称",
+        "SNAM": "声音/短文本",
+        "STRS": "STRINGS 孤立文本",
+        "DLST": "DLSTRINGS 孤立文本",
+        "ILST": "ILSTRINGS 孤立文本",
+        "TNAM": "标题/提示文本",
+        "UNAM": "未命名文本字段",
+        "VOVS": "选项值文本",
+        "WABB": "武器缩写",
+        "WNAM": "窗口/武器文本",
+    }.get(field, "其它文本字段")
+
+
+def _entry_signature_options_html(project: str | None) -> str:
+    return _entry_filter_options_html(
+        _entry_distinct_values(project, "signature"),
+        labeler=_signature_label,
+    )
+
+
+def _entry_field_options_html(project: str | None) -> str:
+    return _entry_filter_options_html(
+        _entry_distinct_values(project, "field"),
+        labeler=_field_label,
+    )
+
+
+def _entry_filter_options_html(values: list[str], *, labeler: Callable[[str], str]) -> str:
+    options = ['<option value="">全部</option>']
+    for value in values:
+        label = labeler(value)
+        options.append(f'<option value="{_esc(value)}">{_esc(label)} ({_esc(value)})</option>')
+    return "".join(options)
+
+
+def _entry_distinct_values(project: str | None, column: str) -> list[str]:
+    if column not in {"signature", "field"}:
+        return []
+    defaults = _DEFAULT_ENTRY_SIGNATURE_FILTERS if column == "signature" else _DEFAULT_ENTRY_FIELD_FILTERS
+    if project is None:
+        return list(defaults)
+    memory_path = paths.project_root(project) / "memory" / "memory.sqlite"
+    if not memory_path.exists():
+        return list(defaults)
+    conn = _open_project_db(project)
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT {column} AS value, COUNT(*) AS count
+            FROM units
+            WHERE {column} IS NOT NULL AND TRIM({column}) != ''
+            GROUP BY {column}
+            ORDER BY
+                CASE WHEN {column} = 'ORPH' THEN 1 ELSE 0 END,
+                COUNT(*) DESC,
+                {column}
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    return [str(row["value"]) for row in rows]
 
 
 def _project_toml_data(project_root: Path) -> dict[str, Any]:
@@ -5130,7 +5427,9 @@ def _project_source_details(project: str, *, verify_sha: bool = False) -> dict[s
         {
             "path": source_path_text,
             "plugin_name": source_path.name if source_path else "",
-            "plugin_type": source_path.suffix.upper().lstrip(".") if source_path and source_path.suffix else "",
+            "plugin_type": source_path.suffix.upper().lstrip(".")
+            if source_path and source_path.suffix
+            else "",
             "source_lang": str(project_block.get("source_lang") or ""),
             "target_lang": str(project_block.get("target_lang") or ""),
             "parser_version": str(project_block.get("parser_version") or ""),
@@ -5228,8 +5527,12 @@ def _project_close_summary(project: str) -> dict[str, Any]:
     try:
         run_rows = [_sqlite_row_dict(row) for row in list_recent_runs(conn, limit=50)]
         annotated_runs = _annotate_run_rows(project, conn, run_rows)
-        in_flight = len([row for row in annotated_runs if str(row.get("status") or "") in {"running", "queued"}])
-        orphaned = len([row for row in annotated_runs if str(row.get("status") or "") == "orphaned"])
+        in_flight = len(
+            [row for row in annotated_runs if str(row.get("status") or "") in {"running", "queued"}]
+        )
+        orphaned = len(
+            [row for row in annotated_runs if str(row.get("status") or "") == "orphaned"]
+        )
         cutoff = latest_export or ""
         unsaved = int(
             conn.execute(
@@ -5260,7 +5563,9 @@ def _latest_export_timestamp(project_root: Path) -> str:
     exports = project_root / "exports"
     if not exports.exists():
         return ""
-    latest = max((path.stat().st_mtime for path in exports.glob("*") if path.is_file()), default=None)
+    latest = max(
+        (path.stat().st_mtime for path in exports.glob("*") if path.is_file()), default=None
+    )
     if latest is None:
         return ""
     return datetime.fromtimestamp(latest, UTC).isoformat()
@@ -5277,7 +5582,9 @@ def _export_file_rows(project: str) -> list[dict[str, Any]]:
             "size": path.stat().st_size,
             "modified_at": datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat(),
         }
-        for path in sorted((item for item in exports.iterdir() if item.is_file()), key=lambda item: item.name)
+        for path in sorted(
+            (item for item in exports.iterdir() if item.is_file()), key=lambda item: item.name
+        )
     ]
 
 
@@ -5297,22 +5604,36 @@ def _entry_rows(
         return []
     conn = _open_project_db(project)
     try:
-        derived_status_filter = entry_status if entry_status in {"locked", "untranslated", "partial", "translated"} else None
+        derived_status_filter = (
+            entry_status
+            if entry_status in {"locked", "untranslated", "partial", "translated"}
+            else None
+        )
+        stored_status_filter = (
+            [derived_status_filter]
+            if derived_status_filter in {"untranslated", "partial", "translated"}
+            else (
+                None
+                if derived_status_filter == "locked"
+                else ([entry_status] if entry_status else None)
+            )
+        )
+        sql_limit = None if derived_status_filter == "locked" else max(limit, min(limit * 5, 5000))
         rows = select_units_filtered(
             conn,
             sigs=[sig] if sig else None,
             fields=[field] if field else None,
-            statuses=None if derived_status_filter else ([entry_status] if entry_status else None),
+            statuses=stored_status_filter,
             search=search,
-            limit=max(limit, min(limit * 5, 5000)),
+            limit=sql_limit,
         )
         visible: list[dict[str, Any]] = []
         for row in rows:
             item = _sqlite_row_dict(row)
             skip_reason = _entry_row_skip_reason(row)
-            stored_status = str(item.get("status") or "")
-            if skip_reason and stored_status != "locked":
+            if skip_reason:
                 continue
+            stored_status = str(item.get("status") or "")
             effective_status = _effective_unit_status(
                 status=stored_status,
                 sparams=int(item.get("sparams") or 0),
@@ -5350,12 +5671,25 @@ def _filtered_entry_row_ids(
         return []
     conn = _open_project_db(project)
     try:
-        derived_status_filter = entry_status if entry_status in {"locked", "untranslated", "partial", "translated"} else None
+        derived_status_filter = (
+            entry_status
+            if entry_status in {"locked", "untranslated", "partial", "translated"}
+            else None
+        )
+        stored_status_filter = (
+            [derived_status_filter]
+            if derived_status_filter in {"untranslated", "partial", "translated"}
+            else (
+                None
+                if derived_status_filter == "locked"
+                else ([entry_status] if entry_status else None)
+            )
+        )
         rows = select_units_filtered(
             conn,
             sigs=[sig] if sig else None,
             fields=[field] if field else None,
-            statuses=None if derived_status_filter else ([entry_status] if entry_status else None),
+            statuses=stored_status_filter,
             search=search,
             limit=None,
         )
@@ -5363,9 +5697,9 @@ def _filtered_entry_row_ids(
         for row in rows:
             item = _sqlite_row_dict(row)
             skip_reason = _entry_row_skip_reason(row)
-            stored_status = str(item.get("status") or "")
-            if skip_reason and stored_status != "locked":
+            if skip_reason:
                 continue
+            stored_status = str(item.get("status") or "")
             effective_status = _effective_unit_status(
                 status=stored_status,
                 sparams=int(item.get("sparams") or 0),
@@ -5411,11 +5745,15 @@ def _group_entry_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for key in order:
         members = grouped[key]
         representative = dict(members[0])
-        representative["member_row_ids"] = [str(member.get("row_id") or "") for member in members if member.get("row_id")]
+        representative["member_row_ids"] = [
+            str(member.get("row_id") or "") for member in members if member.get("row_id")
+        ]
         representative["member_count"] = len(representative["member_row_ids"])
         representative["is_source_group"] = len(members) > 1
         representative["group_key"] = _entry_group_key(representative)
-        representative["cross_signature_field_count"] = len(source_contexts.get(str(representative.get("source") or ""), set()))
+        representative["cross_signature_field_count"] = len(
+            source_contexts.get(str(representative.get("source") or ""), set())
+        )
         representative["sample_contexts"] = [
             {
                 "row_id": str(member.get("row_id") or ""),
@@ -5443,7 +5781,7 @@ def _entry_formid_display(value: Any) -> str:
         return f"0x{int(value):08X}"
     except (TypeError, ValueError):
         text = str(value or "")
-        return text if text.startswith("0x") else text
+        return text
 
 
 def _all_filter(value: str | None) -> bool:
@@ -5595,24 +5933,28 @@ def _pending_previews(project: str | None) -> list[PreviewRequest]:
     if project is None:
         return []
     pending = [
-        payload
-        for payload, _future in _PENDING_PREVIEWS.values()
-        if payload.project == project
+        payload for payload, _future in _PENDING_PREVIEWS.values() if payload.project == project
     ]
     return sorted(pending, key=lambda payload: (payload.run_id, payload.batch_id))
 
 
-def _annotate_run_rows(project: str | None, conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _annotate_run_rows(
+    project: str | None, conn: sqlite3.Connection, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     pending_run_ids = {payload.run_id for payload in _pending_previews(project)}
     now = datetime.now(UTC)
     annotated: list[dict[str, Any]] = []
     for row in rows:
         copy = dict(row)
         raw_status = str(copy.get("status") or "")
-        if raw_status in {"running", "queued"} and not _run_looks_active(conn, copy, pending_run_ids, now):
+        if raw_status in {"running", "queued"} and not _run_looks_active(
+            conn, copy, pending_run_ids, now
+        ):
             copy["raw_status"] = raw_status
             copy["status"] = "orphaned"
-            copy["status_note"] = "上次任务没有正常写入完成状态；如果没有外部 CLI 还在运行，它不会继续执行。"
+            copy["status_note"] = (
+                "上次任务没有正常写入完成状态；如果没有外部 CLI 还在运行，它不会继续执行。"
+            )
         annotated.append(copy)
     return annotated
 
@@ -5634,7 +5976,9 @@ def _latest_run_activity(conn: sqlite3.Connection, run_id: str) -> datetime | No
     if not run_id:
         return None
     try:
-        row = conn.execute("SELECT MAX(emitted_at) FROM events WHERE run_id = ?", (run_id,)).fetchone()
+        row = conn.execute(
+            "SELECT MAX(emitted_at) FROM events WHERE run_id = ?", (run_id,)
+        ).fetchone()
     except sqlite3.Error:
         return None
     return _parse_datetime(str(row[0] or "")) if row else None
@@ -5663,7 +6007,9 @@ def _run_rows(project: str | None) -> list[dict[str, Any]]:
         return []
     conn = _open_project_db(project)
     try:
-        return _annotate_run_rows(project, conn, [_sqlite_row_dict(row) for row in list_recent_runs(conn, limit=20)])
+        return _annotate_run_rows(
+            project, conn, [_sqlite_row_dict(row) for row in list_recent_runs(conn, limit=20)]
+        )
     finally:
         conn.close()
 
@@ -5719,7 +6065,9 @@ def _batch_rows_from_events(conn: sqlite3.Connection, run_id: str) -> list[dict[
             },
         )
         if payload.get("item_count") or payload.get("total") or payload.get("items_total"):
-            row["item_count"] = int(payload.get("item_count") or payload.get("total") or payload.get("items_total") or 0)
+            row["item_count"] = int(
+                payload.get("item_count") or payload.get("total") or payload.get("items_total") or 0
+            )
         kind = str(event.get("kind") or "")
         if kind == "batch.complete":
             row["status"] = str(payload.get("status") or "complete")
@@ -5819,7 +6167,11 @@ def _planned_batches(project: str | None, *, limit: int = 80) -> list[dict[str, 
         plan_project = str(data.get("project") or project)
         source = _project_source_details(plan_project)
         plugin_name = str(source.get("plugin_name") or "")
-        planned_at = datetime.fromtimestamp(plan_path.stat().st_mtime).astimezone().strftime("%Y-%m-%d %H:%M")
+        planned_at = (
+            datetime.fromtimestamp(plan_path.stat().st_mtime)
+            .astimezone()
+            .strftime("%Y-%m-%d %H:%M")
+        )
         for index, batch in enumerate(data.get("batches") or [], start=1):
             if not isinstance(batch, dict):
                 continue
@@ -5846,10 +6198,14 @@ def _planned_batches(project: str | None, *, limit: int = 80) -> list[dict[str, 
                     "item_count": _planned_batch_item_count(batch),
                     "prompt": prompt,
                     "glossary_subset": [
-                        item for item in (batch.get("glossary_subset") or []) if isinstance(item, dict)
+                        item
+                        for item in (batch.get("glossary_subset") or [])
+                        if isinstance(item, dict)
                     ],
                     "glossary_evidence": [
-                        item for item in (batch.get("glossary_evidence") or []) if isinstance(item, dict)
+                        item
+                        for item in (batch.get("glossary_evidence") or [])
+                        if isinstance(item, dict)
                     ],
                     "do_not_translate": [
                         str(item) for item in (batch.get("do_not_translate") or []) if str(item)
@@ -5880,7 +6236,7 @@ def _sample_prompt(project: str | None) -> str:
         "游戏世界：硬科幻 NASA-punk；UC/FC/Crimson Fleet/Va'ruun House 等派系缩写保持原文。\\n"
         "mod：RYOS - Roll Your Own Start，替代起始模组，重点是角色开局选择、飞船、债务和背景故事。\\n\\n"
         "风格要求：语气务实，菜单标题简短一致。保留 <Global.*>、{{P0}} 等占位符。\\n\\n"
-        "返回 JSON 格式：{\"I1\":\"译文\",\"I2\":\"译文\"}"
+        '返回 JSON 格式：{"I1":"译文","I2":"译文"}'
     )
 
 
@@ -5898,17 +6254,25 @@ def _load_profiles_for_api() -> ProfilesConfig:
     try:
         return load_profiles()
     except Exception as exc:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"could not load profiles: {exc}") from exc
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"could not load profiles: {exc}"
+        ) from exc
 
 
-def _profile_from_payload(payload: ProfileSave, cfg: ProfilesConfig) -> tuple[ProviderProfile, str | None]:
+def _profile_from_payload(
+    payload: ProfileSave, cfg: ProfilesConfig
+) -> tuple[ProviderProfile, str | None]:
     name = payload.name.strip()
     if not name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "profile name is required")
     base_url, stripped_suffix = normalize_base_url(payload.base_url)
     original_name = (payload.original_name or payload.name).strip()
     created_at = cfg.profiles[original_name].created_at if original_name in cfg.profiles else None
-    json_mode = payload.json_mode.strip() if isinstance(payload.json_mode, str) and payload.json_mode.strip() else None
+    json_mode = (
+        payload.json_mode.strip()
+        if isinstance(payload.json_mode, str) and payload.json_mode.strip()
+        else None
+    )
     try:
         profile = ProviderProfile(
             name=name,
@@ -6025,8 +6389,16 @@ def _sync_bundled_game_kb(game: str | None) -> list[str]:
         if not (source_dir / "kb.sqlite").is_file():
             continue
         dest_dir = paths.kb_packs_root() / source_dir.name
-        source_manifest = (source_dir / "manifest.json").read_text(encoding="utf-8") if (source_dir / "manifest.json").exists() else ""
-        dest_manifest = (dest_dir / "manifest.json").read_text(encoding="utf-8") if (dest_dir / "manifest.json").exists() else ""
+        source_manifest = (
+            (source_dir / "manifest.json").read_text(encoding="utf-8")
+            if (source_dir / "manifest.json").exists()
+            else ""
+        )
+        dest_manifest = (
+            (dest_dir / "manifest.json").read_text(encoding="utf-8")
+            if (dest_dir / "manifest.json").exists()
+            else ""
+        )
         if dest_dir.exists() and source_manifest == dest_manifest:
             record_count = manifest.get("recordCount")
             count_text = f"{record_count} 条" if isinstance(record_count, int) else "已安装"
@@ -6172,11 +6544,10 @@ def _read_glossary_pack_entries(
             SELECT ge.*, r.pack_id AS row_pack_id
             FROM glossary_entries ge
             JOIN records r ON r.id = ge.record_id
-            WHERE {' AND '.join(where)}
+            WHERE {" AND ".join(where)}
             ORDER BY ge.source
             LIMIT ?
-            """
-            ,
+            """,
             params,
         ).fetchall()
         entries: list[GlossaryEntry] = []
@@ -6216,7 +6587,9 @@ def _save_glossary_entry(payload: GlossarySave) -> GlossaryEntry:
     if not source:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "source is required")
     if not target and scope != "do_not_translate":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "target is required for player glossary entries")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "target is required for player glossary entries"
+        )
     source_lang = payload.source_lang.strip().lower() or "en"
     target_lang = payload.target_lang.strip().lower() or "zh-cn"
     category = payload.category.strip() or "lore_term"
@@ -6294,7 +6667,9 @@ def _delete_user_glossary_entry(record_id: str) -> bool:
     for db_path in dbs:
         conn = sqlite3.connect(db_path)
         try:
-            row = conn.execute("SELECT scope FROM glossary_entries WHERE record_id = ?", (record_id,)).fetchone()
+            row = conn.execute(
+                "SELECT scope FROM glossary_entries WHERE record_id = ?", (record_id,)
+            ).fetchone()
             if row is None or str(row[0]) not in _GLOSSARY_WRITABLE_SCOPES:
                 continue
             conn.execute("DELETE FROM glossary_aliases WHERE record_id = ?", (record_id,))
@@ -6315,7 +6690,11 @@ def _glossary_payload(entry: GlossaryEntry) -> dict[str, Any]:
 def _user_glossary_db_path(*, source_lang: str = "en", target_lang: str = "zh-cn") -> Path:
     source_part = re.sub(r"[^a-z0-9]+", "", source_lang.casefold()) or "en"
     target_part = re.sub(r"[^a-z0-9]+", "", target_lang.casefold()) or "zhcn"
-    return paths.kb_user_packs_root() / f"translator-overrides-{source_part}-{target_part}" / "kb.sqlite"
+    return (
+        paths.kb_user_packs_root()
+        / f"translator-overrides-{source_part}-{target_part}"
+        / "kb.sqlite"
+    )
 
 
 def _next_glossary_record_id(conn: sqlite3.Connection, scope: str, source: str) -> str:
@@ -6342,7 +6721,9 @@ def _glossary_aliases(conn: sqlite3.Connection, record_id: str, alias_kind: str)
 
 
 def _glossary_games(conn: sqlite3.Connection, record_id: str) -> list[str]:
-    rows = conn.execute("SELECT game FROM record_games WHERE record_id = ? ORDER BY game", (record_id,)).fetchall()
+    rows = conn.execute(
+        "SELECT game FROM record_games WHERE record_id = ? ORDER BY game", (record_id,)
+    ).fetchall()
     return [str(row[0]) for row in rows]
 
 

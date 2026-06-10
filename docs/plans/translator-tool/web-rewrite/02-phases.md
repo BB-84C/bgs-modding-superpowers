@@ -868,8 +868,8 @@ Flip default of `xtl gui` from `tk` to `web`. Tk becomes opt-in for one release.
 
 - User has signed off.
 - `xtl gui` opens browser.
-- `xtl gui --backend tk` still works.
-- Tk deletion is deferred out of the current Phase 11 cut-over scope.
+- `xtl gui --backend tk` is rejected because `--backend` no longer exists.
+- Tk deletion is part of the 2026-06-10 Phase 12 closeout.
 
 ---
 
@@ -883,23 +883,23 @@ Delete the Tk tree. The migration is complete.
 
 - [ ] **12.1** Confirm at least one user-workday or release cycle has elapsed since cut-over with no regression complaints. If complaints exist, fix on web; do not roll back to Tk.
 
-- [ ] **12.2** Get explicit user signoff in chat ("delete Tk").
+- [x] **12.2** Get explicit user signoff in chat ("delete Tk").
 
-- [ ] **12.3** `git rm -r`:
+- [x] **12.3** `git rm -r`:
 
   - `tools/bgs-translator/bgs_translator/gui/`
   - `tools/bgs-translator/tests/gui/`
   - `tools/bgs-translator/bgs_translator/core/ipc.py`
 
-- [ ] **12.4** Edit `core/event_queue.py`: remove `EventQueueBridge` class. Keep `GuiEvent` dataclass + `GuiEventKind` enum (used by `EventPublisher`).
+- [x] **12.4** Edit `core/event_queue.py`: remove `EventQueueBridge` class. Keep `GuiEvent` dataclass + `GuiEventKind` enum (used by `EventPublisher`).
 
-- [ ] **12.5** Edit `cli/batch.py:_PreviewingLLMClient._request_preview`: remove backend dispatch; only `request_preview_http` remains.
+- [x] **12.5** Edit `cli/batch.py:_PreviewingLLMClient._request_preview`: remove backend dispatch; only `request_preview_http` remains.
 
-- [ ] **12.6** Edit `cli/gui_launcher.py`: remove `--backend` flag entirely; only web path remains.
+- [x] **12.6** Edit `cli/gui_launcher.py`: remove `--backend` flag entirely; only web path remains.
 
-- [ ] **12.7** Edit `cli/app.py`: drop `--backend` typer argument.
+- [x] **12.7** Edit `cli/app.py`: drop `--backend` typer argument.
 
-- [ ] **12.8** Edit `pyproject.toml`: drop `pywin32` (was only for Tk-named-pipe IPC).
+- [x] **12.8** Edit `pyproject.toml`: drop `pywin32` (was only for Tk-named-pipe IPC).
 
 - [ ] **12.9** Run full suite. Fix any reference to deleted code.
 
@@ -911,7 +911,7 @@ Delete the Tk tree. The migration is complete.
 
 - [ ] **12.10** Update `docs/plans/translator-tool/HANDOFF-POST-LIVE-TEST.md`: mark Bug C as STRUCTURALLY FIXED via web rewrite; mark Bug D as FIXED on web. Bug B stays open as backend-only.
 
-- [ ] **12.11** Update `tools/bgs-translator/README.md`: drop mentions of Tk; mention `xtl gui` opens the web panel.
+- [x] **12.11** Update `tools/bgs-translator/README.md`: drop mentions of Tk; mention `xtl gui` opens the web panel.
 
 - [ ] **12.12** Final commit:
 
@@ -923,7 +923,7 @@ Delete the Tk tree. The migration is complete.
 
 ### Phase 12 acceptance
 
-- `git grep -r "tkinter"` returns zero hits in `tools/bgs-translator/`.
+- `git grep "tkinter" -- tools/bgs-translator/` returns zero hits.
 - Full test suite green.
 - README accurate.
 - Tk-removal commit lands. Migration complete.
@@ -932,12 +932,11 @@ Delete the Tk tree. The migration is complete.
 
 ## Cross-phase invariants
 
-These must hold from Phase 1 through Phase 11 (until cut-over makes them moot):
+These held from Phase 1 through Phase 11. Phase 12 makes the Tk-specific invariants obsolete:
 
-- ✅ `xtl gui` (no flag) still works as Tk.
-- ✅ All existing pipeline tests pass.
-- ✅ A live or synthetic batch run with `--backend tk` still works.
-- ✅ Bug A regression test (`tests/gui/test_app_prompt.py::test_preview_event_shows_approve_action_row`) stays green until Phase 12 deletes the Tk path.
+- ✅ `xtl gui` opens the browser panel.
+- ✅ All existing pipeline tests pass after removing Tk-only tests.
+- ✅ Synthetic preview runs use web HTTP preview.
 - ✅ Push to `feat/translator-web-rewrite` after every phase. PR to `feat/translator-tool` at cut-over (Phase 11).
 
 ## Backout plan

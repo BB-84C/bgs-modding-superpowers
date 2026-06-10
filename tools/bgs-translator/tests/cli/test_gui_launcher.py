@@ -6,6 +6,8 @@ import sys
 from types import ModuleType
 from typing import Any
 
+from typer.testing import CliRunner
+
 
 def test_gui_defaults_to_web_backend(monkeypatch) -> None:
     from bgs_translator.cli.gui_launcher import launch_gui
@@ -24,18 +26,10 @@ def test_gui_defaults_to_web_backend(monkeypatch) -> None:
     assert calls == [{"theme": "amber", "language": "zh-cn", "port": None, "no_open": True, "native": False}]
 
 
-def test_gui_keeps_tk_backend_opt_in(monkeypatch) -> None:
-    from bgs_translator.cli.gui_launcher import launch_gui
+def test_gui_backend_option_is_removed() -> None:
+    from bgs_translator.cli.app import app
 
-    calls: list[dict[str, Any]] = []
-    module = ModuleType("bgs_translator.gui.app")
+    result = CliRunner().invoke(app, ["gui", "--backend", "tk"])
 
-    def fake_launch(**kwargs: Any) -> None:
-        calls.append(kwargs)
-
-    module.launch = fake_launch  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "bgs_translator.gui.app", module)
-
-    launch_gui(theme="amber", language="zh-cn", backend="tk")
-
-    assert calls == [{"theme": "amber", "language": "zh-cn"}]
+    assert result.exit_code != 0
+    assert "No such option" in result.output

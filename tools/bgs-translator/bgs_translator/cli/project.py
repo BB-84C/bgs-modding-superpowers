@@ -284,7 +284,26 @@ def _read_units_from_memory(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         "index_n, index_max, source, list_index, strid, rhash, sparams, "
         "dest, status FROM units WHERE source IS NOT NULL"
     )
-    return [row for row in cur.fetchall() if _should_export_unit_row(row)]
+    rows = cur.fetchall()
+    referenced_string_keys = {
+        (row["plugin"], row["list_index"], row["strid"])
+        for row in rows
+        if str(row["signature"] or "").strip().upper() != "ORPH" and row["strid"]
+    }
+    return [
+        row
+        for row in rows
+        if _should_export_unit_row(row)
+        and not _is_redundant_orphan_string(row, referenced_string_keys)
+    ]
+
+
+def _is_redundant_orphan_string(
+    row: sqlite3.Row, referenced_string_keys: set[tuple[str, int, int]]
+) -> bool:
+    if str(row["signature"] or "").strip().upper() != "ORPH":
+        return False
+    return (row["plugin"], row["list_index"], row["strid"]) in referenced_string_keys
 
 
 _EXPORT_STATUS_MASK = (
@@ -308,7 +327,8 @@ def _should_export_unit_row(row: sqlite3.Row) -> bool:
 
 def _unit_row_to_sst_unit(row: sqlite3.Row) -> SSTUnit:
     edid = row["edid"]
-    rhash = row["rhash"] or compute_rhash(edid, row["formid"])
+    is_orphan = str(row["signature"] or "").strip().upper() == "ORPH"
+    rhash = 0 if is_orphan else row["rhash"] or compute_rhash(edid, row["formid"])
     status_value = str(row["status"] or "").strip().lower()
     sparams = _export_sparams_for_row(row, status_value)
     source = row["source"] or ""
@@ -318,11 +338,11 @@ def _unit_row_to_sst_unit(row: sqlite3.Row) -> SSTUnit:
     return SSTUnit(
         list_index=row["list_index"],
         strid=row["strid"] or 0,
-        formid=row["formid"],
-        signature=row["signature"],
-        field=row["field"],
-        index=row["index_n"] or 0,
-        index_max=row["index_max"] or 0,
+        formid=0 if is_orphan else row["formid"],
+        signature="" if is_orphan else row["signature"],
+        field="" if is_orphan else row["field"],
+        index=0 if is_orphan else row["index_n"] or 0,
+        index_max=0 if is_orphan else row["index_max"] or 0,
         rhash=rhash,
         colab_id=0,
         s_params=int(sparams),

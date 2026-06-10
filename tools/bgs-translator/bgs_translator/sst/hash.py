@@ -45,14 +45,28 @@ _MASK32: Final[int] = 0xFFFFFFFF
 
 
 def sanitize_formid(formid: int) -> int:
-    """Strip the master-index high byte from a 32-bit FormID.
+    """Return xTranslator's default ``sanitizeFormID(formID)`` value.
 
-    Mirrors xTranslator's single-arg ``sanitizeFormID(formID)`` (cf.
-    ``TESVT_typedef.pas:472``, ``TESVT_FastSearch.pas:494``). The two-arg
-    Pascal overload accepts an optional replacement byte; we expose only the
-    common single-arg form because the SST hashing path always uses it.
+    xTranslator does not simply drop the load-order byte when building SST
+    hashes. Its default ``bS`` value is ``$01``, so normal master FormIDs are
+    normalized to ``01xxxxxx``. The exact value matters for no-EDID records
+    such as ``INFO:NAM1`` because V4 SST import compares this rHash before it
+    compares record/field/index metadata.
     """
-    return formid & 0x00FFFFFF
+
+    value = int(formid) & _MASK32
+    high = (value >> 24) & 0xFF
+    if high == 0:
+        return value
+    if high == 0xFE:
+        if ((value >> 12) & 0xFF) == 0:
+            return value
+        return (value & ~(0xFFF << 12)) | (0x01 << 12)
+    if high == 0xFD:
+        if ((value >> 16) & 0xFF) == 0:
+            return value
+        return (value & ~(0xFF << 16)) | (0x01 << 16)
+    return (value & 0x00FFFFFF) | (0x01 << 24)
 
 
 def string_hash(s: str) -> int:
@@ -64,20 +78,19 @@ def string_hash(s: str) -> int:
 
 
 def format_no_edid_key(formid: int) -> str:
-    """Format the bracketed sanitized-FormID key used when no EditorID exists.
+    """Format the bracketed xTranslator FormID key used without an EditorID.
 
-    xTranslator builds the key with Delphi ``format('[%.8x]', [...])``, which
-    emits lowercase 8-digit zero-padded hex; we reproduce that with Python's
-    ``{:08x}``.
+    xTranslator builds the key with Delphi ``format('[%.8x]', [...])``. Delphi
+    emits uppercase A-F for this format, and ``stringHash`` is case-sensitive.
     """
-    return f"[{sanitize_formid(formid):08x}]"
+    return f"[{sanitize_formid(formid):08X}]"
 
 
 def compute_rhash(editor_id: str | None, formid: int) -> int:
     """Compute the SST entry ``rHash`` per the PRD §1.4 / typedef §471 rule.
 
     - With an EditorID: ``stringHash(editorID)``
-    - Without:          ``stringHash('[' + lowercase 8-hex sanitized FormID + ']')``
+    - Without:          ``stringHash('[' + uppercase 8-hex sanitized FormID + ']')``
     """
     if editor_id:
         return string_hash(editor_id)

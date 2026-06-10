@@ -21,7 +21,6 @@ dependencies = [
   "google-genai>=0.5",
   "nicegui>=3.12.1,<4.0",
   "uvicorn>=0.30",
-  "pywin32>=308; sys_platform == 'win32'",
   "watchdog>=3.0",
 ]
 
@@ -39,16 +38,14 @@ dev = [
   "ruff>=0.8",
   "types-PyYAML>=6",
 ]
-gui = []
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["bgs_translator*"]
 
 [tool.setuptools.package-data]
-"bgs_translator.gui.i18n" = ["*.po"]
 "bgs_translator.web.themes" = ["*.css"]
-"bgs_translator.parsers.schemas" = ["data/*.yaml"]
+"bgs_translator.parsers.schemas" = ["data/*.yaml", "data/*_recorddefs.txt"]
 
 [tool.ruff]
 line-length = 100

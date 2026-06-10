@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import sqlite3
-import sys
 import tomllib
 import uuid
 from collections import Counter
@@ -22,8 +21,6 @@ from bgs_translator.cli.envelopes import Envelope, failure, success
 from bgs_translator.config import paths
 from bgs_translator.config.profiles import ProviderProfile, get_active_profile, load_profiles
 from bgs_translator.config.settings import load_settings
-from bgs_translator.core import runtime_pid
-from bgs_translator.core.client import request_preview
 from bgs_translator.core.event_publisher import get_publisher
 from bgs_translator.core.event_queue import GuiEvent
 from bgs_translator.core.web_ipc_client import discover_gui, request_preview_http
@@ -379,58 +376,30 @@ class _PreviewingLLMClient:
                 },
             )
         )
-        if backend == "web" or (backend == "auto" and discovered is not None):
-            return request_preview_http(
-                project=self._project,
-                run_id=self._run_id,
-                batch_id=batch.batch_id,
-                system_prompt=system_prompt,
-                items=_items_payload(batch),
-                glossary_subset=_dict_list(batch.glossary_subset),
-                do_not_translate=batch.do_not_translate,
-                glossary_evidence=_dict_list(batch.glossary_evidence),
-                batch_index=self._batch_indexes.get(batch.batch_id),
-                total_batches=self._total_batches,
-                total_items=self._total_items,
-                timeout=300.0,
-            )
-        try:
-            return request_preview(
-                batch.batch_id,
-                system_prompt,
-                _items_payload(batch),
-                timeout=300.0,
-            )
-        except (FileNotFoundError, ConnectionRefusedError) as exc:
-            log.warning(
-                "IPC preview unavailable for batch %s (GUI not listening): %s",
-                batch.batch_id,
-                exc,
-            )
-            sys.stderr.write(
-                f"[warn] preview skipped for batch {batch.batch_id}: GUI not reachable ({exc})\n"
-            )
-            return {"op": "no_gui"}
-        except TimeoutError as exc:
-            log.warning("IPC preview timed out for batch %s: %s", batch.batch_id, exc)
-            sys.stderr.write(f"[warn] preview timeout for batch {batch.batch_id}\n")
-            return {"op": "timeout"}
-        except RuntimeError as exc:
-            log.error("IPC preview transport unavailable: %s", exc)
-            sys.stderr.write(
-                f"[error] preview transport missing: {exc}\n  install pywin32: pip install pywin32\n"
-            )
+        if backend not in {"auto", "web"}:
+            log.warning("Preview backend %r is no longer supported; only web preview is available.", backend)
             return {"op": "transport_unavailable"}
+        return request_preview_http(
+            project=self._project,
+            run_id=self._run_id,
+            batch_id=batch.batch_id,
+            system_prompt=system_prompt,
+            items=_items_payload(batch),
+            glossary_subset=_dict_list(batch.glossary_subset),
+            do_not_translate=batch.do_not_translate,
+            glossary_evidence=_dict_list(batch.glossary_evidence),
+            batch_index=self._batch_indexes.get(batch.batch_id),
+            total_batches=self._total_batches,
+            total_items=self._total_items,
+            timeout=300.0,
+        )
 
 
 def _preview_enabled_for_session() -> bool:
     settings = load_settings()
     if settings.behavior.prompt_preview_required:
         return True
-    if _preview_backend() == "web":
-        return discover_gui() is not None
-    alive, _pid = runtime_pid.is_gui_alive()
-    return alive
+    return _preview_backend() in {"auto", "web"} and discover_gui() is not None
 
 
 def _preview_backend() -> str:
