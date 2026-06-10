@@ -10,15 +10,63 @@ text. It reads plugin strings, builds AI translation batches with glossary and
 protected-span handling, writes a project memory database, and exports SST/XML
 dictionaries for xTranslator or ESP-ESM Translator to finalize.
 
-The browser GUI is the only GUI surface. The agent should still prefer `xtl`
-for work it can do directly; use the GUI only for human review, provider/key
-setup when the user wants it, prompt preview, progress monitoring, and manual
-cleanup.
+The browser GUI is the only GUI surface. The agent should prefer `xtl` for work
+it can do directly; use the GUI for human review, provider/key setup when the
+user wants it, prompt preview, progress monitoring, and manual cleanup.
 
-Human manuals:
+Human manuals, read these files and explain them to users who need GUI help:
 
 - Chinese: `tools/bgs-translator/USER-GUIDE.zh-cn.md`
 - English: `tools/bgs-translator/USER-GUIDE.en.md`
+
+## What xtl Does Better
+
+Most translator tools focus on editing string tables. `xtl` builds a complete
+LLM request for each batch:
+
+1. It extracts only translatable plugin text into project memory.
+2. It masks dangerous placeholders such as `{P0}` and `<Alias=...>`.
+3. It deduplicates repeated text where safe.
+4. It recalls relevant game/mod/player terminology.
+5. It adds game context, mod context, signature explanations, style rules, and
+   do-not-translate rules to a system prompt.
+6. It sends compact JSON-shaped work items to the selected provider.
+7. It validates the response before writing translations back to project memory.
+8. It exports SST/XML for xTranslator instead of editing the original plugin.
+
+This is why the output can be more context-aware than plain string-table machine
+translation: the LLM receives the text plus the mod's purpose, game lore,
+record-type meaning, glossary, and placeholder rules in one request.
+
+## Help and Capability Discovery
+
+Never assume a shown command is the only valid shape. Examples below are
+templates. Before using an unfamiliar option, check the live CLI:
+
+```powershell
+# Show all top-level xtl command groups.
+xtl --help
+
+# Show provider commands and accepted provider options.
+xtl profile --help
+xtl profile add --help
+xtl profile edit --help
+
+# Show project import/export options.
+xtl project --help
+xtl project init --help
+xtl project export --help
+
+# Show inspect, planning, run, status, and cancellation options.
+xtl inspect --help
+xtl batch plan --help
+xtl batch run --help
+xtl batch status --help
+```
+
+Provider `--sdk-kind` is not always `openai-compat`. Check `xtl profile add
+--help` for the currently supported values. At the time of this skill, the
+code supports `openai`, `anthropic`, `gemini`, and `openai-compat`.
 
 ## Operating Rules
 
@@ -38,33 +86,43 @@ Human manuals:
 
 Use this flow when the user wants the agent to run the translation process.
 
-1. Verify the local CLI:
+1. Verify the local CLI.
 
    ```powershell
+   # Confirm the installed/current xtl can start and report capabilities.
    xtl version
    ```
 
-2. Inspect the plugin before creating a project:
+2. Inspect the plugin before creating a project.
 
    ```powershell
+   # Example path only. Replace with the user's real ESP/ESM/ESL.
    xtl inspect plugin "D:\path\to\Mod.esm"
    ```
 
-   If game detection is ambiguous, pass `--game Starfield`, `--game SkyrimSE`,
-   etc. Do not guess silently.
+   If game detection is ambiguous, pass a real game value. Do not guess silently.
+   Check available options with `xtl inspect plugin --help`.
 
-3. Create or refresh a project:
+3. Create or refresh a project.
 
    ```powershell
+   # Create project memory from the source plugin. Example target language: zh-cn.
    xtl project init <project> --plugin "D:\path\to\Mod.esm" --target-lang zh-cn
    ```
 
-4. Configure the provider if needed:
+4. Configure the provider if needed.
 
    ```powershell
+   # Example: OpenAI-compatible provider. Check xtl profile add --help for all sdk kinds.
    xtl profile add <profile> --sdk-kind openai-compat --base-url <api-root> --model <model> --api-key-env <ENV_NAME> --json-mode json_object
+
+   # Store the key with hidden input. Never put the real key in the command line.
    xtl profile set-key <profile>
+
+   # Example advanced settings. Use xtl profile edit --help before changing these.
    xtl profile edit <profile> --max-concurrency 8 --rate-limit-rpm 120 --rate-limit-tpm 90000
+
+   # Test the provider and then make it active.
    xtl profile probe <profile>
    xtl profile activate <profile>
    ```
@@ -72,10 +130,13 @@ Use this flow when the user wants the agent to run the translation process.
    `set-key` prompts with hidden input and writes `translator/profiles/.env`.
    Never place a real key in a shell command, commit, log, or chat message.
 
-5. Inspect project content:
+5. Inspect project content.
 
    ```powershell
+   # Get high-level counts by record signature.
    xtl inspect signatures <project>
+
+   # Example: inspect 100 quest entries. Check xtl inspect entries --help for filters.
    xtl inspect entries <project> --sig QUST --limit 100
    ```
 
@@ -90,33 +151,53 @@ Use this flow when the user wants the agent to run the translation process.
    queue/fanatic mode use `--queue <queue_id>` when the user submitted one.
 
    ```powershell
+   # Example: plan untranslated QUST text in groups of 200.
+   # This only writes plan.json and does not call the provider.
    xtl batch plan <project> --register dialogue --target-lang zh-cn --profile <profile> --batch-size 200 --sig QUST --game-lore-world "Starfield 2330 Settled Systems" --game-lore-summary "<detailed lore>" --mod-name "<mod name>" --mod-theme "<detailed mod context>" --style "Polished Simplified Chinese game localization."
    ```
 
-   Read the returned JSON envelope. Report `plan_id`, `total_items`,
-   `batch_count`, `skipped_reasons`, and the plan path.
+   `--register`, `--sig`, `--field`, batch size, and context fields are examples.
+   Check `xtl batch plan --help` and inspect project signatures before choosing.
+   Report `plan_id`, `total_items`, `batch_count`, `skipped_reasons`, and the
+   plan path.
 
-8. Dispatch the run:
+8. Dispatch the run.
 
    ```powershell
+   # Start a background worker and return immediately with run_id and log paths.
    xtl batch run <project> --plan <plan_id>
    ```
 
-   Use `--dry-run` only for smoke tests. For no-human-preview agent runs, first
-   confirm `behavior.prompt_preview_required=false`.
-
-9. Monitor and cancel if requested:
+   `xtl batch run` returns immediately by default. Use `--wait` only for tests or
+   deliberate foreground execution. Use `--dry-run` only for smoke tests. For
+   no-human-preview agent runs, first confirm:
 
    ```powershell
+   # Disable required browser prompt preview only when the user asked for agent-only execution.
+   xtl config set behavior.prompt_preview_required false
+   ```
+
+9. Poll status and logs.
+
+   ```powershell
+   # Poll periodically after background launch.
+   Start-Sleep -Seconds 10
    xtl batch status <run_id>
+
+   # Inspect recent persisted run files/logs if progress looks stuck.
    xtl batch logs <run_id>
+
+   # Request cancellation if the user asks to stop.
    xtl batch cancel <run_id>
    ```
 
-10. Validate and export:
+10. Validate and export.
 
     ```powershell
+    # Validate project state before export.
     xtl validate project <project>
+
+    # Export xTranslator dictionary output.
     xtl project export <project> --format sst
     ```
 
@@ -128,7 +209,16 @@ Use this flow when the user wants the agent to run the translation process.
 Use the GUI when a human needs to configure, inspect, approve, or manually fix:
 
 ```powershell
+# Launch the local browser control panel.
 xtl gui
+```
+
+If the GUI or its process state becomes inconsistent, restart it with the stable
+helper:
+
+```powershell
+# From tools/bgs-translator, restart the web GUI on the usual local port.
+powershell -ExecutionPolicy Bypass -File .\scripts\restart-web-gui.ps1 -Port 7847
 ```
 
 The GUI is browser-only. There is no Tk fallback.
@@ -178,6 +268,7 @@ claiming success.
 
 ## Anti-Patterns
 
+- Do not copy examples blindly. Check `--help` for supported values first.
 - Do not make up hard caps. Respect user batch size/budget settings; if a prompt
   may exceed context, report it and ask for smaller batches/settings.
 - Do not mark English source copied to destination as translated unless it is a

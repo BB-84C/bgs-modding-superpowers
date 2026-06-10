@@ -95,7 +95,10 @@ def test_full_synthetic_round_trip_through_web_preview(tmp_path: Path, monkeypat
         assert planned.exit_code == 0, planned.output
         plan_id = json.loads(planned.output)["data"]["plan_id"]
 
-        result = CliRunner().invoke(app, ["batch", "run", "demo-web-acceptance", "--plan", plan_id, "--dry-run"])
+        result = CliRunner().invoke(
+            app,
+            ["batch", "run", "demo-web-acceptance", "--plan", plan_id, "--dry-run", "--wait"],
+        )
         assert result.exit_code == 0, result.output
         envelope = json.loads(result.output)
         assert envelope["data"]["dry_run"] is True

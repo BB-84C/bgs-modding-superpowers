@@ -81,7 +81,7 @@ def test_batch_run_requests_gui_preview_when_required(
     assert planned.exit_code == 0, planned.output
     plan_id = json.loads(planned.output)["data"]["plan_id"]
 
-    result = runner.invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run"])
+    result = runner.invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run", "--wait"])
 
     assert result.exit_code == 0, result.output
     assert len(captured_requests) == 1
@@ -103,7 +103,7 @@ def test_preview_no_gui_emits_warning(tmp_path: Path, monkeypatch: pytest.Monkey
 
     monkeypatch.setattr("bgs_translator.cli.batch.discover_gui", fake_discover_gui)
 
-    result = CliRunner().invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run"])
+    result = CliRunner().invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run", "--wait"])
 
     assert result.exit_code != 0
     assert "prompt_preview_required=true" in result.output
@@ -121,7 +121,7 @@ def test_unsupported_preview_backend_blocks_required_preview(
     save_settings(Settings.model_validate({"behavior": {"prompt_preview_required": True}}))
     plan_id = _create_preview_plan(tmp_path, monkeypatch)
 
-    result = CliRunner().invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run"])
+    result = CliRunner().invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run", "--wait"])
 
     assert result.exit_code != 0
     assert "prompt_preview_required=true" in result.output

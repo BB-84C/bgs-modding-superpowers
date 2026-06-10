@@ -7,13 +7,17 @@ import json
 import logging
 import os
 import sqlite3
+import subprocess
+import sys
 import tomllib
 import uuid
 from collections import Counter
 from dataclasses import asdict, is_dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
+import tomli_w
 import typer
 from pydantic import BaseModel
 
@@ -159,8 +163,15 @@ def run_batch(
     project: str = typer.Argument(...),
     plan_id: str = typer.Option(..., "--plan"),
     dry_run: bool = typer.Option(False, "--dry-run"),
+    wait: bool = typer.Option(False, "--wait", help="Run in the foreground and return final summary."),
+    run_id_override: str | None = typer.Option(None, "--run-id", hidden=True),
 ) -> None:
-    """Execute a planned batch run."""
+    """Start a planned batch run.
+
+    By default this returns immediately after launching a worker process. Use
+    ``xtl batch status <run_id>`` to poll progress, or pass ``--wait`` for
+    foreground/test execution.
+    """
 
     project_root = paths.project_root(project)
     plan_path = _find_plan_path(project_root, plan_id)
@@ -168,7 +179,18 @@ def run_batch(
         _emit_failure("plan_not_found", f"Plan {plan_id!r} not found for project {project!r}.", {})
     assert plan_path is not None
     plan = _load_plan(plan_path)
-    run_id = f"rn_{uuid.uuid4().hex[:12]}"
+    run_id = run_id_override or f"rn_{uuid.uuid4().hex[:12]}"
+    if not wait:
+        launch = _launch_batch_worker(
+            project=project,
+            plan_id=plan_id,
+            run_id=run_id,
+            dry_run=dry_run,
+            project_root=project_root,
+            plan=plan,
+        )
+        _emit_success(launch)
+        return
     client: Any
     if dry_run:
         profile = ProviderProfile(
@@ -241,6 +263,86 @@ def batch_logs(run_id: str) -> None:
         if path.exists():
             lines.extend(path.read_text(encoding="utf-8").splitlines()[-20:])
     _emit_success({"run_id": run_id, "lines": lines[-50:]})
+
+
+def _launch_batch_worker(
+    *,
+    project: str,
+    plan_id: str,
+    run_id: str,
+    dry_run: bool,
+    project_root: Path,
+    plan: BatchPlan,
+) -> dict[str, Any]:
+    """Launch the foreground runner in a child process and return immediately."""
+
+    run_dir = project_root / "batches" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    stdout_path = run_dir / "worker.stdout.log"
+    stderr_path = run_dir / "worker.stderr.log"
+    (run_dir / "status.toml").write_text(
+        tomli_w.dumps(
+            {
+                "run_id": run_id,
+                "plan_id": plan.plan_id,
+                "status": "launched",
+                "started_at": datetime.now(UTC).isoformat(),
+                "total_items": plan.total_items,
+                "succeeded": 0,
+                "retried": 0,
+                "manual_review": 0,
+                "cancelled": 0,
+                "abandoned": 0,
+                "cost_usd": 0.0,
+                "cost_exact": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    cmd = [
+        sys.executable,
+        "-c",
+        "from bgs_translator.cli.app import main; main()",
+        "batch",
+        "run",
+        project,
+        "--plan",
+        plan_id,
+        "--wait",
+        "--run-id",
+        run_id,
+    ]
+    if dry_run:
+        cmd.append("--dry-run")
+    with stdout_path.open("ab") as stdout, stderr_path.open("ab") as stderr:
+        kwargs: dict[str, Any] = {
+            "cwd": str(Path.cwd()),
+            "env": os.environ.copy(),
+            "stdout": stdout,
+            "stderr": stderr,
+            "stdin": subprocess.DEVNULL,
+            "close_fds": True,
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        process = subprocess.Popen(cmd, **kwargs)
+    (run_dir / "worker.pid").write_text(str(process.pid), encoding="utf-8")
+    (run_dir / "worker.cmd.json").write_text(
+        json.dumps({"cmd": cmd, "cwd": str(Path.cwd())}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return {
+        "project": project,
+        "run_id": run_id,
+        "plan_id": plan.plan_id,
+        "status": "launched",
+        "pid": process.pid,
+        "run_dir": str(run_dir),
+        "stdout_log": str(stdout_path),
+        "stderr_log": str(stderr_path),
+        "dry_run": dry_run,
+        "poll": f"xtl batch status {run_id}",
+    }
 
 
 def _read_project_game(project_root: Path) -> str:
