@@ -182,6 +182,16 @@ class EntryBatchQueueRequest(BaseModel):
     batch_size: int | None = None
 
 
+class EntryBatchQueueAllRequest(BaseModel):
+    """Filter payload for submitting all matching entries to batch planning."""
+
+    sig: str | None = None
+    field: str | None = None
+    status: str | None = None
+    search: str | None = None
+    batch_size: int | None = None
+
+
 class EntryBulkStatusRequest(BaseModel):
     """Selected entry ids to mark with one XTL/xTranslator status."""
 
@@ -562,6 +572,29 @@ def api_create_project_batch_queue(
     """Create a GUI-selected batch queue request for later CLI planning."""
 
     return _create_batch_queue(project, payload.row_ids, batch_size=payload.batch_size)
+
+
+@fastapi_app.post("/api/projects/{project}/batch-queue/all")
+def api_create_project_batch_queue_all(
+    project: str,
+    payload: EntryBatchQueueAllRequest,
+    _auth: None = Depends(require_shared_secret),
+) -> dict[str, Any]:
+    """Create a batch queue request for every entry matching current filters."""
+
+    row_ids = _filtered_entry_row_ids(
+        project,
+        sig=None if _all_filter(payload.sig) else payload.sig,
+        field=None if _all_filter(payload.field) else payload.field,
+        entry_status=None if _all_filter(payload.status) else payload.status,
+        search=payload.search,
+    )
+    if not row_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "当前筛选条件下没有可提交的条目。")
+    result = _create_batch_queue(project, row_ids, batch_size=payload.batch_size, max_selected=None)
+    result["all_matching"] = True
+    result["matched_count"] = len(row_ids)
+    return result
 
 
 @fastapi_app.get("/api/projects/{project}/close-summary")
@@ -1726,6 +1759,7 @@ def _entries_html(project: str | None) -> str:
       <button class="xtl-btn danger" data-marker="btn-entries-bulk-untranslated" id="xtl-entries-bulk-untranslated">批量退回未翻译</button>
       <span class="xtl-label">每组条数</span><input class="xtl-input xtl-number-input" data-marker="field-entries-batch-size" id="xtl-entries-batch-size" type="number" min="1" max="500" step="1" value="100">
       <button class="xtl-btn" data-marker="btn-entries-submit-queue" id="xtl-entries-submit-queue">提交到批量翻译队列</button>
+      <button class="xtl-btn danger" data-marker="btn-entries-submit-all-queue" id="xtl-entries-submit-all-queue">疯狂模式：提交当前筛选全部</button>
     </div>
     <div class="xtl-help xtl-selection-status" data-marker="status-entries-queue" id="xtl-entries-queue-status">已选择 0 / 当前列表 0 个显示组，覆盖 0 条记录。按住 Shift 点击复选框可以连续选择一段；提交队列只会接收未翻译条目。</div>
     <details class="xtl-help xtl-tech-details" id="xtl-entries-queue-tech" hidden><summary>技术详情</summary><code id="xtl-entries-queue-command"></code></details>
@@ -1739,7 +1773,11 @@ def _entries_html(project: str | None) -> str:
       <div class="xtl-panel" data-marker="panel-entry-detail">
         <div class="xtl-panel-title">源文 / 译文 <span class="xtl-detail-id" id="xtl-entry-id">{_esc(str(selected["row_id"])) if selected else "未选择"}</span></div>
         <div class="xtl-panel-body xtl-entry-split">
-          <div><div class="xtl-help">源文：只读，供核对。保存只会写入本项目记忆库，不会修改原始 MOD 文件。</div><textarea class="xtl-entry-text" data-marker="field-entry-source" id="xtl-entry-source" readonly>{source}</textarea></div>
+          <div>
+            <div class="xtl-entry-context" data-marker="panel-entry-context" id="xtl-entry-context">选择左侧条目后，这里会显示 EDID、Record Signature、字段、FormID 和重复条目数量。</div>
+            <div class="xtl-help">源文：只读，供核对。保存只会写入本项目记忆库，不会修改原始 MOD 文件。</div>
+            <textarea class="xtl-entry-text" data-marker="field-entry-source" id="xtl-entry-source" readonly>{source}</textarea>
+          </div>
           <div>
             <div class="xtl-help">译文：可以手动修正 AI 结果。普通玩家只需要改这里。</div>
             <textarea class="xtl-entry-text" data-marker="field-entry-dest" id="xtl-entry-dest">{dest}</textarea>
@@ -3748,6 +3786,14 @@ def _entries_script(project: str | None) -> str:
         params.set('limit', '500');
         return `/api/projects/${encodeURIComponent(project)}/entries?${params}`;
       }
+      function currentEntryFilters() {
+        return {
+          sig: byId('xtl-entries-sig')?.value || '',
+          field: byId('xtl-entries-field')?.value || '',
+          status: byId('xtl-entries-status')?.value || '',
+          search: byId('xtl-entries-search')?.value || '',
+        };
+      }
       function setSaveStatus(text, tone = '') {
         const el = byId('xtl-entry-save-status');
         if (!el) return;
@@ -3842,20 +3888,47 @@ def _entries_script(project: str | None) -> str:
           const contextSamples = Array.isArray(entry.sample_contexts)
             ? entry.sample_contexts.slice(0, 3).map(item => item.edid || item.formid || item.row_id).filter(Boolean).join('；')
             : '';
+          const shortEdid = String(entry.edid || entry.sample_contexts?.[0]?.edid || entry.row_id || '').slice(0, 32);
           return `<tr${active} data-row-id="${esc(entry.row_id)}" data-marker="row-entries-${esc(entry.row_id)}">
             <td><input type="checkbox" class="xtl-entry-check" data-row-id="${esc(entry.row_id)}"${checked} title="勾选后可批量改状态；未翻译条目也可提交到 AI 队列"></td>
             <td title="${esc(meta)}"><span class="xtl-status-pill ${esc(entry.status)}">${esc(statusLabels[entry.status] || entry.status)}</span></td>
-            <td title="${esc(`${meta}${contextWarning}${contextSamples ? `；示例：${contextSamples}` : ''}`)}"><b>${esc(groupText)}</b><div class="xtl-help">${esc(contextWarning || (contextSamples ? contextSamples : '单条记录'))}</div></td>
+            <td title="${esc(`${meta}${contextWarning}${contextSamples ? `；示例：${contextSamples}` : ''}`)}"><b class="xtl-entry-sigline">${esc(groupText)}</b><div class="xtl-entry-edidline">${esc(shortEdid)}</div></td>
             <td title="${esc(meta)}">${esc(entry.source)}</td>
             <td title="${esc(meta)}">${esc(entry.dest || '')}</td>
           </tr>`;
         }).join('');
+      }
+      function renderEntryContext(entry) {
+        const panel = byId('xtl-entry-context');
+        if (!panel) return;
+        if (!entry) {
+          panel.textContent = '选择左侧条目后，这里会显示 EDID、Record Signature、字段、FormID 和重复条目数量。';
+          return;
+        }
+        const samples = Array.isArray(entry.sample_contexts) ? entry.sample_contexts : [];
+        const first = samples[0] || {};
+        const memberCount = Number(entry.member_count || 1);
+        const lines = [
+          `<div><b>Record Signature</b><span>${esc(entry.signature || '')}:${esc(entry.field || '')}</span></div>`,
+          `<div><b>EDID</b><span>${esc(entry.edid || first.edid || '无 EDID')}</span></div>`,
+          `<div><b>FormID</b><span>${esc(first.formid || entry.formid || '未知')}</span></div>`,
+          `<div><b>重复组</b><span>${memberCount > 1 ? `同一原文 + 同一 signature:field 共 ${memberCount} 条` : '单条记录'}</span></div>`,
+        ];
+        if (entry.cross_signature_field_count > 1) {
+          lines.push(`<div><b>折叠规则</b><span>同原文存在其他 signature:field，已保持分开。</span></div>`);
+        }
+        if (samples.length > 1) {
+          const sampleText = samples.slice(0, 5).map(item => item.edid || item.formid || item.row_id).filter(Boolean).join('；');
+          lines.push(`<div><b>组内示例</b><span>${esc(sampleText)}</span></div>`);
+        }
+        panel.innerHTML = lines.join('');
       }
       function renderDetail(entry) {
         selected = entry;
         savedDest = entry ? (entry.dest || '') : '';
         savedStatus = entry ? (entry.status || 'untranslated') : 'untranslated';
         if (byId('xtl-entry-id')) byId('xtl-entry-id').textContent = entry ? entry.row_id : '未选择';
+        renderEntryContext(entry);
         if (byId('xtl-entry-source')) byId('xtl-entry-source').value = entry ? entry.source || '' : '';
         if (byId('xtl-entry-dest')) byId('xtl-entry-dest').value = savedDest;
         if (byId('xtl-entry-status')) byId('xtl-entry-status').value = savedStatus;
@@ -3991,6 +4064,35 @@ def _entries_script(project: str | None) -> str:
           if (button) button.disabled = false;
         }
       }
+      async function submitAllMatchingBatchQueue() {
+        const batchSize = Math.max(1, Math.min(500, Number(byId('xtl-entries-batch-size')?.value || 100)));
+        const button = byId('xtl-entries-submit-all-queue');
+        if (button) button.disabled = true;
+        setQueueStatus('疯狂模式正在按当前筛选收集所有可翻译条目...', '');
+        try {
+          const response = await api(`/api/projects/${encodeURIComponent(project)}/batch-queue/all`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({...currentEntryFilters(), batch_size: batchSize}),
+          });
+          const skipped = response.skipped_count ? `，跳过 ${response.skipped_count} 个非未翻译条目` : '';
+          const llmSkipped = response.llm_skipped_count ? `；其中 ${response.llm_skipped_count} 条只有占位符/数字等内容，不会交给 AI` : '';
+          const tech = byId('xtl-entries-queue-tech');
+          const command = byId('xtl-entries-queue-command');
+          if (tech && command) {
+            command.textContent = response.command || '';
+            tech.hidden = !response.command;
+          }
+          const covered = response.covered_count && response.covered_count !== response.queued_count
+            ? `，覆盖 ${response.covered_count} 条真实记录`
+            : '';
+          setQueueStatus(`疯狂模式已提交当前筛选命中的 ${response.matched_count || response.covered_count || 0} 条记录：实际 ${response.queued_count} 个独特文本${covered}，每组最多 ${response.batch_size} 个，预计 ${response.group_count} 组${skipped}${llmSkipped}。下一步请让翻译助手生成提示词并预览。`, 'good');
+        } catch (error) {
+          setQueueStatus(`疯狂模式提交失败：${error.message || error}`, 'danger');
+        } finally {
+          if (button) button.disabled = false;
+        }
+      }
       async function bulkUpdateStatus(newStatus) {
         const rowIds = selectedMemberRowIds();
         if (!rowIds.length) {
@@ -4049,6 +4151,9 @@ def _entries_script(project: str | None) -> str:
         }
         if (event.target && event.target.id === 'xtl-entries-submit-queue') {
           submitBatchQueue();
+        }
+        if (event.target && event.target.id === 'xtl-entries-submit-all-queue') {
+          submitAllMatchingBatchQueue();
         }
         if (event.target && event.target.id === 'xtl-entries-bulk-translated') {
           bulkUpdateStatus('translated');
@@ -4172,12 +4277,18 @@ def _bulk_update_entries_status(
     }
 
 
-def _create_batch_queue(project: str, row_ids: list[str], *, batch_size: int | None = None) -> dict[str, Any]:
+def _create_batch_queue(
+    project: str,
+    row_ids: list[str],
+    *,
+    batch_size: int | None = None,
+    max_selected: int | None = 500,
+) -> dict[str, Any]:
     selected_ids = list(dict.fromkeys(item.strip() for item in row_ids if isinstance(item, str) and item.strip()))
     if not selected_ids:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先勾选至少一个条目。")
-    if len(selected_ids) > 500:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "一次最多提交 500 个条目到批量队列。")
+    if max_selected is not None and len(selected_ids) > max_selected:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"一次最多提交 {max_selected} 个条目到批量队列。")
     normalized_batch_size = int(batch_size or 100)
     if normalized_batch_size < 1 or normalized_batch_size > 500:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "每组条数必须在 1 到 500 之间。")
@@ -5222,6 +5333,52 @@ def _entry_rows(
                 continue
             visible.append(item)
         return _group_entry_rows(visible)[:limit]
+    finally:
+        conn.close()
+
+
+def _filtered_entry_row_ids(
+    project: str,
+    *,
+    sig: str | None = None,
+    field: str | None = None,
+    entry_status: str | None = None,
+    search: str | None = None,
+) -> list[str]:
+    memory_path = paths.project_root(project) / "memory" / "memory.sqlite"
+    if not memory_path.exists():
+        return []
+    conn = _open_project_db(project)
+    try:
+        derived_status_filter = entry_status if entry_status in {"locked", "untranslated", "partial", "translated"} else None
+        rows = select_units_filtered(
+            conn,
+            sigs=[sig] if sig else None,
+            fields=[field] if field else None,
+            statuses=None if derived_status_filter else ([entry_status] if entry_status else None),
+            search=search,
+            limit=None,
+        )
+        row_ids: list[str] = []
+        for row in rows:
+            item = _sqlite_row_dict(row)
+            skip_reason = _entry_row_skip_reason(row)
+            stored_status = str(item.get("status") or "")
+            if skip_reason and stored_status != "locked":
+                continue
+            effective_status = _effective_unit_status(
+                status=stored_status,
+                sparams=int(item.get("sparams") or 0),
+                skip_reason=skip_reason,
+                signature=str(item.get("signature") or ""),
+                field=str(item.get("field") or ""),
+            )
+            if derived_status_filter and effective_status != derived_status_filter:
+                continue
+            row_id = item.get("row_id")
+            if row_id:
+                row_ids.append(str(row_id))
+        return row_ids
     finally:
         conn.close()
 

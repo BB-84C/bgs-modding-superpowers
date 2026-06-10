@@ -202,7 +202,7 @@ def test_desktop_layout_css_keeps_tables_as_tables() -> None:
     assert ".xtl-layout {\n  display: grid;\n  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));" in css
     assert ".xtl-profiles-workbench {\n  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));" in css
     assert ".xtl-glossary-workbench {\n  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));" in css
-    assert "grid-template-columns: minmax(0, 58%) minmax(0, 42%);" not in css
+    assert ".xtl-entries-workbench {\n  height: 100%;\n  min-height: 0;\n  overflow: hidden;\n  grid-template-columns: minmax(0, 58%) minmax(0, 42%);" in css
     assert "grid-template-columns: minmax(0, 1.2fr) minmax(16rem, .8fr);" not in css
     assert ".xtl-toolbar .xtl-select {\n  flex: 1 1 42%;\n  min-width: 0;" in css
     assert ".xtl-toolbar .xtl-priority-action {\n  flex: 0 1 auto;" in css
@@ -580,6 +580,9 @@ def test_entries_html_uses_player_facing_filter_labels(tmp_path: Path, monkeypat
     assert "field-entries-batch-size" in html
     assert "btn-entries-bulk-translated" in html
     assert "btn-entries-bulk-untranslated" in html
+    assert "btn-entries-submit-all-queue" in html
+    assert "疯狂模式：提交当前筛选全部" in html
+    assert 'data-marker="panel-entry-context"' in html
     assert "xtl-selection-status" in html
     assert "已选择 0 / 当前列表 0 个显示组" in html
     assert "按住 Shift 点击复选框" in html
@@ -591,6 +594,8 @@ def test_entries_html_uses_player_facing_filter_labels(tmp_path: Path, monkeypat
     assert "function selectAllVisibleRows" in script
     assert "function clearSelectedRows" in script
     assert "function bulkUpdateStatus" in script
+    assert "function submitAllMatchingBatchQueue" in script
+    assert "/batch-queue/all" in script
     assert "entries.map(entry => entry.row_id)" in script
     assert "entry.status === 'untranslated'" in script
     assert "batch_size: batchSize" in script

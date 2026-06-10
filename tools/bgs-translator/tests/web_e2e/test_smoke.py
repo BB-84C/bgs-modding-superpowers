@@ -480,6 +480,66 @@ def test_batch_queue_dedupes_safe_duplicate_groups(tmp_path: Path, monkeypatch) 
     assert data["last_group_size"] == 2
 
 
+def test_batch_queue_all_submits_all_matching_entries(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.config.profiles import ProfilesConfig, ProviderProfile, save_profiles
+    from bgs_translator.core.memory import insert_units, open_memory_db
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+    from bgs_translator.web.app import fastapi_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    save_profiles(
+        ProfilesConfig(
+            active="OpenRouter-Test",
+            profiles={
+                "OpenRouter-Test": ProviderProfile(
+                    name="OpenRouter-Test",
+                    sdk_kind="openai-compat",
+                    base_url="https://openrouter.ai/api/v1",
+                    model="anthropic/claude-opus-4.6",
+                    api_key_env="OPENROUTER_API_KEY",
+                    json_mode="json_object",
+                )
+            },
+        )
+    )
+    project_root = paths.project_root("queue-all")
+    project_root.mkdir(parents=True)
+    (project_root / "project.toml").write_text(
+        "[project]\ngame = \"Starfield\"\ntarget_lang = \"zh-cn\"\n",
+        encoding="utf-8",
+    )
+    conn = open_memory_db(project_root)
+    insert_units(
+        conn,
+        [
+            TranslationUnit("A.esm", index, index, f"Q{index}", "QUST", "FULL", source=f"Objective {index}")
+            for index in range(1, 504)
+        ]
+        + [TranslationUnit("A.esm", 900, 900, "SkipAlias", "QUST", "QMDP", source="<Alias=TargetLocation>")]
+    )
+    conn.close()
+
+    client = TestClient(fastapi_app)
+    headers = {"Authorization": f"Bearer {ensure_shared_secret()}"}
+    response = client.post(
+        "/api/projects/queue-all/batch-queue/all",
+        headers=headers,
+        json={"sig": "QUST", "status": "untranslated", "batch_size": 100},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["all_matching"] is True
+    assert data["matched_count"] == 503
+    assert data["covered_count"] == 503
+    assert data["queued_count"] == 503
+    assert data["batch_size"] == 100
+    assert data["group_count"] == 6
+    assert data["last_group_size"] == 3
+
+
 def test_project_import_api_rejects_duplicate_project(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
     from bgs_translator.config import paths
