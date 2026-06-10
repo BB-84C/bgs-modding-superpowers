@@ -1,6 +1,6 @@
 ---
 name: maintaining-modding-environments
-description: "Use after first-run for ongoing modpack maintenance: log KB update, register custom pack, prune KB cache, modding environment health check, version pinning, or other recurring BGS modding environment care."
+description: "Use after first-run for ongoing modpack maintenance: update/install KB packs, author or register custom/mod KB packs, maintain localization glossary KBs for translator use, prune KB cache, health-check the environment, version-pin KB/tooling, or handle recurring BGS modding environment care."
 ---
 
 # Maintaining Modding Environments
@@ -9,6 +9,7 @@ description: "Use after first-run for ongoing modpack maintenance: log KB update
 
 - The environment is already set up and the user asks to maintain, refresh, update, or health-check it.
 - The user says "register custom pack", "install my KB pack", "set `BGS_KB_USER_PACKS`", or asks how to author a local KB pack.
+- The user asks how to maintain a mod knowledge base, a translator glossary KB, or a third-party localization KB for Skyrim/Fallout/Starfield.
 - The user asks to check or apply knowledge-base updates after first-run.
 - The user asks to prune the KB cache or clean old pack versions.
 - The user asks whether to pin a KB pack version, follow latest, or handle a `minPluginVersion` warning.
@@ -42,7 +43,10 @@ Each version directory contains `manifest.json`, `records/`, and `kb.sqlite`. Cu
 Use the KB MCP CLI for routine pruning:
 
 ```powershell
+# Preview which cached pack versions would be removed.
 node <plugin>\tools\bgs-kb-mcp\dist\cli.js prune-cache --dry-run
+
+# Apply the prune after the user accepts the preview.
 node <plugin>\tools\bgs-kb-mcp\dist\cli.js prune-cache
 ```
 
@@ -75,6 +79,7 @@ Reserved official pack IDs: `bgs-kb-core`, `bgs-kb-skyrim`, `bgs-kb-fallout4`, `
 Build the pack:
 
 ```powershell
+# Build kb.sqlite and manifest.json from the pack's records/ tree.
 node <plugin>\tools\bgs-kb-mcp\dist\cli.js build <pack-root>
 ```
 
@@ -83,7 +88,10 @@ This produces `kb.sqlite` and `manifest.json` next to `records/`.
 Validate and inspect:
 
 ```powershell
+# Validate every Markdown record against the official KB schema.
 node <plugin>\tools\bgs-kb-mcp\dist\cli.js validate <pack-root>
+
+# Inspect pack metadata, counts, games, and domains.
 node <plugin>\tools\bgs-kb-mcp\dist\cli.js info <pack-root>
 ```
 
@@ -105,12 +113,82 @@ C:\my-kb-roots\
 Set:
 
 ```powershell
+# Point discovery at the directory that contains one or more pack folders.
 $env:BGS_KB_USER_PACKS = "C:\my-kb-roots"
 ```
 
 Do not set it to `C:\my-kb-roots\my-custom-pack`; that points at the pack itself and discovery will look one level too deep.
 
 After registration, restart/reconnect the MCP so pack discovery runs, then call `bgs_kb_status({})` and verify the custom pack appears with the intended `packId`.
+
+## Localization and translator KBs
+
+Localization glossary packs are KB packs whose SQLite store includes
+`glossary_entries` and `glossary_aliases`. They feed `bgs-translator` RAG so an
+LLM receives canonical terms such as places, factions, item names, UI concepts,
+and do-not-translate entries. Put this guidance here, not in
+`using-bgs-translator`, because the same maintenance rules apply to official,
+mod-specific, and third-party glossary packs.
+
+Official bundled policy:
+
+- `bgs-l10n-starfield-zhhans` is the only official zh-Hans glossary pack we
+  ship from vanilla game data because Starfield is the only supported BGS game
+  with official Simplified Chinese localization.
+- Do not fabricate official Skyrim/Fallout4 Chinese packs. If the user wants
+  them, create third-party/user packs with explicit source, license, scope, and
+  review notes.
+- The Starfield official pack is large and should be distributed through KB
+  Release artifacts, not copied into the portable plugin tree.
+
+For a mod-specific translator KB, prefer a user namespace such as
+`user-l10n-<game>-<mod>-zhcn`. Include only the mod's accepted terminology,
+character/place names, recurring UI labels, and do-not-translate terms. Do not
+dump every translated sentence into a term KB unless the user explicitly wants a
+translation-memory style pack and accepts the recall/noise tradeoff.
+
+For a third-party game localization KB, require:
+
+- source language, target language, game, source project/version, and license;
+- provenance in `bgs-kb-meta.yml` and in generated notes;
+- a stable pack id outside reserved `bgs-kb-*` official namespaces;
+- a small sample query after registration to verify the pack is discoverable.
+
+If the input is an xTranslator SST dictionary, the translator tool has a
+one-shot builder that creates the glossary SQLite shape directly:
+
+```powershell
+# Build a user-maintained glossary pack from an SST dictionary.
+py -3.12 tools\bgs-translator\bgs_translator\tools\xtranslator_sst_to_kb_pack.py `
+  --input "D:\path\to\source_english_chinese.sst" `
+  --output-dir "C:\my-kb-roots\user-l10n-skyrim-thirdparty-zhcn" `
+  --pack-id user-l10n-skyrim-thirdparty-zhcn `
+  --display-name "User Skyrim zh-CN Localization Glossary" `
+  --game SkyrimSE `
+  --source-lang en `
+  --target-lang zh-cn
+```
+
+Then set `BGS_KB_USER_PACKS` to the parent root, restart/reconnect the MCP, and
+query a known term. For translator-only packs, use `xtl`/translator glossary
+smokes as the stronger check because `bgs_kb_query` only searches Markdown-style
+records unless the MCP has been upgraded for glossary-table queries.
+
+## Official KB release maintenance
+
+For project maintainers cutting a KB Release, use the release staging script:
+
+```powershell
+# Rebuild source-record packs, verify prebuilt glossary packs, zip all packs,
+# and write dist/kb-release/manifest-index.json.
+pwsh scripts/build-kb-release.ps1 -Force
+```
+
+The script includes the generated Starfield zh-Hans glossary pack in the release
+index but does not rebuild it from Markdown records. If `kb.sqlite` hash
+verification fails, regenerate that pack from its approved source SST before
+publishing. The script prints the exact `gh release create ...` command; review
+the staged `manifest-index.json` before running that network-side publish.
 
 ## Version-pinning advice
 

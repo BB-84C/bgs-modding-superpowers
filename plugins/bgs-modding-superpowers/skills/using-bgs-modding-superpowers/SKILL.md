@@ -26,6 +26,7 @@ for dev-log and release-changelog maintenance.
 | `xedit-automation` | Any task involving `.esp/.esm/.esl` plugin files, FormIDs, masters, conflicts, ESL flagging, ITM/UDR cleaning, Pascal scripts |
 | `xedit-conflict-audit` | "Why is this override not winning?", "Which plugins overlap on this record?", "Is this load order safe?" |
 | `writing-bgs-load-order` | Reading/editing/generating `plugins.txt` or `loadorder.txt`; enabling/disabling/reordering/adding/removing plugins; launching xEdit with a custom plugins file; "load order", "enable this plugin", "disable that plugin", "what does the asterisk mean" |
+| `using-bgs-translator` | Translate a Bethesda plugin's text to another language; "translate this mod", "汉化这个 mod", "localize mod to chinese", "build SST for", "use my LLM to translate plugins" |
 | `writing-modpack-devlog` | "Log this", "record what I did", "note this change", "add to dev-log", "track this decision" |
 | `writing-modpack-changelog` | "Cut a release", "release notes", "what changed since v1.2", "prepare release for Nexus" |
 
@@ -148,6 +149,9 @@ actual plugin, load-order, and record readback.
   registered via `$BGS_KB_USER_PACKS` through `maintaining-modding-environments`.
 - When you would normally write code that touches BGS plugin files (`.esp/.esm/
   .esl`), STOP and route through `xedit-automation` instead.
+- When the user wants to translate plugin text or emit SST dictionaries for a
+  mod, route to `using-bgs-translator` instead of xEdit; translator reads plugin
+  text and emits dictionaries, it does not modify plugin binaries.
 - When the user asks to "log", "record", "track", or "note" modpack work,
   route to `writing-modpack-devlog`. When the user asks to "cut a release" or
   prepare release notes, route to `writing-modpack-changelog`.
@@ -162,6 +166,8 @@ actual plugin, load-order, and record readback.
 - BGS KB records under `knowledge/bgs-kb/packs/core/records/` — deep reference
   for daemon commands, error codes, save semantics, glossary, and durable gotchas.
 - `xedit-conflict-audit` — the W2 conflict-audit workflow.
+- `using-bgs-translator` — CLI + Tk workflow for LLM-assisted plugin text
+  translation and SST dictionary export.
 - `writing-modpack-devlog`, `writing-modpack-changelog` — runtime asset
   skills for project documentation.
 

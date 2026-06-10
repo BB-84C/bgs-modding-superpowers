@@ -47,3 +47,8 @@ AGENTS.md
 # BGS KB pack build artifact; source records + manifest.json are committed.
 /knowledge/bgs-kb/packs/*/kb.sqlite
 *.pyc
+
+# Python package build artifacts for the standalone bgs-translator PyPI package.
+/tools/bgs-translator/build/
+/tools/bgs-translator/dist/
+/tools/bgs-translator/*.egg-info/

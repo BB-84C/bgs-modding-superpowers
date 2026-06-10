@@ -239,6 +239,11 @@ High-signal tabs:
 For detailed player-facing guidance, point the user to the manuals listed at the
 top of this skill.
 
+For maintaining Starfield official terminology packs, mod-specific glossary
+packs, or third-party Skyrim/Fallout localization KBs, switch to
+`maintaining-modding-environments`. Translator runs consume those packs; they do
+not own KB release or provenance policy.
+
 ## Prompt Context Requirements
 
 Do not send generic prompts. For every real batch, build context with:

@@ -288,6 +288,9 @@ Copy-Tree -From "tools/mo2-vfs-launcher"  -To "tools/mo2-vfs-launcher"
 Copy-Tree -From "tools/mo2-control-plane" -To "tools/mo2-control-plane"
 
 # ---- 7. Bundled knowledge-base core pack -----------------------------------
+# Large per-game and localization packs ship as KB Release artifacts. Keep the
+# portable plugin small and deterministic; first-run/maintenance can install
+# bgs-kb-starfield, bgs-l10n-starfield-zhhans, and other packs from releases.
 Copy-FileOnly -From "knowledge/bgs-kb/packs/core/manifest.json" -To "knowledge/bgs-kb/packs/core/manifest.json"
 Copy-Tree -From "knowledge/bgs-kb/packs/core/records" -To "knowledge/bgs-kb/packs/core/records"
 if (Test-Path -LiteralPath (Join-Path $RepoRoot "knowledge/bgs-kb/packs/core/kb.sqlite")) {
