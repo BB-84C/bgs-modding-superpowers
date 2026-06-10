@@ -1757,7 +1757,7 @@ def _entries_html(project: str | None) -> str:
       <button class="xtl-btn" data-marker="btn-entries-clear-selection" id="xtl-entries-clear-selection">全部清空</button>
       <button class="xtl-btn" data-marker="btn-entries-bulk-translated" id="xtl-entries-bulk-translated">批量标记已翻译</button>
       <button class="xtl-btn danger" data-marker="btn-entries-bulk-untranslated" id="xtl-entries-bulk-untranslated">批量退回未翻译</button>
-      <span class="xtl-label">每组条数</span><input class="xtl-input xtl-number-input" data-marker="field-entries-batch-size" id="xtl-entries-batch-size" type="number" min="1" max="500" step="1" value="100">
+      <span class="xtl-label">每组条数</span><input class="xtl-input xtl-number-input" data-marker="field-entries-batch-size" id="xtl-entries-batch-size" type="number" min="1" step="1" value="100">
       <button class="xtl-btn" data-marker="btn-entries-submit-queue" id="xtl-entries-submit-queue">提交到批量翻译队列</button>
       <button class="xtl-btn danger" data-marker="btn-entries-submit-all-queue" id="xtl-entries-submit-all-queue">疯狂模式：提交当前筛选全部</button>
     </div>
@@ -3794,6 +3794,10 @@ def _entries_script(project: str | None) -> str:
           search: byId('xtl-entries-search')?.value || '',
         };
       }
+      function entryBatchSize() {
+        const value = Math.floor(Number(byId('xtl-entries-batch-size')?.value || 100));
+        return Number.isFinite(value) && value > 0 ? value : 100;
+      }
       function setSaveStatus(text, tone = '') {
         const el = byId('xtl-entry-save-status');
         if (!el) return;
@@ -4031,7 +4035,7 @@ def _entries_script(project: str | None) -> str:
           setQueueStatus('请先在左侧列表勾选至少一个条目。提交队列只会接收其中未翻译、适合交给 AI 的条目。', 'danger');
           return;
         }
-        const batchSize = Math.max(1, Math.min(500, Number(byId('xtl-entries-batch-size')?.value || 100)));
+        const batchSize = entryBatchSize();
         const button = byId('xtl-entries-submit-queue');
         if (button) button.disabled = true;
         setQueueStatus('正在写入批量队列请求...', '');
@@ -4066,7 +4070,7 @@ def _entries_script(project: str | None) -> str:
         }
       }
       async function submitAllMatchingBatchQueue() {
-        const batchSize = Math.max(1, Math.min(500, Number(byId('xtl-entries-batch-size')?.value || 100)));
+        const batchSize = entryBatchSize();
         const button = byId('xtl-entries-submit-all-queue');
         if (button) button.disabled = true;
         setQueueStatus('疯狂模式正在按当前筛选收集所有可翻译条目...', '');
@@ -4291,8 +4295,8 @@ def _create_batch_queue(
     if max_selected is not None and len(selected_ids) > max_selected:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"一次最多提交 {max_selected} 个条目到批量队列。")
     normalized_batch_size = int(batch_size or 100)
-    if normalized_batch_size < 1 or normalized_batch_size > 500:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "每组条数必须在 1 到 500 之间。")
+    if normalized_batch_size < 1:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "每组条数必须是正整数。")
 
     project_root = paths.project_root(project)
     data = _project_toml_data(project_root)

@@ -539,6 +539,19 @@ def test_batch_queue_all_submits_all_matching_entries(tmp_path: Path, monkeypatc
     assert data["group_count"] == 6
     assert data["last_group_size"] == 3
 
+    large_response = client.post(
+        "/api/projects/queue-all/batch-queue/all",
+        headers=headers,
+        json={"sig": "QUST", "status": "untranslated", "batch_size": 1000},
+    )
+
+    assert large_response.status_code == 200, large_response.text
+    large_data = large_response.json()
+    assert large_data["batch_size"] == 1000
+    assert large_data["queued_count"] == 503
+    assert large_data["group_count"] == 1
+    assert large_data["last_group_size"] == 503
+
 
 def test_project_import_api_rejects_duplicate_project(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))

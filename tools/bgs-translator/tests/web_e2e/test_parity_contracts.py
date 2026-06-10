@@ -580,6 +580,8 @@ def test_entries_html_uses_player_facing_filter_labels(tmp_path: Path, monkeypat
     assert "批量退回未翻译" in html
     assert "每组条数" in html
     assert "field-entries-batch-size" in html
+    assert 'id="xtl-entries-batch-size" type="number" min="1" step="1" value="100"' in html
+    assert 'id="xtl-entries-batch-size" type="number" min="1" max="500"' not in html
     assert "btn-entries-bulk-translated" in html
     assert "btn-entries-bulk-untranslated" in html
     assert "btn-entries-submit-all-queue" in html
@@ -597,7 +599,9 @@ def test_entries_html_uses_player_facing_filter_labels(tmp_path: Path, monkeypat
     assert "function clearSelectedRows" in script
     assert "function bulkUpdateStatus" in script
     assert "function submitAllMatchingBatchQueue" in script
+    assert "function entryBatchSize" in script
     assert "/batch-queue/all" in script
+    assert "Math.min(500" not in script
     assert "entries.map(entry => entry.row_id)" in script
     assert "entry.status === 'untranslated'" in script
     assert "batch_size: batchSize" in script
