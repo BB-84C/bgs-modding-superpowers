@@ -162,6 +162,75 @@ def test_reader_filters_target_lang(tmp_path: Path, make_fixture_pack: PackFacto
     assert entries == []
 
 
+def test_reader_chunks_large_candidate_prefilter_terms(
+    tmp_path: Path, make_fixture_pack: PackFactory
+) -> None:
+    from bgs_translator.kb.reader import KBGlossaryReader
+
+    make_fixture_pack(
+        "bgs-l10n-starfield-zhhans",
+        [
+            {
+                "record_id": "l10n.starfield.target-term",
+                "source": "TargetTerm",
+                "target": "目标术语",
+                "category": "lore_term",
+                "games": ["Starfield"],
+            }
+        ],
+    )
+    source = " ".join([f"token{i:03d}" for i in range(520)] + ["TargetTerm"])
+
+    reader = KBGlossaryReader(
+        kb_root=tmp_path,
+        user_packs_root=tmp_path / "user-packs",
+        candidate_source_term_limit=600,
+    )
+    try:
+        entries = reader.query_candidate_entries("zh-cn", "Starfield", source_strings=[source])
+    finally:
+        reader.close()
+
+    assert [entry.record_id for entry in entries] == ["l10n.starfield.target-term"]
+
+
+def test_reader_large_pack_keeps_related_rag_candidates(
+    tmp_path: Path, make_fixture_pack: PackFactory
+) -> None:
+    from bgs_translator.kb.reader import KBGlossaryReader
+
+    make_fixture_pack(
+        "bgs-l10n-starfield-zhhans",
+        [
+            {
+                "record_id": "l10n.starfield.laser-turret",
+                "source": "Laser Turret",
+                "target": "激光炮塔",
+                "category": "lore_term",
+                "games": ["Starfield"],
+            }
+        ],
+    )
+    db_path = tmp_path / "packs" / "bgs-l10n-starfield-zhhans" / "kb.sqlite"
+
+    reader = KBGlossaryReader(
+        kb_root=tmp_path,
+        user_packs_root=tmp_path / "user-packs",
+        candidate_source_term_limit=20,
+    )
+    reader._glossary_count_cache[db_path] = 50_001
+    try:
+        entries = reader.query_candidate_entries(
+            "zh-cn",
+            "Starfield",
+            source_strings=["Install a defensive Laser weapon near the Turret control node."],
+        )
+    finally:
+        reader.close()
+
+    assert [entry.record_id for entry in entries] == ["l10n.starfield.laser-turret"]
+
+
 def test_reader_skips_missing_kb_sqlite(tmp_path: Path) -> None:
     from bgs_translator.kb.reader import KBGlossaryReader
 

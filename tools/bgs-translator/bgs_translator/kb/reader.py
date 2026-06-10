@@ -4,11 +4,36 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections import Counter
 from collections.abc import Collection
 from pathlib import Path
 
 from bgs_translator.config import paths
 from bgs_translator.kb.models import GlossaryEntry
+
+_SOURCE_PREFILTER_CHUNK_SIZE = 400
+_LARGE_GLOSSARY_PACK_THRESHOLD = 50_000
+_READER_STOP_WORDS = {
+    "and",
+    "are",
+    "for",
+    "from",
+    "have",
+    "identify",
+    "just",
+    "not",
+    "read",
+    "that",
+    "the",
+    "there",
+    "this",
+    "was",
+    "were",
+    "while",
+    "with",
+    "you",
+    "your",
+}
 
 
 class KBGlossaryReader:
@@ -37,6 +62,8 @@ class KBGlossaryReader:
             tuple[str, Path, str, str, str | None, tuple[str, ...] | None],
             list[GlossaryEntry],
         ] = {}
+        self._glossary_count_cache: dict[Path, int] = {}
+        self._large_pack_entries_cache: dict[tuple[Path, str, str], list[GlossaryEntry]] = {}
 
     def _discover(self) -> None:
         """Scan installed and user pack roots for ``kb.sqlite`` files."""
@@ -154,6 +181,7 @@ class KBGlossaryReader:
         many entries while planning a run.
         """
         source_terms = tuple(_candidate_source_terms(source_strings or [], self.candidate_source_term_limit)) or None
+        exact_forms = tuple(_candidate_exact_forms(source_strings or [], self.candidate_source_term_limit)) or None
         deduped: dict[str, GlossaryEntry] = {}
         for root_kind, pack_id, db_path in [
             *[("canonical", pack_id, db_path) for pack_id, db_path in self.pack_dbs],
@@ -162,7 +190,39 @@ class KBGlossaryReader:
             prefilter_terms = None if root_kind == "user" else source_terms
             if root_kind == "canonical" and source_terms is None:
                 continue
-            key = (root_kind, db_path, target_lang.casefold(), game, mod_slug, prefilter_terms)
+            cached = self._query_candidate_pack_cached(
+                root_kind,
+                pack_id,
+                db_path,
+                target_lang,
+                game,
+                mod_slug=mod_slug,
+                source_prefilter_terms=prefilter_terms,
+                source_exact_forms=exact_forms if root_kind == "canonical" else None,
+            )
+            for entry in cached:
+                deduped[entry.record_id] = entry
+
+        return sorted(
+            deduped.values(),
+            key=lambda entry: (-_scope_sort_weight(entry.scope), entry.source.casefold(), entry.record_id),
+        )
+
+    def _query_candidate_pack_cached(
+        self,
+        root_kind: str,
+        pack_id: str,
+        db_path: Path,
+        target_lang: str,
+        game: str,
+        *,
+        mod_slug: str | None,
+        source_prefilter_terms: tuple[str, ...] | None,
+        source_exact_forms: tuple[str, ...] | None = None,
+    ) -> list[GlossaryEntry]:
+        deduped: dict[str, GlossaryEntry] = {}
+        for chunk in _chunks(source_exact_forms or (), _SOURCE_PREFILTER_CHUNK_SIZE):
+            key = (f"{root_kind}:exact", db_path, target_lang.casefold(), game, mod_slug, chunk)
             cached = self._candidate_cache.get(key)
             if cached is None:
                 cached = self._query_pack(
@@ -174,16 +234,81 @@ class KBGlossaryReader:
                     mod_slug=mod_slug,
                     require_source_match=False,
                     alias_mode="bulk",
-                    source_prefilter_terms=prefilter_terms,
+                    source_exact_forms=chunk,
                 )
                 self._candidate_cache[key] = cached
             for entry in cached:
                 deduped[entry.record_id] = entry
+        if self._is_large_glossary_pack(db_path):
+            for entry in self._query_large_candidate_pack_cached(
+                root_kind,
+                pack_id,
+                db_path,
+                target_lang,
+                game,
+                mod_slug=mod_slug,
+                source_prefilter_terms=source_prefilter_terms,
+            ):
+                deduped[entry.record_id] = entry
+            return list(deduped.values())
 
-        return sorted(
-            deduped.values(),
-            key=lambda entry: (-_scope_sort_weight(entry.scope), entry.source.casefold(), entry.record_id),
+        chunks = (
+            _chunks(source_prefilter_terms, _SOURCE_PREFILTER_CHUNK_SIZE)
+            if source_prefilter_terms
+            else [None]
         )
+        for chunk in chunks:
+            key = (f"{root_kind}:prefilter", db_path, target_lang.casefold(), game, mod_slug, chunk)
+            cached = self._candidate_cache.get(key)
+            if cached is None:
+                cached = self._query_pack(
+                    pack_id,
+                    db_path,
+                    [],
+                    target_lang,
+                    game,
+                    mod_slug=mod_slug,
+                    require_source_match=False,
+                    alias_mode="bulk",
+                    source_prefilter_terms=chunk,
+                )
+                self._candidate_cache[key] = cached
+            for entry in cached:
+                deduped[entry.record_id] = entry
+        return list(deduped.values())
+
+    def _query_large_candidate_pack_cached(
+        self,
+        root_kind: str,
+        pack_id: str,
+        db_path: Path,
+        target_lang: str,
+        game: str,
+        *,
+        mod_slug: str | None,
+        source_prefilter_terms: tuple[str, ...] | None,
+    ) -> list[GlossaryEntry]:
+        if not source_prefilter_terms:
+            return []
+        key = (
+            f"{root_kind}:large-prefilter",
+            db_path,
+            target_lang.casefold(),
+            game,
+            mod_slug,
+            source_prefilter_terms,
+        )
+        cached = self._candidate_cache.get(key)
+        if cached is not None:
+            return cached
+        source_terms = set(source_prefilter_terms)
+        cached = [
+            entry
+            for entry in self._large_pack_entries(pack_id, db_path, target_lang, game, mod_slug=mod_slug)
+            if _entry_source_related_to_terms(entry.source, source_terms)
+        ]
+        self._candidate_cache[key] = cached
+        return cached
 
     def _query_pack(
         self,
@@ -197,6 +322,7 @@ class KBGlossaryReader:
         require_source_match: bool = True,
         alias_mode: str = "per-record",
         source_prefilter_terms: tuple[str, ...] | None = None,
+        source_exact_forms: tuple[str, ...] | None = None,
     ) -> list[GlossaryEntry]:
         try:
             conn = self._conn(db_path)
@@ -207,22 +333,28 @@ class KBGlossaryReader:
                 "LOWER(ge.target_lang) = LOWER(?)",
             ]
             params: list[object] = [target_lang]
+            if source_exact_forms:
+                placeholders = ",".join("?" for _ in source_exact_forms)
+                where.append(f"LOWER(ge.source) IN ({placeholders})")
+                params.extend(form.casefold() for form in source_exact_forms)
             if source_prefilter_terms:
+                include_alias_prefilter = self._has_source_aliases(db_path)
                 clauses = []
                 for term in source_prefilter_terms:
                     clauses.append("LOWER(ge.source) LIKE ?")
                     params.append(f"%{term}%")
-                    clauses.append(
-                        """
-                        EXISTS (
-                            SELECT 1 FROM glossary_aliases ga
-                            WHERE ga.record_id = ge.record_id
-                              AND ga.alias_kind = 'source'
-                              AND LOWER(ga.alias) LIKE ?
+                    if include_alias_prefilter:
+                        clauses.append(
+                            """
+                            EXISTS (
+                                SELECT 1 FROM glossary_aliases ga
+                                WHERE ga.record_id = ge.record_id
+                                  AND ga.alias_kind = 'source'
+                                  AND LOWER(ga.alias) LIKE ?
+                            )
+                            """
                         )
-                        """
-                    )
-                    params.append(f"%{term}%")
+                        params.append(f"%{term}%")
                 where.append(f"({' OR '.join(clauses)})")
             rows = conn.execute(
                 f"""
@@ -312,6 +444,124 @@ class KBGlossaryReader:
             )
         return grouped
 
+    def _has_source_aliases(self, db_path: Path) -> bool:
+        try:
+            conn = self._conn(db_path)
+            if not _has_tables(conn, {"glossary_aliases"}):
+                return False
+            row = conn.execute(
+                "SELECT 1 FROM glossary_aliases WHERE alias_kind = 'source' LIMIT 1"
+            ).fetchone()
+        except sqlite3.Error:
+            return False
+        return row is not None
+
+    def _large_pack_entries(
+        self,
+        pack_id: str,
+        db_path: Path,
+        target_lang: str,
+        game: str,
+        *,
+        mod_slug: str | None,
+    ) -> list[GlossaryEntry]:
+        cache_key = (db_path, target_lang.casefold(), game)
+        cached = self._large_pack_entries_cache.get(cache_key)
+        if cached is not None:
+            entries = cached
+        else:
+            try:
+                conn = self._conn(db_path)
+                if not _has_tables(conn, {"records", "glossary_entries"}):
+                    entries = []
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT
+                            ge.record_id,
+                            ge.source,
+                            ge.source_lang,
+                            ge.target,
+                            ge.target_lang,
+                            ge.scope,
+                            ge.scope_key,
+                            ge.category,
+                            ge.confidence,
+                            ge.notes,
+                            r.pack_id AS row_pack_id
+                        FROM glossary_entries ge
+                        JOIN records r ON r.id = ge.record_id
+                        WHERE r.kind = 'glossary-entry'
+                          AND LOWER(ge.target_lang) = LOWER(?)
+                          AND (
+                            EXISTS (
+                              SELECT 1
+                              FROM record_games rg
+                              WHERE rg.record_id = ge.record_id
+                                AND rg.game = ?
+                            )
+                            OR NOT EXISTS (
+                              SELECT 1
+                              FROM record_games rg_any
+                              WHERE rg_any.record_id = ge.record_id
+                            )
+                          )
+                        """,
+                        (target_lang, game),
+                    ).fetchall()
+                    alias_map = self._aliases_map(db_path) if self._has_source_aliases(db_path) else {}
+                    games_map = self._games_map(db_path)
+                    entries = []
+                    for row in rows:
+                        record_id = str(row["record_id"])
+                        source_aliases = alias_map.get(record_id, {}).get("source", [])
+                        target_aliases = alias_map.get(record_id, {}).get("target", [])
+                        games = games_map.get(record_id, [])
+                        entries.append(
+                            GlossaryEntry(
+                                record_id=record_id,
+                                source=str(row["source"]),
+                                source_aliases=source_aliases,
+                                source_lang=str(row["source_lang"]),
+                                target=str(row["target"]),
+                                target_aliases=target_aliases,
+                                target_lang=str(row["target_lang"]),
+                                scope=row["scope"],
+                                scope_key=row["scope_key"],
+                                category=row["category"],
+                                confidence=row["confidence"],
+                                notes=row["notes"],
+                                pack_id=str(row["row_pack_id"] or pack_id),
+                                games=games,
+                            )
+                        )
+            except sqlite3.Error:
+                entries = []
+            self._large_pack_entries_cache[cache_key] = entries
+
+        if not mod_slug:
+            return [entry for entry in entries if entry.scope != "mod"]
+        return [
+            entry
+            for entry in entries
+            if entry.scope != "mod" or entry.scope_key == mod_slug
+        ]
+
+    def _is_large_glossary_pack(self, db_path: Path) -> bool:
+        cached = self._glossary_count_cache.get(db_path)
+        if cached is not None:
+            return cached > _LARGE_GLOSSARY_PACK_THRESHOLD
+        try:
+            conn = self._conn(db_path)
+            if not _has_tables(conn, {"glossary_entries"}):
+                self._glossary_count_cache[db_path] = 0
+                return False
+            count = int(conn.execute("SELECT COUNT(*) FROM glossary_entries").fetchone()[0])
+        except sqlite3.Error:
+            count = 0
+        self._glossary_count_cache[db_path] = count
+        return count > _LARGE_GLOSSARY_PACK_THRESHOLD
+
     def _games_map(self, db_path: Path) -> dict[str, list[str]]:
         try:
             conn = self._conn(db_path)
@@ -365,6 +615,7 @@ class KBGlossaryReader:
             conn.close()
         self._conns.clear()
         self._candidate_cache.clear()
+        self._large_pack_entries_cache.clear()
 
 
 def _has_tables(conn: sqlite3.Connection, table_names: set[str]) -> bool:
@@ -391,13 +642,66 @@ def _scope_sort_weight(scope: str) -> int:
 
 
 def _candidate_source_terms(source_strings: list[str], limit: int) -> list[str]:
-    terms = [
-        token.casefold()
-        for source in source_strings
-        for token in re.findall(r"[A-Za-z0-9]+", source)
-        if len(token) >= 3 or (len(token) >= 2 and token.isupper())
+    counts: Counter[str] = Counter()
+    first_seen: dict[str, int] = {}
+    order = 0
+    for source in source_strings:
+        for raw_token in re.findall(r"[A-Za-z0-9]+", source):
+            token = raw_token.casefold()
+            if token in _READER_STOP_WORDS:
+                continue
+            if len(raw_token) < 3 and not (len(raw_token) >= 2 and raw_token.isupper()):
+                continue
+            counts[token] += 1
+            first_seen.setdefault(token, order)
+            order += 1
+    return [
+        token
+        for token, _count in sorted(
+            counts.items(),
+            key=lambda item: (-item[1], first_seen[item[0]], item[0]),
+        )[:limit]
     ]
-    return sorted(set(terms))[:limit]
+
+
+def _candidate_exact_forms(source_strings: list[str], limit: int) -> list[str]:
+    forms: list[str] = []
+    for source in source_strings:
+        clean = " ".join(source.strip().split())
+        if clean:
+            forms.append(clean)
+        tokens = re.findall(r"[A-Za-z0-9]+", source)
+        if len(tokens) > 12:
+            continue
+        for width in (2, 3, 4):
+            for index in range(0, max(0, len(tokens) - width + 1)):
+                forms.append(" ".join(tokens[index : index + width]))
+    deduped = list(dict.fromkeys(form for form in forms if form and len(form) >= 2))
+    return deduped[:limit]
+
+
+def _chunks(values: tuple[str, ...], size: int) -> list[tuple[str, ...]]:
+    return [values[index : index + size] for index in range(0, len(values), size)]
+
+
+def _entry_source_related_to_terms(source: str, source_terms: set[str]) -> bool:
+    entry_terms = _entry_candidate_terms(source)
+    if not entry_terms:
+        return False
+    required_overlap = min(2, len(entry_terms))
+    return len(entry_terms & source_terms) >= required_overlap
+
+
+def _entry_candidate_terms(source: str) -> set[str]:
+    if len(source) > 80 or any(marker in source for marker in (".", "?", "!", ",", ";", ":")):
+        return set()
+    raw_tokens = {token.casefold() for token in re.findall(r"[A-Za-z0-9]+", source)}
+    if raw_tokens & _READER_STOP_WORDS:
+        return set()
+    terms = {token for token in raw_tokens if len(token) >= 3 and token not in _READER_STOP_WORDS}
+    if len(terms) < 2 or len(terms) > 6:
+        return set()
+    return terms
 
 
 __all__ = ["KBGlossaryReader"]

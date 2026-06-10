@@ -1096,6 +1096,9 @@ def test_project_html_explains_sst_and_reload_safely(tmp_path: Path, monkeypatch
     assert 'data-marker="field-budget-glossary-max-terms"' in prompt_html
     assert 'data-marker="field-budget-glossary-max-prompt-chars"' in prompt_html
     assert 'data-marker="field-budget-glossary-candidate-source-terms"' in prompt_html
+    assert 'id="xtl-budget-glossary-max-terms" data-marker="field-budget-glossary-max-terms" type="number" min="1" max=' not in prompt_html
+    assert 'id="xtl-budget-glossary-max-prompt-chars" data-marker="field-budget-glossary-max-prompt-chars" type="number" min="1000" max=' not in prompt_html
+    assert 'id="xtl-budget-glossary-candidate-source-terms" data-marker="field-budget-glossary-candidate-source-terms" type="number" min="1" max=' not in prompt_html
     assert 'data-marker="btn-save-translation-budgets"' in prompt_html
     script = web_app._project_script("ryos-zhcn")
     assert "导出命令完成\uff0c但没有生成 SST 文件" in script

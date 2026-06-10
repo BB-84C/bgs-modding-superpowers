@@ -88,10 +88,17 @@ class GlossaryRetriever:
         """Collect candidate terms, dedupe them, and mark prompt inclusion."""
         entries = self._candidate_entries(source_strings, target_lang, game, mod_slug=mod_slug)
         entry_by_id = {entry.record_id: entry for entry in entries}
+        source_tokens = set().union(*(_content_tokens(source) for source in source_strings))
+        normalized_source_corpus = "\n".join(_normalize_form(source) for source in source_strings)
         evidence = [
             match
             for entry in entries
-            for match in self._match_entry(entry, source_strings)
+            for match in self._match_entry(
+                entry,
+                source_strings,
+                source_tokens,
+                normalized_source_corpus,
+            )
         ]
         evidence = self._dedupe_evidence(evidence, entry_by_id)
         evidence = self._apply_budget(evidence, max_terms=max_terms, max_prompt_chars=max_prompt_chars)
@@ -142,6 +149,8 @@ class GlossaryRetriever:
         self,
         entry: GlossaryEntry,
         source_strings: list[str],
+        source_tokens: set[str],
+        normalized_source_corpus: str,
     ) -> list[GlossaryMatchEvidence]:
         matches: list[GlossaryMatchEvidence] = []
         for index, form in enumerate(entry.all_source_forms):
@@ -150,14 +159,14 @@ class GlossaryRetriever:
             exact = _find_boundary_match(form, source_strings)
             if exact is not None:
                 matched_by = "source_exact" if index == 0 else "alias_exact"
-                matches.append(self._evidence(entry, matched_by, form, exact, source_strings))
+                matches.append(self._evidence(entry, matched_by, form, exact, normalized_source_corpus))
                 continue
 
             if _is_normalized_matchable(form):
                 normalized_match = _find_normalized_match(form, source_strings)
                 if normalized_match is not None:
                     matches.append(
-                        self._evidence(entry, "normalized", form, normalized_match, source_strings)
+                        self._evidence(entry, "normalized", form, normalized_match, normalized_source_corpus)
                     )
                     continue
 
@@ -171,7 +180,7 @@ class GlossaryRetriever:
                     "dnt_rule",
                     entry.source,
                     entry.source,
-                    source_strings,
+                    normalized_source_corpus,
                 )
             ]
         if entry.scope == "player":
@@ -181,13 +190,13 @@ class GlossaryRetriever:
                     "player_rule",
                     entry.source,
                     entry.source,
-                    source_strings,
+                    normalized_source_corpus,
                 )
             ]
 
-        rag_match = _related_match(entry, source_strings)
+        rag_match = _related_match(entry, source_tokens)
         if rag_match is not None:
-            return [self._evidence(entry, "rag", rag_match, rag_match, source_strings)]
+            return [self._evidence(entry, "rag", rag_match, rag_match, normalized_source_corpus)]
         return []
 
     def _evidence(
@@ -196,13 +205,13 @@ class GlossaryRetriever:
         matched_by: str,
         matched_text: str,
         source_excerpt: str,
-        source_strings: list[str],
+        normalized_source_corpus: str,
     ) -> GlossaryMatchEvidence:
         score = (
             self.MATCH_PRIORITY[matched_by]
             + self.SCOPE_PRIORITY[entry.scope] * 0.1
             + self.CONFIDENCE_WEIGHT[entry.confidence] * 0.01
-            + min(_occurrence_count(matched_text, source_strings), 10) * 0.001
+            + min(_occurrence_count(matched_text, normalized_source_corpus), 10) * 0.001
         )
         return GlossaryMatchEvidence(
             term=entry.source,
@@ -352,7 +361,7 @@ def _find_normalized_match(form: str, source_strings: list[str]) -> str | None:
     return None
 
 
-def _related_match(entry: GlossaryEntry, source_strings: list[str]) -> str | None:
+def _related_match(entry: GlossaryEntry, source_tokens: set[str]) -> str | None:
     if len(entry.source) > 80 or _looks_like_sentence(entry.source):
         return None
     if _raw_tokens(entry.source) & STOP_WORDS:
@@ -360,7 +369,6 @@ def _related_match(entry: GlossaryEntry, source_strings: list[str]) -> str | Non
     term_tokens = _content_tokens(entry.source)
     if len(term_tokens) < 2 or len(term_tokens) > 6:
         return None
-    source_tokens = set().union(*(_content_tokens(source) for source in source_strings))
     required_overlap = min(2, len(term_tokens))
     if len(set(term_tokens) & source_tokens) >= required_overlap:
         return " ".join(sorted(set(term_tokens) & source_tokens))
@@ -388,11 +396,11 @@ def _dedupe_key(entry: GlossaryEntry) -> str:
     return normalized or entry.record_id
 
 
-def _occurrence_count(form: str, source_strings: list[str]) -> int:
+def _occurrence_count(form: str, normalized_source_corpus: str) -> int:
     normalized = _normalize_form(form)
     if not normalized:
         return 0
-    return sum(_normalize_form(source).count(normalized) for source in source_strings)
+    return normalized_source_corpus.count(normalized)
 
 
 def _excerpt(text: str) -> str:

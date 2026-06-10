@@ -33,9 +33,9 @@ class BehaviorSettings(BaseModel):
     sst_version: Literal["SSU9", "SSU8", "SSU7", "SSU6", "SSU5", "SSU4", "SSU3", "SSU2"] = "SSU9"
     skip_kb_migration: bool = False
     prompt_preview_required: bool = False
-    glossary_max_terms: int = Field(default=500, ge=1, le=2000)
-    glossary_max_prompt_chars: int = Field(default=80000, ge=1000, le=500000)
-    glossary_candidate_source_terms: int = Field(default=32, ge=1, le=500)
+    glossary_max_terms: int = Field(default=500, ge=1)
+    glossary_max_prompt_chars: int = Field(default=80000, ge=1000)
+    glossary_candidate_source_terms: int = Field(default=32, ge=1)
 
 
 class Settings(BaseModel):
@@ -64,14 +64,6 @@ def load_settings() -> Settings:
             schema_version,
             CURRENT_SCHEMA_VERSION,
         )
-    behavior = raw.get("behavior")
-    if isinstance(behavior, dict) and "glossary_candidate_source_terms" in behavior:
-        value = behavior.get("glossary_candidate_source_terms")
-        if isinstance(value, int):
-            raw = deepcopy(raw)
-            raw_behavior = raw.setdefault("behavior", {})
-            if isinstance(raw_behavior, dict):
-                raw_behavior["glossary_candidate_source_terms"] = min(500, max(1, value))
     return Settings.model_validate(raw)
 
 

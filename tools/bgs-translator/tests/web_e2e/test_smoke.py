@@ -693,22 +693,22 @@ def test_translation_budget_settings_api_persists_values(tmp_path: Path, monkeyp
         "/api/settings/behavior/translation-budgets",
         headers=headers,
         json={
-            "glossary_max_terms": 777,
-            "glossary_max_prompt_chars": 123456,
-            "glossary_candidate_source_terms": 500,
+            "glossary_max_terms": 2500,
+            "glossary_max_prompt_chars": 1000000,
+            "glossary_candidate_source_terms": 2000,
         },
     )
 
     assert response.status_code == 200
     assert response.json() == {
-        "glossary_max_terms": 777,
-        "glossary_max_prompt_chars": 123456,
-        "glossary_candidate_source_terms": 500,
+        "glossary_max_terms": 2500,
+        "glossary_max_prompt_chars": 1000000,
+        "glossary_candidate_source_terms": 2000,
     }
     settings = load_settings()
-    assert settings.behavior.glossary_max_terms == 777
-    assert settings.behavior.glossary_max_prompt_chars == 123456
-    assert settings.behavior.glossary_candidate_source_terms == 500
+    assert settings.behavior.glossary_max_terms == 2500
+    assert settings.behavior.glossary_max_prompt_chars == 1000000
+    assert settings.behavior.glossary_candidate_source_terms == 2000
 
 
 def test_pending_previews_api_returns_unresolved_requests(tmp_path: Path, monkeypatch) -> None:

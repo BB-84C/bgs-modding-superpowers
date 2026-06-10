@@ -591,7 +591,7 @@ def api_create_project_batch_queue_all(
     )
     if not row_ids:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "当前筛选条件下没有可提交的条目。")
-    result = _create_batch_queue(project, row_ids, batch_size=payload.batch_size, max_selected=None)
+    result = _create_batch_queue(project, row_ids, batch_size=payload.batch_size)
     result["all_matching"] = True
     result["matched_count"] = len(row_ids)
     return result
@@ -1952,16 +1952,16 @@ def _prompt_html(project: str | None) -> str:
 
 
 def _translation_budget_panel_html(settings: Any) -> str:
-    candidate_source_terms = min(500, max(1, int(settings.behavior.glossary_candidate_source_terms)))
+    candidate_source_terms = max(1, int(settings.behavior.glossary_candidate_source_terms))
     return f"""
       <div class="xtl-panel" data-marker="panel-prompt-translation-budgets">
         <div class="xtl-panel-title">高级预算设置</div>
         <div class="xtl-panel-body">
           <div class="xtl-section-label">高级设置（不懂可以不改）：提示词术语数量、术语字符预算、候选召回范围</div>
           <div class="xtl-form-grid compact">
-            <label><span>术语最多条数</span><input class="xtl-input" id="xtl-budget-glossary-max-terms" data-marker="field-budget-glossary-max-terms" type="number" min="1" max="2000" step="1" value="{settings.behavior.glossary_max_terms}"></label>
-            <label><span>术语文本字符预算</span><input class="xtl-input" id="xtl-budget-glossary-max-prompt-chars" data-marker="field-budget-glossary-max-prompt-chars" type="number" min="1000" max="500000" step="1000" value="{settings.behavior.glossary_max_prompt_chars}"></label>
-            <label><span>候选召回关键词数</span><input class="xtl-input" id="xtl-budget-glossary-candidate-source-terms" data-marker="field-budget-glossary-candidate-source-terms" type="number" min="1" max="500" step="1" value="{candidate_source_terms}"></label>
+            <label><span>术语最多条数</span><input class="xtl-input" id="xtl-budget-glossary-max-terms" data-marker="field-budget-glossary-max-terms" type="number" min="1" step="1" value="{settings.behavior.glossary_max_terms}"></label>
+            <label><span>术语文本字符预算</span><input class="xtl-input" id="xtl-budget-glossary-max-prompt-chars" data-marker="field-budget-glossary-max-prompt-chars" type="number" min="1000" step="1000" value="{settings.behavior.glossary_max_prompt_chars}"></label>
+            <label><span>候选召回关键词数</span><input class="xtl-input" id="xtl-budget-glossary-candidate-source-terms" data-marker="field-budget-glossary-candidate-source-terms" type="number" min="1" step="1" value="{candidate_source_terms}"></label>
           </div>
           <div class="xtl-toolbar" style="margin-top: 10px">
             <button class="xtl-btn primary" data-marker="btn-save-translation-budgets" id="xtl-budget-save">保存高级预算</button>
@@ -4232,8 +4232,6 @@ def _bulk_update_entries_status(
     selected_ids = list(dict.fromkeys(item.strip() for item in row_ids if isinstance(item, str) and item.strip()))
     if not selected_ids:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先勾选至少一个条目。")
-    if len(selected_ids) > 500:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "一次最多批量修改 500 个条目。")
     new_status = status_value.strip().lower()
     allowed_statuses = {"untranslated", "translated", "partial", "locked"}
     if new_status not in allowed_statuses:
@@ -4287,13 +4285,10 @@ def _create_batch_queue(
     row_ids: list[str],
     *,
     batch_size: int | None = None,
-    max_selected: int | None = 500,
 ) -> dict[str, Any]:
     selected_ids = list(dict.fromkeys(item.strip() for item in row_ids if isinstance(item, str) and item.strip()))
     if not selected_ids:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先勾选至少一个条目。")
-    if max_selected is not None and len(selected_ids) > max_selected:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"一次最多提交 {max_selected} 个条目到批量队列。")
     normalized_batch_size = int(batch_size or 100)
     if normalized_batch_size < 1:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "每组条数必须是正整数。")
