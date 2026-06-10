@@ -197,6 +197,8 @@ def test_desktop_layout_css_keeps_tables_as_tables() -> None:
     assert "\n  height: 36px;" not in css
     assert ".xtl-glossary-table {\n  table-layout: fixed;" in css
     assert ".xtl-entries-table {\n  table-layout: fixed;" in css
+    assert ".xtl-entries-table th:nth-child(3),\n.xtl-entries-table td:nth-child(3) {\n  width: 14%;" in css
+    assert ".xtl-entries-table th:nth-child(4),\n.xtl-entries-table td:nth-child(4) {\n  width: 55%;" in css
     assert ".xtl-batch-table {\n  table-layout: fixed;" in css
     assert ".xtl-workbench {\n  display: grid;\n  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));" in css
     assert ".xtl-layout {\n  display: grid;\n  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));" in css

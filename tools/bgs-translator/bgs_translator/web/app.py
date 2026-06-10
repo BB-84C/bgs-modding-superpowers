@@ -3883,16 +3883,17 @@ def _entries_script(project: str | None) -> str:
           const checked = checkedRows.has(entry.row_id) ? ' checked' : '';
           const meta = `类型：${sigLabel}；字段：${fieldLabel}；条目编号：${entry.edid || entry.row_id}`;
           const memberCount = Number(entry.member_count || 1);
-          const groupText = memberCount > 1 ? `${entry.signature}:${entry.field} · ${memberCount} 处` : `${entry.signature}:${entry.field}`;
+          const groupText = `${entry.signature}:${entry.field}`;
+          const groupHint = memberCount > 1 ? `；重复组：共 ${memberCount} 条` : '';
           const contextWarning = entry.cross_signature_field_count > 1 ? ' · 同原文存在其他类型/字段，未跨上下文折叠' : '';
           const contextSamples = Array.isArray(entry.sample_contexts)
             ? entry.sample_contexts.slice(0, 3).map(item => item.edid || item.formid || item.row_id).filter(Boolean).join('；')
             : '';
-          const shortEdid = String(entry.edid || entry.sample_contexts?.[0]?.edid || entry.row_id || '').slice(0, 32);
+          const shortEdid = String(entry.edid || entry.sample_contexts?.[0]?.edid || entry.row_id || '').slice(0, 28);
           return `<tr${active} data-row-id="${esc(entry.row_id)}" data-marker="row-entries-${esc(entry.row_id)}">
             <td><input type="checkbox" class="xtl-entry-check" data-row-id="${esc(entry.row_id)}"${checked} title="勾选后可批量改状态；未翻译条目也可提交到 AI 队列"></td>
             <td title="${esc(meta)}"><span class="xtl-status-pill ${esc(entry.status)}">${esc(statusLabels[entry.status] || entry.status)}</span></td>
-            <td title="${esc(`${meta}${contextWarning}${contextSamples ? `；示例：${contextSamples}` : ''}`)}"><b class="xtl-entry-sigline">${esc(groupText)}</b><div class="xtl-entry-edidline">${esc(shortEdid)}</div></td>
+            <td title="${esc(`${meta}${groupHint}${contextWarning}${contextSamples ? `；示例：${contextSamples}` : ''}`)}"><b class="xtl-entry-sigline">${esc(groupText)}</b><div class="xtl-entry-edidline">${esc(shortEdid)}</div></td>
             <td title="${esc(meta)}">${esc(entry.source)}</td>
             <td title="${esc(meta)}">${esc(entry.dest || '')}</td>
           </tr>`;
