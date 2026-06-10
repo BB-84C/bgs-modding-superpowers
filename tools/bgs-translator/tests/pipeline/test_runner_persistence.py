@@ -351,6 +351,49 @@ def test_runner_starts_parallel_window_immediately_after_approve_all(
     assert client.max_active == client.profile.max_concurrency
 
 
+def test_runner_fans_out_translation_to_safe_duplicate_group(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    reset_publishers_for_tests()
+    project_root = tmp_path / "translator" / "projects" / "demo"
+    conn = open_memory_db(project_root)
+    units = [
+        TranslationUnit("A.esp", 1, 1, "WeaponA", "WEAP", "FULL", "Ship"),
+        TranslationUnit("A.esp", 2, 2, "WeaponB", "WEAP", "FULL", "Ship"),
+        TranslationUnit("A.esp", 3, 3, "MessageA", "MESG", "FULL", "Ship"),
+    ]
+    insert_units(conn, units)
+    conn.close()
+    plan = BatchPlan(
+        "plan-dupe-fanout",
+        "demo",
+        "mock-profile",
+        "zh-cn",
+        "dialogue",
+        [Batch("batch-1", [build_masked_unit(units[0])], None, [], [])],
+        1,
+        20,
+        20,
+        0.0,
+        "system",
+    )
+
+    result = asyncio.run(_runner(plan).run("run-dupe-fanout"))
+
+    conn = sqlite3.connect(project_root / "memory" / "memory.sqlite")
+    rows = conn.execute(
+        "SELECT signature, formid, dest, status FROM units ORDER BY formid"
+    ).fetchall()
+    conn.close()
+    assert result.succeeded == 2
+    assert rows == [
+        ("WEAP", 1, "译文-batch-1-1", "translated"),
+        ("WEAP", 2, "译文-batch-1-1", "translated"),
+        ("MESG", 3, None, "untranslated"),
+    ]
+
+
 def _seeded_two_batch_plan(translator_home: Path) -> tuple[BatchPlan, Path]:
     project_root = translator_home / "translator" / "projects" / "demo"
     conn = open_memory_db(project_root)

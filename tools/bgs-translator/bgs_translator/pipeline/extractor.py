@@ -49,24 +49,27 @@ def collect_units_for_run(
         """,
         params,
     ).fetchall()
-    seen_sources: set[str] = set()
+    seen_source_contexts: set[tuple[str, str, str]] = set()
     units: list[TranslationUnit] = []
     if row_ids:
         row_order = {row_id: index for index, row_id in enumerate(row_ids)}
         rows = sorted(rows, key=lambda row: row_order.get(str(row[0]), len(row_order)))
     for row in rows:
         source = str(row[7])
-        if dedupe_sources and source in seen_sources:
+        signature = str(row[5])
+        field = str(row[6])
+        source_context = (source, signature, field)
+        if dedupe_sources and source_context in seen_source_contexts:
             continue
-        seen_sources.add(source)
+        seen_source_contexts.add(source_context)
         units.append(
             TranslationUnit(
                 plugin=str(row[1]),
                 formid=int(row[2]),
                 formid_sanitized=int(row[3]),
                 edid=None if row[4] is None else str(row[4]),
-                signature=str(row[5]),
-                field=str(row[6]),
+                signature=signature,
+                field=field,
                 source=source,
                 index_n=int(row[8]),
                 index_max=int(row[9]),

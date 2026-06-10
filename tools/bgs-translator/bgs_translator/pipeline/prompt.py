@@ -26,6 +26,7 @@ REQUIRED_SLOTS = [
     "mod_context_name",
     "mod_context_theme",
     "style_directives",
+    "record_signature_context",
     "glossary_subset_rendered",
     "do_not_translate_list",
 ]
@@ -47,6 +48,9 @@ ${style_directives}
 补充上下文：
 ${ad_hoc_context_if_present}
 
+本批 Record Signature 说明：
+${record_signature_context}
+
 术语表（必须严格遵循）：
 ${glossary_subset_rendered}
 
@@ -54,6 +58,7 @@ ${glossary_subset_rendered}
 ${do_not_translate_list}
 
 注意：占位符 {{P0}}, {{P1}}, ... 不要翻译、不要删除、不要增加。
+用户消息里的每个条目都包含 source、edid、signature、field；EDID 和 signature:field 只用于判断语境，不要翻译成正文。
 返回 JSON 格式 {"I1": "译文", "I2": "译文", ...}
 """
 
@@ -98,6 +103,7 @@ def render_prompt(
     mod_context_name: str,
     mod_context_theme: str,
     style_directives: str,
+    record_signature_context: str,
     glossary_subset_rendered: str,
     do_not_translate_list: str,
     parent_context_summary: str | None = None,
@@ -116,6 +122,7 @@ def render_prompt(
         "mod_context_name": mod_context_name,
         "mod_context_theme": mod_context_theme,
         "style_directives": style_directives,
+        "record_signature_context": record_signature_context,
         "glossary_subset_rendered": glossary_subset_rendered,
         "do_not_translate_list": do_not_translate_list,
         "parent_context_summary_if_present": parent_context_summary or "",

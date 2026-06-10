@@ -37,6 +37,7 @@ from bgs_translator.pipeline.batcher import Batch, BatchPlan, plan_batches
 from bgs_translator.pipeline.clients.base import LLMResponse, TokenUsage, build_client_for
 from bgs_translator.pipeline.clients.synthetic import SyntheticLLMClient
 from bgs_translator.pipeline.extractor import collect_units_for_run
+from bgs_translator.pipeline.item_payload import compact_batch_items_payload
 from bgs_translator.pipeline.mask import build_masked_unit
 from bgs_translator.pipeline.runner import BatchRunner, PreviewAbandoned
 
@@ -94,7 +95,7 @@ def plan_batch(
             signatures=sig,
             fields=field,
             row_ids=selected_row_ids or None,
-            dedupe_sources=not selected_row_ids,
+            dedupe_sources=True,
         )
         if selected_row_ids and not units:
             _emit_failure("queue_empty", "Selected row ids did not match untranslated entries.", {"row_ids": selected_row_ids})
@@ -437,7 +438,7 @@ def _preview_backend() -> str:
 
 
 def _items_payload(batch: Batch) -> list[dict[str, object]]:
-    payload = _to_jsonable(batch.items)
+    payload = _to_jsonable(compact_batch_items_payload(batch))
     if not isinstance(payload, list):
         return []
     return [cast(dict[str, object], item) for item in payload if isinstance(item, dict)]

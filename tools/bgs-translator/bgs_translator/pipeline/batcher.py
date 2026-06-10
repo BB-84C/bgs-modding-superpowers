@@ -23,6 +23,7 @@ from bgs_translator.pipeline.mask import (
     strip_prompt_protected_spans,
 )
 from bgs_translator.pipeline.prompt import load_template, render_prompt
+from bgs_translator.pipeline.signatures import render_signature_context
 
 REGISTERS = Literal[
     "dialogue",
@@ -288,6 +289,7 @@ def _build_batch(
             glossary_subset=flattened_subset,
             do_not_translate=do_not_translate,
             parent_context_summary=parent_context_summary,
+            signatures=[item.unit.signature for item in chunk],
         ),
     )
 
@@ -389,6 +391,7 @@ def _render_batch_prompt(
     glossary_subset: list[GlossaryEntry],
     do_not_translate: list[str],
     parent_context_summary: str | None,
+    signatures: list[str],
 ) -> str:
     subset = GlossarySubset(
         entries_by_scope={
@@ -407,6 +410,7 @@ def _render_batch_prompt(
         mod_context_name=_prompt_safe_text(mod_context_name or project),
         mod_context_theme=_prompt_safe_text(mod_context_theme or ""),
         style_directives=_prompt_safe_text(style_directives or "保持语义准确，保留占位符。"),
+        record_signature_context=_prompt_safe_text(render_signature_context(signatures)),
         glossary_subset_rendered=glossary_composer.render_prompt_subset(
             subset, "glossary_subset_rendered"
         ),

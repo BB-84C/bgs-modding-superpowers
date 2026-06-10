@@ -757,23 +757,32 @@ class BatchRunner:
             dest_masked = response.items.get(item_id, "")
             dest = unmask_dest(dest_masked, item.mask_map, item.mcm_token_prefix)
             row_id = self._row_id_for_item(memory_conn, item.unit)
-            if memory_conn is not None and row_id is not None:
+            row_ids = self._row_ids_for_item_group(memory_conn, item.unit)
+            if row_id is not None and row_id not in row_ids:
+                row_ids.insert(0, row_id)
+            if not row_ids and row_id is not None:
+                row_ids = [row_id]
+            row_cost = item_cost / max(1, len(row_ids)) if item_cost is not None else None
+            persisted_any = False
+            if memory_conn is not None and row_ids:
                 try:
-                    update_unit_translation(
-                        memory_conn,
-                        row_id=row_id,
-                        dest=dest,
-                        status="translated",
-                        sparams=0,
-                        via_llm=True,
-                        profile_used=profile_used,
-                        sdk_via=response.via,
-                        cost_estimate_usd=item_cost,
-                        cost_exact=response.cost_exact,
-                        retry_count=attempt,
-                        last_batch_id=batch.batch_id,
-                        last_run_id=run_id,
-                    )
+                    for target_row_id in row_ids:
+                        update_unit_translation(
+                            memory_conn,
+                            row_id=target_row_id,
+                            dest=dest,
+                            status="translated",
+                            sparams=0,
+                            via_llm=True,
+                            profile_used=profile_used,
+                            sdk_via=response.via,
+                            cost_estimate_usd=row_cost,
+                            cost_exact=response.cost_exact,
+                            retry_count=attempt,
+                            last_batch_id=batch.batch_id,
+                            last_run_id=run_id,
+                        )
+                        persisted_any = True
                 except (sqlite3.Error, ValueError) as exc:
                     persist_failures.append(
                         ValidationFailure(
@@ -784,20 +793,24 @@ class BatchRunner:
                         )
                     )
                     continue
-            translated_units.append(
-                TranslatedUnit(
-                    row_id=row_id or "",
-                    unit=item.unit,
-                    dest=dest,
-                    via_llm=True,
-                    profile_used=profile_used,
-                    sdk_via=response.via,
-                    cost_estimate_usd=item_cost,
-                    cost_exact=response.cost_exact,
-                    retry_count=attempt,
-                    last_batch_id=batch.batch_id,
+            translated_row_ids = row_ids if row_ids else [row_id or ""]
+            if not persisted_any and row_id:
+                translated_row_ids = [row_id]
+            for translated_row_id in translated_row_ids:
+                translated_units.append(
+                    TranslatedUnit(
+                        row_id=translated_row_id,
+                        unit=item.unit,
+                        dest=dest,
+                        via_llm=True,
+                        profile_used=profile_used,
+                        sdk_via=response.via,
+                        cost_estimate_usd=row_cost if row_ids else item_cost,
+                        cost_exact=response.cost_exact,
+                        retry_count=attempt,
+                        last_batch_id=batch.batch_id,
+                    )
                 )
-            )
         if persist_failures:
             return _BatchOutcome(
                 manual_review=len(persist_failures),
@@ -845,6 +858,19 @@ class BatchRunner:
             (unit.plugin, unit.formid, unit.signature, unit.field, unit.index_n),
         ).fetchone()
         return None if row is None else str(row[0])
+
+    def _row_ids_for_item_group(self, memory_conn: sqlite3.Connection | None, unit: Any) -> list[str]:
+        if memory_conn is None:
+            return []
+        rows = memory_conn.execute(
+            """
+            SELECT row_id FROM units
+            WHERE source = ? AND signature = ? AND field = ? AND status = 'untranslated'
+            ORDER BY signature, field, formid, index_n
+            """,
+            (unit.source, unit.signature, unit.field),
+        ).fetchall()
+        return [str(row[0]) for row in rows]
 
     def _prepare_run_dir(self, run_dir: Path) -> None:
         (run_dir / "responses").mkdir(parents=True, exist_ok=True)

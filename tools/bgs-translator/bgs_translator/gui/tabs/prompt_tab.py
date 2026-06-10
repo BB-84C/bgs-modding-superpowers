@@ -160,6 +160,7 @@ class PromptTab(ttk.Frame):
             mod_context_name=str(slots.get("mod_context_name", "")),
             mod_context_theme=str(slots.get("mod_context_theme", "")),
             style_directives=str(slots.get("style_directives", "保持语义准确，保留占位符。")),
+            record_signature_context=str(slots.get("record_signature_context", "")),
             glossary_subset_rendered=str(slots.get("glossary_subset_rendered", "")),
             do_not_translate_list=str(slots.get("do_not_translate_list", "")),
             parent_context_summary=_optional_str(slots.get("parent_context_summary")),

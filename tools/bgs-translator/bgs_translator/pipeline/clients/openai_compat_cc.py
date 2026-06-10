@@ -11,6 +11,7 @@ from typing import Any
 from bgs_translator.config.profiles import ProviderProfile, resolve_api_key
 from bgs_translator.pipeline.batcher import Batch
 from bgs_translator.pipeline.clients.base import BatchTranslationOutput, LLMResponse, TokenUsage
+from bgs_translator.pipeline.item_payload import batch_items_payload
 
 log = logging.getLogger(__name__)
 
@@ -105,12 +106,12 @@ def _response_format(profile: ProviderProfile) -> dict[str, Any]:
 
 
 def _user_message(batch: Batch, json_mode: str | None) -> str:
-    items = {f"I{index}": item.source_masked for index, item in enumerate(batch.items, start=1)}
+    items = batch_items_payload(batch)
     payload = json.dumps({"items": items}, ensure_ascii=False)
     if json_mode == "json_object":
         return (
             "Return as JSON matching this exact example shape: "
-            '{"items":{"I1":"translated text"}}. Source batch: '
+            '{"items":{"I1":"translated text"}}. Each source item includes source, edid, signature, field, and record context. Source batch: '
             f"{payload}"
         )
     return payload

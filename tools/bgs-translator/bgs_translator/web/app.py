@@ -416,6 +416,7 @@ def api_project_reload(project: str, _auth: None = Depends(require_shared_secret
     plugin_path = Path(str(project_data.get("source_plugin_path") or ""))
     game = str(project_data.get("game") or "")
     inserted = 0
+    parse_error = ""
     if plugin_path.is_file() and game:
         try:
             schema = get_schema_for_game(game)
@@ -429,6 +430,8 @@ def api_project_reload(project: str, _auth: None = Depends(require_shared_secret
                 conn.close()
         except KeyError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"暂不支持这个游戏：{game}") from exc
+        except Exception as exc:
+            parse_error = str(exc)
     summary = _project_summary(project)
     source = _project_source_details(project, verify_sha=True)
     return {
@@ -437,7 +440,12 @@ def api_project_reload(project: str, _auth: None = Depends(require_shared_secret
         "summary": summary,
         "source": source,
         "inserted_units": inserted,
-        "message": f"已重新解析源插件并补入 {inserted} 条新文本；不会修改原始 MOD 文件。",
+        "parse_error": parse_error,
+        "message": (
+            f"已重新解析源插件并补入 {inserted} 条新文本；不会修改原始 MOD 文件。"
+            if not parse_error
+            else f"已重新读取项目状态，但源插件暂时无法解析：{parse_error}。不会修改原始 MOD 文件。"
+        ),
     }
 
 
@@ -1384,22 +1392,6 @@ def _project_html(project: str | None) -> str:
             <p class="xtl-help">重新读取会检查 project.toml、源插件是否还在、文件指纹是否改变，以及本项目记忆库统计；不会重新导入新 ESP/ESM/ESL，也不会修改原始 MOD 文件。SST 是给 xTranslator 导入的翻译文件，不是 MOD 本体。</p>
           </div>
         </div>
-        <div class="xtl-panel" data-marker="panel-project-translation-budgets">
-          <div class="xtl-panel-title">高级预算设置</div>
-          <div class="xtl-panel-body">
-            <div class="xtl-section-label">高级设置（不懂可以不改）：提示词术语数量、术语字符预算、候选召回范围</div>
-            <div class="xtl-form-grid compact">
-              <label><span>术语最多条数</span><input class="xtl-input" id="xtl-budget-glossary-max-terms" data-marker="field-budget-glossary-max-terms" type="number" min="1" max="2000" step="1" value="{settings.behavior.glossary_max_terms}"></label>
-              <label><span>术语文本字符预算</span><input class="xtl-input" id="xtl-budget-glossary-max-prompt-chars" data-marker="field-budget-glossary-max-prompt-chars" type="number" min="1000" max="500000" step="1000" value="{settings.behavior.glossary_max_prompt_chars}"></label>
-              <label><span>候选召回关键词数</span><input class="xtl-input" id="xtl-budget-glossary-candidate-source-terms" data-marker="field-budget-glossary-candidate-source-terms" type="number" min="1" max="5000" step="1" value="{settings.behavior.glossary_candidate_source_terms}"></label>
-            </div>
-            <div class="xtl-toolbar" style="margin-top: 10px">
-              <button class="xtl-btn primary" data-marker="btn-save-translation-budgets" id="xtl-budget-save">保存高级预算</button>
-              <span class="xtl-help" data-marker="status-translation-budgets" id="xtl-budget-status">这些设置会影响下一次生成提示词；不会改写已经在运行或已经完成的批次。</span>
-            </div>
-            <p class="xtl-help">调高这些值会让 AI 收到更多术语，也会增加输入 token 和等待时间；真实费用请以你使用的 AI 服务商后台为准，本工具不再估算费用。</p>
-          </div>
-        </div>
         <div class="xtl-panel" data-marker="panel-close-guard">
           <div class="xtl-panel-title">关闭前检查</div>
           <div class="xtl-panel-body">
@@ -1657,8 +1649,12 @@ def _project_script(project: str | None) -> str:
         el.className = `xtl-help ${tone}`;
       }
       function budgetNumber(id, fallback) {
-        const value = Number(byId(id)?.value || fallback);
-        return Number.isFinite(value) ? Math.round(value) : fallback;
+        const input = byId(id);
+        const value = Number(input?.value || fallback);
+        const min = Number(input?.min || Number.NEGATIVE_INFINITY);
+        const max = Number(input?.max || Number.POSITIVE_INFINITY);
+        const rounded = Number.isFinite(value) ? Math.round(value) : fallback;
+        return Math.min(max, Math.max(min, rounded));
       }
       async function saveTranslationBudgets() {
         const payload = {
@@ -1731,13 +1727,13 @@ def _entries_html(project: str | None) -> str:
       <span class="xtl-label">每组条数</span><input class="xtl-input xtl-number-input" data-marker="field-entries-batch-size" id="xtl-entries-batch-size" type="number" min="1" max="500" step="1" value="100">
       <button class="xtl-btn" data-marker="btn-entries-submit-queue" id="xtl-entries-submit-queue">提交到批量翻译队列</button>
     </div>
-    <div class="xtl-help xtl-selection-status" data-marker="status-entries-queue" id="xtl-entries-queue-status">已选择 0 / 当前列表 0 条。按住 Shift 点击复选框可以连续选择一段；提交队列只会接收未翻译条目。</div>
+    <div class="xtl-help xtl-selection-status" data-marker="status-entries-queue" id="xtl-entries-queue-status">已选择 0 / 当前列表 0 个显示组，覆盖 0 条记录。按住 Shift 点击复选框可以连续选择一段；提交队列只会接收未翻译条目。</div>
     <details class="xtl-help xtl-tech-details" id="xtl-entries-queue-tech" hidden><summary>技术详情</summary><code id="xtl-entries-queue-command"></code></details>
     <div class="xtl-workbench xtl-entries-workbench">
       <div class="xtl-panel" data-marker="panel-entries-table">
         <div class="xtl-panel-title">条目列表</div>
         <div class="xtl-panel-body">
-          <table class="xtl-table xtl-entries-table" id="xtl-entries-table"><thead><tr><th>选择</th><th>状态</th><th>原文</th><th>译文</th></tr></thead><tbody><tr><td colspan="4">正在读取条目...</td></tr></tbody></table>
+          <table class="xtl-table xtl-entries-table" id="xtl-entries-table"><thead><tr><th>选择</th><th>状态</th><th>上下文</th><th>原文</th><th>译文</th></tr></thead><tbody><tr><td colspan="5">正在读取条目...</td></tr></tbody></table>
         </div>
       </div>
       <div class="xtl-panel" data-marker="panel-entry-detail">
@@ -1901,16 +1897,41 @@ def _prompt_html(project: str | None) -> str:
           <div class="xtl-panel" data-marker="panel-dnt-list"><div class="xtl-panel-title">不要翻译的词</div><div class="xtl-panel-body" id="xtl-dnt">{_esc(first_dnt)}</div></div>
         </div>
       </div>
-      <div class="xtl-panel xtl-prompt-aside">
-        <div class="xtl-panel-title">为什么要先预览？</div>
-        <div class="xtl-panel-body xtl-help">
-          <p>这一步不会修改原始 MOD 文件。</p>
-          <p>AI 翻译前会先让你看到它收到的说明和文本。你可以检查里面有没有奇怪内容、错误术语或不该翻译的名字，再决定是否继续。</p>
-          <p>不确定时，只确认当前内容，不要选择“用于整个项目”。</p>
+      <div class="xtl-stack xtl-prompt-aside-stack">
+        <div class="xtl-panel xtl-prompt-aside">
+          <div class="xtl-panel-title">为什么要先预览？</div>
+          <div class="xtl-panel-body xtl-help">
+            <p>这一步不会修改原始 MOD 文件。</p>
+            <p>AI 翻译前会先让你看到它收到的说明和文本。你可以检查里面有没有奇怪内容、错误术语或不该翻译的名字，再决定是否继续。</p>
+            <p>不确定时，只确认当前内容，不要选择“用于整个项目”。</p>
+          </div>
         </div>
+        {_translation_budget_panel_html(settings)}
       </div>
     </div>
     </div>
+    """
+
+
+def _translation_budget_panel_html(settings: Any) -> str:
+    candidate_source_terms = min(500, max(1, int(settings.behavior.glossary_candidate_source_terms)))
+    return f"""
+      <div class="xtl-panel" data-marker="panel-prompt-translation-budgets">
+        <div class="xtl-panel-title">高级预算设置</div>
+        <div class="xtl-panel-body">
+          <div class="xtl-section-label">高级设置（不懂可以不改）：提示词术语数量、术语字符预算、候选召回范围</div>
+          <div class="xtl-form-grid compact">
+            <label><span>术语最多条数</span><input class="xtl-input" id="xtl-budget-glossary-max-terms" data-marker="field-budget-glossary-max-terms" type="number" min="1" max="2000" step="1" value="{settings.behavior.glossary_max_terms}"></label>
+            <label><span>术语文本字符预算</span><input class="xtl-input" id="xtl-budget-glossary-max-prompt-chars" data-marker="field-budget-glossary-max-prompt-chars" type="number" min="1000" max="500000" step="1000" value="{settings.behavior.glossary_max_prompt_chars}"></label>
+            <label><span>候选召回关键词数</span><input class="xtl-input" id="xtl-budget-glossary-candidate-source-terms" data-marker="field-budget-glossary-candidate-source-terms" type="number" min="1" max="500" step="1" value="{candidate_source_terms}"></label>
+          </div>
+          <div class="xtl-toolbar" style="margin-top: 10px">
+            <button class="xtl-btn primary" data-marker="btn-save-translation-budgets" id="xtl-budget-save">保存高级预算</button>
+            <span class="xtl-help" data-marker="status-translation-budgets" id="xtl-budget-status">这些设置会影响下一次生成提示词；不会改写已经在运行或已经完成的批次。</span>
+          </div>
+          <p class="xtl-help">调高这些值会让 AI 收到更多术语，也会增加输入 token 和等待时间；真实费用请以你使用的 AI 服务商后台为准，本工具不再估算费用。</p>
+        </div>
+      </div>
     """
 
 
@@ -2911,6 +2932,47 @@ def _prompt_script(project: str | None) -> str:
         el.textContent = text;
         el.className = `xtl-help ${tone}`;
       }
+      function setBudgetStatus(text, tone = '') {
+        const el = document.getElementById('xtl-budget-status');
+        if (!el) return;
+        el.textContent = text;
+        el.className = `xtl-help ${tone}`;
+      }
+      function budgetNumber(id, fallback) {
+        const input = document.getElementById(id);
+        const value = Number(input?.value || fallback);
+        const min = Number(input?.min || Number.NEGATIVE_INFINITY);
+        const max = Number(input?.max || Number.POSITIVE_INFINITY);
+        const rounded = Number.isFinite(value) ? Math.round(value) : fallback;
+        return Math.min(max, Math.max(min, rounded));
+      }
+      async function saveTranslationBudgets() {
+        const payload = {
+          glossary_max_terms: budgetNumber('xtl-budget-glossary-max-terms', 500),
+          glossary_max_prompt_chars: budgetNumber('xtl-budget-glossary-max-prompt-chars', 80000),
+          glossary_candidate_source_terms: budgetNumber('xtl-budget-glossary-candidate-source-terms', 32),
+        };
+        setBudgetStatus('正在保存高级预算...');
+        try {
+          const res = await fetch('/api/settings/behavior/translation-budgets', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+          });
+          const saved = await res.json();
+          if (!res.ok) {
+            const detail = typeof saved.detail === 'string' ? saved.detail : (saved.detail?.message || `保存失败：${res.status}`);
+            throw new Error(detail);
+          }
+          if (document.getElementById('xtl-budget-glossary-max-terms')) document.getElementById('xtl-budget-glossary-max-terms').value = saved.glossary_max_terms;
+          if (document.getElementById('xtl-budget-glossary-max-prompt-chars')) document.getElementById('xtl-budget-glossary-max-prompt-chars').value = saved.glossary_max_prompt_chars;
+          if (document.getElementById('xtl-budget-glossary-candidate-source-terms')) document.getElementById('xtl-budget-glossary-candidate-source-terms').value = saved.glossary_candidate_source_terms;
+          setBudgetStatus('已保存。下一次生成提示词会使用这些预算；当前运行中的任务不会被改写。', 'good');
+        } catch (err) {
+          setBudgetStatus(`保存失败：${err.message || err}`, 'danger');
+        }
+      }
       function shortId(value) {
         return String(value || '').slice(0, 8);
       }
@@ -3087,6 +3149,7 @@ def _prompt_script(project: str | None) -> str:
         if (event.target && event.target.id === 'xtl-approve') respond('approved');
         if (event.target && event.target.id === 'xtl-approve-all') respond('approve_all');
         if (event.target && event.target.id === 'xtl-discard') respond('discarded');
+        if (event.target && event.target.id === 'xtl-budget-save') saveTranslationBudgets();
       });
       document.addEventListener('change', (event) => {
         if (event.target && event.target.id === 'xtl-history-batch-select') renderPlanned(Number(event.target.value || 0));
@@ -3700,6 +3763,19 @@ def _entries_script(project: str | None) -> str:
       function selectableRowIds() {
         return entries.map(entry => entry.row_id);
       }
+      function rowIdsForEntry(entry) {
+        const ids = Array.isArray(entry?.member_row_ids) && entry.member_row_ids.length
+          ? entry.member_row_ids
+          : [entry?.row_id].filter(Boolean);
+        return ids.map(String);
+      }
+      function selectedEntries() {
+        const selected = new Set(checkedRows);
+        return entries.filter(entry => selected.has(entry.row_id));
+      }
+      function selectedMemberRowIds() {
+        return [...new Set(selectedEntries().flatMap(entry => rowIdsForEntry(entry)))];
+      }
       function queueableRowIds() {
         return entries.filter(entry => entry.status === 'untranslated').map(entry => entry.row_id);
       }
@@ -3709,11 +3785,12 @@ def _entries_script(project: str | None) -> str:
         const queueable = new Set(queueableRowIds());
         const selectedVisible = [...checkedRows].filter(rowId => selectable.has(rowId));
         const selectedCount = selectedVisible.length;
+        const selectedRecords = selectedMemberRowIds().length;
         const selectedQueueable = selectedVisible.filter(rowId => queueable.has(rowId)).length;
         const suffix = total
-          ? `按住 Shift 点击复选框可以连续选择一段；其中 ${selectedQueueable} 条可提交到 AI 队列。`
+          ? `按住 Shift 点击复选框可以连续选择一段；其中 ${selectedQueueable} 个显示组可提交到 AI 队列，覆盖 ${selectedRecords} 条真实记录。`
           : '当前列表没有可加入队列的未翻译条目。';
-        setQueueStatus(`已选择 ${selectedCount} / 当前列表 ${total} 条。${suffix}`, tone);
+        setQueueStatus(`已选择 ${selectedCount} / 当前列表 ${total} 个显示组，覆盖 ${selectedRecords} 条记录。${suffix}`, tone);
       }
       function setRowChecked(rowId, checked) {
         if (!selectableRowIds().includes(rowId)) return;
@@ -3749,7 +3826,7 @@ def _entries_script(project: str | None) -> str:
         const body = document.querySelector('#xtl-entries-table tbody');
         if (!body) return;
         if (!entries.length) {
-          body.innerHTML = '<tr><td colspan="4">没有匹配的条目。换个筛选条件试试。</td></tr>';
+          body.innerHTML = '<tr><td colspan="5">没有匹配的条目。换个筛选条件试试。</td></tr>';
           updateSelectionStatus();
           return;
         }
@@ -3759,9 +3836,16 @@ def _entries_script(project: str | None) -> str:
           const fieldLabel = fieldLabels[entry.field] ? `${fieldLabels[entry.field]}（${entry.field}）` : entry.field;
           const checked = checkedRows.has(entry.row_id) ? ' checked' : '';
           const meta = `类型：${sigLabel}；字段：${fieldLabel}；条目编号：${entry.edid || entry.row_id}`;
+          const memberCount = Number(entry.member_count || 1);
+          const groupText = memberCount > 1 ? `${entry.signature}:${entry.field} · ${memberCount} 处` : `${entry.signature}:${entry.field}`;
+          const contextWarning = entry.cross_signature_field_count > 1 ? ' · 同原文存在其他类型/字段，未跨上下文折叠' : '';
+          const contextSamples = Array.isArray(entry.sample_contexts)
+            ? entry.sample_contexts.slice(0, 3).map(item => item.edid || item.formid || item.row_id).filter(Boolean).join('；')
+            : '';
           return `<tr${active} data-row-id="${esc(entry.row_id)}" data-marker="row-entries-${esc(entry.row_id)}">
             <td><input type="checkbox" class="xtl-entry-check" data-row-id="${esc(entry.row_id)}"${checked} title="勾选后可批量改状态；未翻译条目也可提交到 AI 队列"></td>
             <td title="${esc(meta)}"><span class="xtl-status-pill ${esc(entry.status)}">${esc(statusLabels[entry.status] || entry.status)}</span></td>
+            <td title="${esc(`${meta}${contextWarning}${contextSamples ? `；示例：${contextSamples}` : ''}`)}"><b>${esc(groupText)}</b><div class="xtl-help">${esc(contextWarning || (contextSamples ? contextSamples : '单条记录'))}</div></td>
             <td title="${esc(meta)}">${esc(entry.source)}</td>
             <td title="${esc(meta)}">${esc(entry.dest || '')}</td>
           </tr>`;
@@ -3856,8 +3940,11 @@ def _entries_script(project: str | None) -> str:
           const index = entries.findIndex(entry => entry.row_id === updated.row_id);
           if (index >= 0) entries[index] = updated;
           renderDetail(updated);
+          await loadEntries({keepSelection: true});
           const validation = response.validation && response.validation.failures && response.validation.failures.length ? ' 已标记为需复查。' : '';
-          setSaveStatus(`快速翻译已写入本项目记忆库：${response.profile || '当前账号'}。${validation}`, response.validation && response.validation.failures && response.validation.failures.length ? '' : 'good');
+          const updatedCount = Number(response.updated_count || 1);
+          const fanout = updatedCount > 1 ? ` 同一类型/字段的 ${updatedCount} 条重复文本已同步写入。` : '';
+          setSaveStatus(`快速翻译已写入本项目记忆库：${response.profile || '当前账号'}。${fanout}${validation}`, response.validation && response.validation.failures && response.validation.failures.length ? '' : 'good');
         } catch (error) {
           setSaveStatus(`快速翻译失败：${error.message || error} 请到“账号”页检查 API Key、模型和余额，或稍后重试。`, 'danger');
         } finally {
@@ -3865,7 +3952,7 @@ def _entries_script(project: str | None) -> str:
         }
       }
       async function submitBatchQueue() {
-        const rowIds = [...checkedRows];
+        const rowIds = selectedMemberRowIds();
         if (!rowIds.length) {
           setQueueStatus('请先在左侧列表勾选至少一个条目。提交队列只会接收其中未翻译、适合交给 AI 的条目。', 'danger');
           return;
@@ -3892,9 +3979,12 @@ def _entries_script(project: str | None) -> str:
             tech.hidden = !response.command;
           }
           const groupSummary = response.group_count === 1
-            ? `预计 1 组，实际 ${response.last_group_size || response.queued_count} 条`
-            : `预计 ${response.group_count} 组，每组最多 ${response.batch_size} 条，最后一组 ${response.last_group_size} 条`;
-          setQueueStatus(`已加入待翻译清单 ${response.queued_count} 个条目，${groupSummary}${skipped}${llmSkipped}，还没有调用 AI。下一步请让翻译助手生成提示词；如果开启了预览，你会先在“提示词”页确认后才会开始批量翻译。`, 'good');
+            ? `预计 1 组，实际 ${response.last_group_size || response.queued_count} 个独特文本`
+            : `预计 ${response.group_count} 组，每组最多 ${response.batch_size} 个独特文本，最后一组 ${response.last_group_size} 个`;
+          const covered = response.covered_count && response.covered_count !== response.queued_count
+            ? `，覆盖 ${response.covered_count} 条真实记录`
+            : '';
+          setQueueStatus(`已加入待翻译清单 ${response.queued_count} 个独特文本${covered}，${groupSummary}${skipped}${llmSkipped}，还没有调用 AI。下一步请让翻译助手生成提示词；如果开启了预览，你会先在“提示词”页确认后才会开始批量翻译。`, 'good');
         } catch (error) {
           setQueueStatus(`提交失败：${error.message || error}`, 'danger');
         } finally {
@@ -3902,7 +3992,7 @@ def _entries_script(project: str | None) -> str:
         }
       }
       async function bulkUpdateStatus(newStatus) {
-        const rowIds = [...checkedRows];
+        const rowIds = selectedMemberRowIds();
         if (!rowIds.length) {
           setQueueStatus('请先在左侧列表勾选至少一个条目。', 'danger');
           return;
@@ -4125,13 +4215,45 @@ def _create_batch_queue(project: str, row_ids: list[str], *, batch_size: int | N
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "勾选的条目都不是“未翻译”状态，不会加入批量队列。")
     llm_skip_reasons = _queue_llm_skip_reasons(untranslated)
     llm_skipped_count = sum(llm_skip_reasons.values())
-    queued_rows = [row for row in untranslated if not _queue_row_skip_reason(row)]
-    if not queued_rows:
+    translatable_rows = [row for row in untranslated if not _queue_row_skip_reason(row)]
+    if not translatable_rows:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "勾选的未翻译条目都是占位符、数字或内部标识，不需要交给 AI 翻译。",
         )
-    queued_ids = [str(row[0]) for row in queued_rows]
+    source_groups: dict[tuple[str, str, str], list[Any]] = {}
+    source_group_order: list[tuple[str, str, str]] = []
+    for row in translatable_rows:
+        key = (str(row[6]), str(row[4]), str(row[5]))
+        if key not in source_groups:
+            source_groups[key] = []
+            source_group_order.append(key)
+        source_groups[key].append(row)
+    grouped_rows = [source_groups[key][0] for key in source_group_order]
+    source_group_payload = [
+        {
+            "representative_row_id": str(source_groups[key][0][0]),
+            "member_row_ids": [str(row[0]) for row in source_groups[key]],
+            "member_count": len(source_groups[key]),
+            "source": str(source_groups[key][0][6]),
+            "signature": str(source_groups[key][0][4]),
+            "field": str(source_groups[key][0][5]),
+            "sample_contexts": [
+                {
+                    "row_id": str(row[0]),
+                    "plugin": str(row[1]),
+                    "formid": f"0x{int(row[2]):08X}",
+                    "edid": row[3],
+                    "signature": str(row[4]),
+                    "field": str(row[5]),
+                }
+                for row in source_groups[key][:8]
+            ],
+        }
+        for key in source_group_order
+    ]
+    queued_ids = [str(row[0]) for row in grouped_rows]
+    covered_ids = [str(row[0]) for row in translatable_rows]
     group_count = (len(queued_ids) + normalized_batch_size - 1) // normalized_batch_size
     last_group_size = len(queued_ids) % normalized_batch_size or normalized_batch_size
     queue_id = f"queue-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
@@ -4150,6 +4272,8 @@ def _create_batch_queue(project: str, row_ids: list[str], *, batch_size: int | N
         "project": project,
         "created_at": datetime.now(UTC).isoformat(),
         "row_ids": queued_ids,
+        "covered_row_ids": covered_ids,
+        "source_groups": source_group_payload,
         "batch_size": normalized_batch_size,
         "group_count": group_count,
         "last_group_size": last_group_size,
@@ -4171,8 +4295,9 @@ def _create_batch_queue(project: str, row_ids: list[str], *, batch_size: int | N
                 "field": str(row[5]),
                 "source": str(row[6]),
                 "status": str(row[8]),
+                "member_count": len(source_groups[(str(row[6]), str(row[4]), str(row[5]))]),
             }
-            for row in queued_rows[:50]
+            for row in grouped_rows[:50]
         ],
     }
     queue_path = queue_dir / f"{queue_id}.json"
@@ -4182,6 +4307,7 @@ def _create_batch_queue(project: str, row_ids: list[str], *, batch_size: int | N
         "queue_id": queue_id,
         "queue_path": str(queue_path),
         "queued_count": len(queued_ids),
+        "covered_count": len(covered_ids),
         "batch_size": normalized_batch_size,
         "group_count": group_count,
         "last_group_size": last_group_size,
@@ -4309,37 +4435,54 @@ async def _quick_translate_entry(project: str, row_id: str) -> dict[str, Any]:
             reasons = "；".join(failure.reason for failure in validation.failures) or "校验未通过"
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"AI 返回内容未通过校验，已取消写入：{reasons}")
         new_status = "translated" if not validation.failures else "partial"
-        update_unit_translation(
-            conn,
-            row_id=row_id,
-            dest=dest,
-            status=new_status,
-            sparams=_sparams_for_entry_status(new_status),
-            via_llm=True,
-            profile_used=profile.name,
-            sdk_via=response.via,
-            cost_estimate_usd=response.cost_usd,
-            cost_exact=response.cost_exact,
-            retry_count=0,
-            last_batch_id=batch_id,
-        )
+        group_row_ids = _entry_translation_group_row_ids(conn, before)
+        if row_id not in group_row_ids:
+            group_row_ids.insert(0, row_id)
+        before_by_row_id = {
+            target_row_id: _get_unit(conn, target_row_id)
+            for target_row_id in group_row_ids
+        }
+        item_cost = None
+        if response.cost_usd is not None and group_row_ids:
+            item_cost = response.cost_usd / max(1, len(group_row_ids))
+        for target_row_id in group_row_ids:
+            update_unit_translation(
+                conn,
+                row_id=target_row_id,
+                dest=dest,
+                status=new_status,
+                sparams=_sparams_for_entry_status(new_status),
+                via_llm=True,
+                profile_used=profile.name,
+                sdk_via=response.via,
+                cost_estimate_usd=item_cost,
+                cost_exact=response.cost_exact,
+                retry_count=0,
+                last_batch_id=batch_id,
+            )
         after = _get_unit(conn, row_id)
         if after is None:
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"entry disappeared: {row_id}")
-        _append_audit(
-            project_root,
-            row_id=row_id,
-            before=before,
-            after=after,
-            reason=f"Web Entries quick translate via {profile.name}",
-            operation="quick-translate",
-        )
+        for target_row_id in group_row_ids:
+            target_after = _get_unit(conn, target_row_id)
+            target_before = before_by_row_id.get(target_row_id)
+            if target_before is not None and target_after is not None:
+                _append_audit(
+                    project_root,
+                    row_id=target_row_id,
+                    before=target_before,
+                    after=target_after,
+                    reason=f"Web Entries quick translate safe duplicate group via {profile.name}",
+                    operation="quick-translate",
+                )
     finally:
         conn.close()
 
     return {
         "ok": True,
         "entry": after,
+        "updated_count": len(group_row_ids),
+        "member_row_ids": group_row_ids,
         "profile": profile.name,
         "model": profile.model,
         "batch_id": batch_id,
@@ -4372,6 +4515,19 @@ def _quick_translate_dest_from_response(items: dict[str, str]) -> str:
     if not dest_masked and len(items) == 1:
         dest_masked = next(iter(items.values()))
     return dest_masked
+
+
+def _entry_translation_group_row_ids(conn: sqlite3.Connection, entry: dict[str, Any]) -> list[str]:
+    rows = conn.execute(
+        """
+        SELECT row_id FROM units
+        WHERE source = ? AND signature = ? AND field = ?
+          AND status IN ('untranslated', 'partial')
+        ORDER BY signature, field, formid, index_n
+        """,
+        (entry.get("source") or "", entry.get("signature") or "", entry.get("field") or ""),
+    ).fetchall()
+    return [str(row[0]) for row in rows]
 
 
 def _translation_unit_from_entry(entry: dict[str, Any]) -> Any:
@@ -5042,10 +5198,14 @@ def _entry_rows(
         visible: list[dict[str, Any]] = []
         for row in rows:
             item = _sqlite_row_dict(row)
+            skip_reason = _entry_row_skip_reason(row)
+            stored_status = str(item.get("status") or "")
+            if skip_reason and stored_status != "locked":
+                continue
             effective_status = _effective_unit_status(
-                status=str(item.get("status") or ""),
+                status=stored_status,
                 sparams=int(item.get("sparams") or 0),
-                skip_reason=_entry_row_skip_reason(row),
+                skip_reason=skip_reason,
                 signature=str(item.get("signature") or ""),
                 field=str(item.get("field") or ""),
             )
@@ -5061,9 +5221,72 @@ def _entry_rows(
             if derived_status_filter and effective_status != derived_status_filter:
                 continue
             visible.append(item)
-        return visible[:limit]
+        return _group_entry_rows(visible)[:limit]
     finally:
         conn.close()
+
+
+def _group_entry_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fold duplicate source text only inside the same signature:field and status."""
+
+    source_contexts: dict[str, set[tuple[str, str]]] = {}
+    for row in rows:
+        source = str(row.get("source") or "")
+        signature = str(row.get("signature") or "")
+        field = str(row.get("field") or "")
+        source_contexts.setdefault(source, set()).add((signature, field))
+
+    grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+    order: list[tuple[str, str, str, str]] = []
+    for row in rows:
+        key = (
+            str(row.get("source") or ""),
+            str(row.get("signature") or ""),
+            str(row.get("field") or ""),
+            str(row.get("status") or ""),
+        )
+        if key not in grouped:
+            grouped[key] = []
+            order.append(key)
+        grouped[key].append(row)
+
+    result: list[dict[str, Any]] = []
+    for key in order:
+        members = grouped[key]
+        representative = dict(members[0])
+        representative["member_row_ids"] = [str(member.get("row_id") or "") for member in members if member.get("row_id")]
+        representative["member_count"] = len(representative["member_row_ids"])
+        representative["is_source_group"] = len(members) > 1
+        representative["group_key"] = _entry_group_key(representative)
+        representative["cross_signature_field_count"] = len(source_contexts.get(str(representative.get("source") or ""), set()))
+        representative["sample_contexts"] = [
+            {
+                "row_id": str(member.get("row_id") or ""),
+                "edid": member.get("edid") or "",
+                "signature": member.get("signature") or "",
+                "field": member.get("field") or "",
+                "formid": _entry_formid_display(member.get("formid")),
+            }
+            for member in members[:8]
+        ]
+        result.append(representative)
+    return result
+
+
+def _entry_group_key(row: dict[str, Any]) -> str:
+    digest = hashlib.sha1()
+    for key in ("source", "signature", "field", "status"):
+        digest.update(str(row.get(key) or "").encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
+def _entry_formid_display(value: Any) -> str:
+    try:
+        return f"0x{int(value):08X}"
+    except (TypeError, ValueError):
+        text = str(value or "")
+        return text if text.startswith("0x") else text
 
 
 def _all_filter(value: str | None) -> bool:

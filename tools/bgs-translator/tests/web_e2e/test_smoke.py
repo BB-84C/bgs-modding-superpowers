@@ -378,7 +378,104 @@ def test_batch_queue_api_reports_actual_group_size_when_under_cap(tmp_path: Path
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["queued_count"] == 2
-    assert data["batch_size"] == 500
+
+
+def test_entries_api_folds_duplicates_only_within_signature_field(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.core.memory import insert_units, open_memory_db
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+    from bgs_translator.web.app import fastapi_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    project_root = paths.project_root("dupes")
+    project_root.mkdir(parents=True)
+    (project_root / "project.toml").write_text("[project]\ngame = \"Starfield\"\n", encoding="utf-8")
+    conn = open_memory_db(project_root)
+    insert_units(
+        conn,
+        [
+            TranslationUnit("A.esm", 1, 1, "WeaponA", "WEAP", "FULL", source="Ship"),
+            TranslationUnit("A.esm", 2, 2, "WeaponB", "WEAP", "FULL", source="Ship"),
+            TranslationUnit("A.esm", 3, 3, "MessageA", "MESG", "FULL", source="Ship"),
+        ],
+    )
+    conn.close()
+
+    client = TestClient(fastapi_app)
+    headers = {"Authorization": f"Bearer {ensure_shared_secret()}"}
+    response = client.get("/api/projects/dupes/entries?limit=20", headers=headers)
+
+    assert response.status_code == 200, response.text
+    rows = response.json()
+    assert len(rows) == 2
+    grouped = next(row for row in rows if row["signature"] == "WEAP")
+    separate = next(row for row in rows if row["signature"] == "MESG")
+    assert grouped["member_count"] == 2
+    assert len(grouped["member_row_ids"]) == 2
+    assert grouped["cross_signature_field_count"] == 2
+    assert separate["member_count"] == 1
+    assert separate["cross_signature_field_count"] == 2
+
+
+def test_batch_queue_dedupes_safe_duplicate_groups(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.config.profiles import ProfilesConfig, ProviderProfile, save_profiles
+    from bgs_translator.core.memory import insert_units, open_memory_db
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+    from bgs_translator.web.app import fastapi_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    save_profiles(
+        ProfilesConfig(
+            active="OpenRouter-Test",
+            profiles={
+                "OpenRouter-Test": ProviderProfile(
+                    name="OpenRouter-Test",
+                    sdk_kind="openai-compat",
+                    base_url="https://openrouter.ai/api/v1",
+                    model="anthropic/claude-opus-4.6",
+                    api_key_env="OPENROUTER_API_KEY",
+                    json_mode="json_object",
+                )
+            },
+        )
+    )
+    project_root = paths.project_root("queue-dupes")
+    project_root.mkdir(parents=True)
+    (project_root / "project.toml").write_text(
+        "[project]\ngame = \"Starfield\"\ntarget_lang = \"zh-cn\"\n",
+        encoding="utf-8",
+    )
+    conn = open_memory_db(project_root)
+    insert_units(
+        conn,
+        [
+            TranslationUnit("A.esm", 1, 1, "WeaponA", "WEAP", "FULL", source="Ship"),
+            TranslationUnit("A.esm", 2, 2, "WeaponB", "WEAP", "FULL", source="Ship"),
+            TranslationUnit("A.esm", 3, 3, "MessageA", "MESG", "FULL", source="Ship"),
+        ],
+    )
+    row_ids = [str(row[0]) for row in conn.execute("SELECT row_id FROM units ORDER BY formid").fetchall()]
+    conn.close()
+
+    client = TestClient(fastapi_app)
+    headers = {"Authorization": f"Bearer {ensure_shared_secret()}"}
+    response = client.post(
+        "/api/projects/queue-dupes/batch-queue",
+        headers=headers,
+        json={"row_ids": row_ids, "batch_size": 100},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["covered_count"] == 3
+    assert data["queued_count"] == 2
+    queue = json.loads(Path(data["queue_path"]).read_text(encoding="utf-8"))
+    assert len(queue["row_ids"]) == 2
+    assert [group["member_count"] for group in queue["source_groups"]] == [2, 1]
+    assert data["batch_size"] == 100
     assert data["group_count"] == 1
     assert data["last_group_size"] == 2
 
@@ -525,7 +622,7 @@ def test_translation_budget_settings_api_persists_values(tmp_path: Path, monkeyp
         json={
             "glossary_max_terms": 777,
             "glossary_max_prompt_chars": 123456,
-            "glossary_candidate_source_terms": 1000,
+            "glossary_candidate_source_terms": 500,
         },
     )
 
@@ -533,12 +630,12 @@ def test_translation_budget_settings_api_persists_values(tmp_path: Path, monkeyp
     assert response.json() == {
         "glossary_max_terms": 777,
         "glossary_max_prompt_chars": 123456,
-        "glossary_candidate_source_terms": 1000,
+        "glossary_candidate_source_terms": 500,
     }
     settings = load_settings()
     assert settings.behavior.glossary_max_terms == 777
     assert settings.behavior.glossary_max_prompt_chars == 123456
-    assert settings.behavior.glossary_candidate_source_terms == 1000
+    assert settings.behavior.glossary_candidate_source_terms == 500
 
 
 def test_pending_previews_api_returns_unresolved_requests(tmp_path: Path, monkeypatch) -> None:

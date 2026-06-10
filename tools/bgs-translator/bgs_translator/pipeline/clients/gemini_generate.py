@@ -10,6 +10,7 @@ from typing import Any
 from bgs_translator.config.profiles import ProviderProfile, resolve_api_key
 from bgs_translator.pipeline.batcher import Batch
 from bgs_translator.pipeline.clients.base import BatchTranslationOutput, LLMResponse, TokenUsage
+from bgs_translator.pipeline.item_payload import batch_items_payload
 
 
 class GeminiGenerateClient:
@@ -46,7 +47,7 @@ class GeminiGenerateClient:
 
 
 def _user_message(batch: Batch) -> str:
-    items = {f"I{index}": item.source_masked for index, item in enumerate(batch.items, start=1)}
+    items = batch_items_payload(batch)
     return json.dumps({"items": items}, ensure_ascii=False)
 
 

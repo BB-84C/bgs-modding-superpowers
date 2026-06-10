@@ -28,6 +28,7 @@ def test_render_prompt_replaces_all_slots() -> None:
         mod_context_name="Demo Mod",
         mod_context_theme="Quest mod",
         style_directives="Concise",
+        record_signature_context="- WEAP: Meaning this entry is from a Weapon record.",
         glossary_subset_rendered="- Whiterun → 白漫城 (place, canonical)",
         do_not_translate_list="- SKSE",
         parent_context_summary="This is dialogue.",
@@ -46,6 +47,7 @@ def test_optional_slot_label_lines_are_omitted_when_empty() -> None:
         mod_context_name="Demo Mod",
         mod_context_theme="Quest mod",
         style_directives="Concise",
+        record_signature_context="",
         glossary_subset_rendered="",
         do_not_translate_list="",
         parent_context_summary=None,
@@ -64,6 +66,7 @@ def test_placeholder_literal_is_preserved() -> None:
         mod_context_name="Demo Mod",
         mod_context_theme="Quest mod",
         style_directives="Concise",
+        record_signature_context="",
         glossary_subset_rendered="",
         do_not_translate_list="",
     )

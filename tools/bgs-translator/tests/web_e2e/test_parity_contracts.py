@@ -581,7 +581,7 @@ def test_entries_html_uses_player_facing_filter_labels(tmp_path: Path, monkeypat
     assert "btn-entries-bulk-translated" in html
     assert "btn-entries-bulk-untranslated" in html
     assert "xtl-selection-status" in html
-    assert "已选择 0 / 当前列表 0 条" in html
+    assert "已选择 0 / 当前列表 0 个显示组" in html
     assert "按住 Shift 点击复选框" in html
     assert "提交队列只会接收未翻译条目" in html
     assert "条目编号" in script
@@ -594,7 +594,7 @@ def test_entries_html_uses_player_facing_filter_labels(tmp_path: Path, monkeypat
     assert "entries.map(entry => entry.row_id)" in script
     assert "entry.status === 'untranslated'" in script
     assert "batch_size: batchSize" in script
-    assert "已选择 ${selectedCount} / 当前列表 ${total} 条" in script
+    assert "已选择 ${selectedCount} / 当前列表 ${total} 个显示组" in script
     assert "内部 ID" not in html
     assert "内部 ID" not in script
     assert "这会让该文本保持原文" in script
@@ -1079,11 +1079,13 @@ def test_project_html_explains_sst_and_reload_safely(tmp_path: Path, monkeypatch
     assert "不是 MOD 本体" in html
     assert "导入新的 MOD 文件" in html
     assert "field-import-plugin-path" in html
-    assert 'data-marker="panel-project-translation-budgets"' in html
-    assert 'data-marker="field-budget-glossary-max-terms"' in html
-    assert 'data-marker="field-budget-glossary-max-prompt-chars"' in html
-    assert 'data-marker="field-budget-glossary-candidate-source-terms"' in html
-    assert 'data-marker="btn-save-translation-budgets"' in html
+    prompt_html = web_app._prompt_html("ryos-zhcn")
+    assert 'data-marker="panel-project-translation-budgets"' not in html
+    assert 'data-marker="panel-prompt-translation-budgets"' in prompt_html
+    assert 'data-marker="field-budget-glossary-max-terms"' in prompt_html
+    assert 'data-marker="field-budget-glossary-max-prompt-chars"' in prompt_html
+    assert 'data-marker="field-budget-glossary-candidate-source-terms"' in prompt_html
+    assert 'data-marker="btn-save-translation-budgets"' in prompt_html
     script = web_app._project_script("ryos-zhcn")
     assert "导出命令完成\uff0c但没有生成 SST 文件" in script
     assert "正在重新读取项目状态" in script
