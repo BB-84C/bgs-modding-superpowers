@@ -10,6 +10,8 @@ description: "Use after first-run for ongoing modpack maintenance: update/instal
 - The environment is already set up and the user asks to maintain, refresh, update, or health-check it.
 - The user says "register custom pack", "install my KB pack", "set `BGS_KB_USER_PACKS`", or asks how to author a local KB pack.
 - The user asks how to maintain a mod knowledge base, a translator glossary KB, or a third-party localization KB for Skyrim/Fallout/Starfield.
+- The user asks to install, upgrade, repair, or verify the standalone
+  `xtl`/`bgs-translator` CLI after first-run.
 - The user asks to check or apply knowledge-base updates after first-run.
 - The user asks to prune the KB cache or clean old pack versions.
 - The user asks whether to pin a KB pack version, follow latest, or handle a `minPluginVersion` warning.
@@ -18,7 +20,76 @@ description: "Use after first-run for ongoing modpack maintenance: update/instal
 
 Use `setting-up-bgs-modding-environment` for first-run: MO2 detection, control-plane install, visible MO2 launch, first xEdit acquisition, first KB pack acquisition, and first semantic smoke.
 
-This skill owns ongoing care after that first-run boundary: KB updates, cache hygiene, custom-pack authoring and registration, recurring environment health checks, and version-pinning advice.
+This skill owns ongoing care after that first-run boundary: KB updates, cache hygiene, custom-pack authoring and registration, translator CLI maintenance, recurring environment health checks, and version-pinning advice.
+
+## Translator CLI maintenance
+
+`xtl` is the standalone AI translation CLI/Web GUI launcher. It is published on
+PyPI as `bgs-translator`; the portable plugin may include translator-facing
+skills, but a fresh user machine still needs the Python package installed before
+high-speed agents can call `xtl`.
+
+Start every maintenance pass with an explicit readback:
+
+```powershell
+# Check whether xtl is installed and can report its version/capabilities.
+xtl version
+
+# Inspect top-level commands before choosing a workflow.
+xtl --help
+```
+
+If `xtl` is missing or too old, prefer an isolated user-level CLI install:
+
+```powershell
+# Install the current release-candidate build as an isolated command-line tool.
+pipx install bgs-translator==0.9.0rc1
+
+# Upgrade an existing pipx-managed xtl install when a newer stable build exists.
+pipx upgrade bgs-translator
+```
+
+If `pipx` is unavailable, or the user explicitly wants `xtl` inside a project
+virtual environment, use Python's package installer from that environment:
+
+```powershell
+# Install or upgrade xtl inside the selected Python environment.
+py -3.12 -m pip install --upgrade bgs-translator==0.9.0rc1
+```
+
+For a future stable release, use the unpinned package name for normal installs:
+`pipx install bgs-translator`, `pipx upgrade bgs-translator`, or
+`py -3.12 -m pip install --upgrade bgs-translator`. Do **not** use broad
+`--pre` during routine maintenance; it can allow prerelease dependency versions
+that were not part of the tested translator build. Pin an exact prerelease only
+when the user intentionally wants that version.
+
+After any install or upgrade, inspect subcommand help instead of assuming
+specific option values:
+
+```powershell
+# Verify provider-profile setup options, including all supported SDK kinds.
+xtl profile add --help
+
+# Verify web GUI launch options and ports.
+xtl gui --help
+
+# Verify batch controls before telling an agent to submit or resume work.
+xtl batch --help
+```
+
+If a GUI or background translator service gets into an inconsistent state,
+restart it with the repo's reusable helper instead of inventing process-kill
+steps:
+
+```powershell
+# Restart the translator GUI/service stack using the project helper.
+pwsh tools\bgs-translator\scripts\restart-web-gui.ps1 -Port 7847
+```
+
+If that helper is absent in an older checkout, fall back to the current
+`using-bgs-translator` instructions for launching `xtl gui`, then file a note in
+the environment maintenance log that the helper should be added or backported.
 
 ## Check + apply KB updates
 

@@ -1,6 +1,6 @@
 ---
 name: setting-up-bgs-modding-environment
-description: "Use on first install of this plugin, when MO2 or xEdit is not yet detected, when starting a new modpack project, or when the user says 'set up', 'install', 'bootstrap', 'configure', or 'initialize' the BGS modding environment. Orchestrates: MO2 detection and control-plane install, MO2 visible launch, optional xEdit download from BB-84C/TES5Edit, dev-log and release-changelog initialization, and end-to-end semantic smoke verification."
+description: "Use on first install of this plugin, when MO2 or xEdit is not yet detected, when starting a new modpack project, or when the user says 'set up', 'install', 'bootstrap', 'configure', or 'initialize' the BGS modding environment. Orchestrates: MO2 detection and control-plane install, MO2 visible launch, optional xEdit download from BB-84C/TES5Edit, optional bgs-translator/xtl PyPI install, dev-log and release-changelog initialization, and end-to-end semantic smoke verification."
 ---
 
 # Setting Up the BGS Modding Environment
@@ -181,6 +181,58 @@ For routine update / prune / version-pinning work after first-run, route to
 `maintaining-modding-environments` — it documents the full ongoing-care flow
 on top of the same two MCP tools.
 
+### Step 3A - Install or verify `xtl` for AI translation workflows
+
+If the user plans to translate mods, or a downstream workflow routes into
+`using-bgs-translator`, make sure the standalone translator CLI is available.
+`xtl` is distributed on PyPI as the `bgs-translator` package; do not assume it
+is present in a fresh machine just because this plugin is installed.
+
+Start with a readback:
+
+```powershell
+# Check whether the translator CLI is already installed and can report capabilities.
+xtl version
+```
+
+If `xtl` is missing, choose one install path:
+
+```powershell
+# Preferred user-level CLI install when pipx is available.
+pipx install bgs-translator==0.9.0rc1
+
+# Fallback when pipx is unavailable, or when the user wants xtl inside the active Python environment.
+py -3.12 -m pip install bgs-translator==0.9.0rc1
+```
+
+For a future stable release, the same commands can omit the exact prerelease
+pin, for example `pipx install bgs-translator` or
+`py -3.12 -m pip install bgs-translator`. Do **not** use broad
+`pip install --pre bgs-translator` as routine setup; it can opt unrelated
+dependencies into prerelease builds. Pin an exact release candidate only when
+that exact version is the intended runtime.
+
+Verify after install:
+
+```powershell
+# Confirm xtl is on PATH and exposes the expected command surface.
+xtl version
+
+# Inspect the top-level help before choosing subcommands or options.
+xtl --help
+
+# Inspect provider-profile options instead of assuming a single SDK kind.
+xtl profile add --help
+
+# Inspect GUI launch options if the user wants the web translator.
+xtl gui --help
+```
+
+If `xtl version` fails after a pipx install, surface the pipx PATH warning and
+ask the user to reopen the shell/session, then retry. Once it passes, route
+actual translation work to `using-bgs-translator`; this setup skill only
+installs and smoke-checks the CLI.
+
 ### Step 4 - Install the MO2 control plane (Python + broker)
 
 Once `MO2_Root` is known (path a or b), deploy the Python plugin:
@@ -360,6 +412,8 @@ success otherwise:
 - `<MO2_Root>` is known and `<MO2_Root>/ModOrganizer.exe` exists.
 - Target games are recorded; `bgs_kb_status` sees the bundled core pack; and at
   least one `bgs_kb_query` smoke for the chosen game returns a hit.
+- If AI translation workflows were requested: `xtl version` succeeds from the
+  user's shell, and `xtl --help` lists the translator command surface.
 - `<MO2_Root>/plugins/mo2_agent_control.py` exists (skipped only in no-MO2 mode).
 - MO2 is visibly running (process has `MainWindowHandle != 0`) and
   `<MO2_Root>/plugins/Mo2AgentControl/bootstrap/runtime/status.json` reports
@@ -399,6 +453,9 @@ steps need to pass.
   overlay. NEVER do this. See `using-bgs-modding-superpowers` rule 1.
 - Declaring success on a green script return without the semantic readback
   (the file existence checks and the four MCP smoke calls).
+- Using broad `pip install --pre bgs-translator` during setup. Prefer an exact
+  package version such as `bgs-translator==0.9.0rc1`, or use the stable package
+  name once a stable release is published.
 
 ## See also
 
