@@ -365,8 +365,24 @@ textarea {
 }
 
 .xtl-entries-page {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  row-gap: 8px;
   height: 100%;
   overflow: hidden;
+}
+
+.xtl-selection-status {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--xtl-line-soft);
+  background: var(--xtl-panel);
+  color: var(--xtl-strong);
+  overflow-wrap: anywhere;
+}
+
+.xtl-help.xtl-selection-status {
+  color: var(--xtl-strong);
 }
 
 .xtl-entries-workbench {
@@ -883,6 +899,34 @@ textarea {
   box-sizing: border-box;
 }
 
+.xtl-path-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.xtl-path-picker .xtl-btn {
+  white-space: nowrap;
+}
+
+.xtl-inline-confirm {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--xtl-line);
+  background: var(--xtl-panel);
+  color: var(--xtl-text);
+}
+
+.xtl-inline-confirm .xtl-toolbar {
+  margin-top: 8px;
+}
+
+.xtl-toolbar.compact {
+  gap: 8px;
+}
+
 .xtl-profile-notes {
   min-height: 70px;
   resize: vertical;
@@ -949,6 +993,23 @@ textarea {
   max-width: 100%;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.xtl-signature-stat-table {
+  table-layout: fixed;
+  margin-top: 10px;
+}
+
+.xtl-signature-stat-table th,
+.xtl-signature-stat-table td {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.xtl-signature-stat-table th:first-child,
+.xtl-signature-stat-table td:first-child {
+  width: 34%;
+  text-align: left;
 }
 
 .xtl-glossary-helper-grid {

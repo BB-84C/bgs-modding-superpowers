@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import struct
 from pathlib import Path
 
+from test_strings_io import _strings_bytes, write_ba2_gnrl
 from test_tes4_family_walker import plugin_bytes, record, subrecord
 
 
@@ -34,3 +36,22 @@ def test_multi_value_itxt_indices(tmp_path: Path) -> None:
         ("ITXT", 0, 1, "Choice A"),
         ("ITXT", 1, 1, "Choice B"),
     ]
+
+
+def test_extract_localized_starfield_units_from_sibling_ba2(tmp_path: Path) -> None:
+    from bgs_translator.parsers.extractor import extract_translation_units
+
+    data = subrecord(b"FULL", struct.pack("<I", 1001))
+    plugin = tmp_path / "Example.esm"
+    plugin.write_bytes(plugin_bytes(flags=0x80, child=record(b"WEAP", data, fv=552)))
+    write_ba2_gnrl(
+        tmp_path / "Example - main.ba2",
+        {
+            "strings/Example_english.strings": _strings_bytes({1001: b"Archive Sword"}),
+        },
+    )
+
+    units = list(extract_translation_units(plugin, "Starfield"))
+
+    assert [unit.source for unit in units] == ["Archive Sword"]
+    assert units[0].strid == 1001

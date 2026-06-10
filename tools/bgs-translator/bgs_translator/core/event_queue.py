@@ -18,11 +18,16 @@ GuiEventKind = Literal[
     "run.start",
     "run.complete",
     "run.failed",
+    "run.abandoned",
     "batch.start",
     "batch.progress",
+    "batch.request_sent",
+    "batch.response_received",
     "batch.complete",
     "batch.failed",
     "batch.cancelled",
+    "batch.abandoned",
+    "batch.waiting_preview",
     "cost.update",
     "rate.observed",
     "log.entry",
@@ -63,7 +68,13 @@ class EventQueueBridge:
         with self._lock:
             if event.kind == "batch.start":
                 self._in_flight_count += 1
-            elif event.kind in {"batch.complete", "batch.failed", "batch.cancelled"}:
+            elif event.kind in {
+                "batch.complete",
+                "batch.failed",
+                "batch.cancelled",
+                "batch.abandoned",
+                "batch.waiting_preview",
+            }:
                 self._in_flight_count = max(0, self._in_flight_count - 1)
 
     def drain(self) -> list[GuiEvent]:

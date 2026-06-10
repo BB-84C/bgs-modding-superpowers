@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from bgs_translator.parsers.tes4_family import TranslationUnit
+from bgs_translator.sst.status import normalize_params_for_status
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER);
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS units (
     cost_exact BOOLEAN,
     retry_count INTEGER NOT NULL DEFAULT 0,
     last_batch_id TEXT,
+    last_run_id TEXT,
     updated_at TEXT NOT NULL
 );
 
@@ -105,6 +107,7 @@ def open_memory_db(project_root: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA_SQL)
     _ensure_batches_composite_key(conn)
+    _ensure_units_run_id_column(conn)
     version_count = conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0]
     if version_count == 0:
         conn.execute("INSERT INTO schema_version VALUES (1)")
@@ -164,6 +167,14 @@ def _ensure_batches_composite_key(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _ensure_units_run_id_column(conn: sqlite3.Connection) -> None:
+    rows = conn.execute("PRAGMA table_info(units)").fetchall()
+    column_names = {str(row[1]) for row in rows}
+    if "last_run_id" not in column_names:
+        conn.execute("ALTER TABLE units ADD COLUMN last_run_id TEXT")
+        conn.commit()
+
+
 def insert_units(conn: sqlite3.Connection, units: Iterable[TranslationUnit]) -> int:
     """Bulk insert translation units as untranslated rows, ignoring duplicates."""
 
@@ -220,22 +231,24 @@ def update_unit_translation(
     cost_exact: bool,
     retry_count: int,
     last_batch_id: str,
+    last_run_id: str | None = None,
 ) -> None:
     """Persist a translated unit's dest and provenance back to memory.sqlite."""
 
+    normalized_sparams = int(normalize_params_for_status(status, sparams))
     cursor = conn.execute(
         """
         UPDATE units SET
             dest = ?, status = ?, sparams = ?, via_llm = ?,
             profile_used = ?, sdk_via = ?, cost_estimate_usd = ?,
-            cost_exact = ?, retry_count = ?, last_batch_id = ?,
+            cost_exact = ?, retry_count = ?, last_batch_id = ?, last_run_id = ?,
             updated_at = ?
         WHERE row_id = ?
         """,
         (
             dest,
             status,
-            sparams,
+            normalized_sparams,
             1 if via_llm else 0,
             profile_used,
             sdk_via,
@@ -243,6 +256,7 @@ def update_unit_translation(
             1 if cost_exact else 0,
             retry_count,
             last_batch_id,
+            last_run_id,
             datetime.now(UTC).isoformat(),
             row_id,
         ),
@@ -251,6 +265,42 @@ def update_unit_translation(
         conn.rollback()
         raise ValueError(f"No memory.sqlite unit row updated for row_id={row_id!r}")
     conn.commit()
+
+
+def discard_run_translations(conn: sqlite3.Connection, run_id: str) -> int:
+    """Clear translations written by one completed or in-progress batch run."""
+
+    now = datetime.now(UTC).isoformat()
+    cursor = conn.execute(
+        """
+        UPDATE units SET
+            dest = NULL,
+            status = 'untranslated',
+            sparams = 0,
+            via_llm = 0,
+            profile_used = NULL,
+            sdk_via = NULL,
+            cost_estimate_usd = NULL,
+            cost_exact = NULL,
+            retry_count = 0,
+            last_batch_id = NULL,
+            last_run_id = NULL,
+            updated_at = ?
+        WHERE last_run_id = ?
+        """,
+        (now, run_id),
+    )
+    conn.execute(
+        """
+        UPDATE runs SET
+            status = 'discarded',
+            completed_at = COALESCE(completed_at, ?)
+        WHERE run_id = ?
+        """,
+        (now, run_id),
+    )
+    conn.commit()
+    return int(cursor.rowcount)
 
 
 def insert_run(
@@ -566,6 +616,7 @@ def select_units_filtered(
                index_n, index_max, source, list_index, strid, rhash,
                parent_context_json, dest, status, sparams, via_llm, profile_used,
                sdk_via, cost_estimate_usd, cost_exact, retry_count, last_batch_id,
+               last_run_id,
                updated_at
         FROM units
         {where}
@@ -657,6 +708,7 @@ def _row_to_dict(row: sqlite3.Row | tuple[Any, ...]) -> dict[str, Any]:
 
 __all__ = [
     "count_units",
+    "discard_run_translations",
     "fetch_events_for_run",
     "get_unit_by_row_id",
     "get_unit_counts_by_signature",

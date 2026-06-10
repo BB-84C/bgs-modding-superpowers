@@ -38,6 +38,9 @@ def request_preview_http(
     glossary_subset: list[dict[str, object]],
     do_not_translate: list[str],
     glossary_evidence: list[dict[str, object]] | None = None,
+    batch_index: int | None = None,
+    total_batches: int | None = None,
+    total_items: int | None = None,
     timeout: float = 300.0,
 ) -> dict[str, Any]:
     """Request browser approval for one batch prompt."""
@@ -58,6 +61,9 @@ def request_preview_http(
                 "glossary_subset": glossary_subset,
                 "glossary_evidence": glossary_evidence or [],
                 "do_not_translate": do_not_translate,
+                "batch_index": batch_index,
+                "total_batches": total_batches,
+                "total_items": total_items,
                 "timeout_seconds": timeout,
             },
             headers={"Authorization": f"Bearer {secret}"},

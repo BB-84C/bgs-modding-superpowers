@@ -42,7 +42,23 @@ class OpenAICompatChatCompletionsClient:
         }
         if self.profile.require_parameters:
             kwargs["extra_body"] = {"provider": {"require_parameters": True}}
-        response = await _maybe_await(self.client.chat.completions.create(**kwargs))
+        try:
+            response = await _maybe_await(self.client.chat.completions.create(**kwargs))
+        except Exception as exc:
+            if self.profile.json_mode != "json_schema" or not _is_invalid_json_schema_error(exc):
+                raise
+            log.warning(
+                "Provider rejected json_schema response_format for model=%s; retrying batch_id=%s with json_object",
+                self.profile.model,
+                batch.batch_id,
+            )
+            fallback_kwargs = dict(kwargs)
+            fallback_kwargs["messages"] = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": _user_message(batch, "json_object")},
+            ]
+            fallback_kwargs["response_format"] = {"type": "json_object"}
+            response = await _maybe_await(self.client.chat.completions.create(**fallback_kwargs))
         request_id = _as_optional_str(getattr(response, "id", None))
         content = getattr(response.choices[0].message, "content", "")
         content_text = "" if content is None else str(content)
@@ -116,6 +132,11 @@ def _openrouter_cost_usd(response: Any) -> float | None:
 
 def _is_openrouter(base_url: str) -> bool:
     return "openrouter" in base_url.casefold()
+
+
+def _is_invalid_json_schema_error(exc: Exception) -> bool:
+    text = str(exc).casefold()
+    return "invalid_json_schema" in text or "invalid schema for response_format" in text
 
 
 def _raw_response_json(value: Any) -> Any:

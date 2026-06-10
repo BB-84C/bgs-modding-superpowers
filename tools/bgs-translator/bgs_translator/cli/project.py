@@ -24,7 +24,9 @@ from bgs_translator.parsers.extractor import GameSchema, extract_translation_uni
 from bgs_translator.parsers.form_versions import detect_game_from_header
 from bgs_translator.parsers.schemas import get_schema_for_game
 from bgs_translator.parsers.tes4_family import TES4FamilyWalker, TES4Header, TranslationUnit
+from bgs_translator.pipeline.mask import build_masked_unit
 from bgs_translator.sst.hash import compute_rhash
+from bgs_translator.sst.status import SStrParam, normalize_params_for_status
 from bgs_translator.sst.writer import SSTUnit, write_sst
 
 # Starfield 9-fill lang slugs per PRD §3.2
@@ -282,12 +284,37 @@ def _read_units_from_memory(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         "index_n, index_max, source, list_index, strid, rhash, sparams, "
         "dest, status FROM units WHERE source IS NOT NULL"
     )
-    return list(cur.fetchall())
+    return [row for row in cur.fetchall() if _should_export_unit_row(row)]
+
+
+_EXPORT_STATUS_MASK = (
+    SStrParam.TRANSLATED
+    | SStrParam.LOCKED_TRANS
+    | SStrParam.INCOMPLETE_TRANS
+    | SStrParam.VALIDATED
+    | SStrParam.PENDING
+)
+
+
+def _should_export_unit_row(row: sqlite3.Row) -> bool:
+    status_value = str(row["status"] or "").strip().lower()
+    sparams = _export_sparams_for_row(row, status_value)
+    if not (sparams & _EXPORT_STATUS_MASK):
+        return False
+    if SStrParam.LOCKED_TRANS in sparams or SStrParam.PENDING in sparams:
+        return True
+    return bool(str(row["dest"] or "").strip())
 
 
 def _unit_row_to_sst_unit(row: sqlite3.Row) -> SSTUnit:
     edid = row["edid"]
     rhash = row["rhash"] or compute_rhash(edid, row["formid"])
+    status_value = str(row["status"] or "").strip().lower()
+    sparams = _export_sparams_for_row(row, status_value)
+    source = row["source"] or ""
+    dest = row["dest"] or ""
+    if not dest and (SStrParam.LOCKED_TRANS in sparams or SStrParam.PENDING in sparams):
+        dest = source
     return SSTUnit(
         list_index=row["list_index"],
         strid=row["strid"] or 0,
@@ -298,10 +325,52 @@ def _unit_row_to_sst_unit(row: sqlite3.Row) -> SSTUnit:
         index_max=row["index_max"] or 0,
         rhash=rhash,
         colab_id=0,
-        s_params=row["sparams"] or 0,
-        source=row["source"] or "",
-        dest=row["dest"] or row["source"] or "",
+        s_params=int(sparams),
+        source=source,
+        dest=dest,
     )
+
+
+def _export_sparams_for_row(row: sqlite3.Row, status_value: str) -> SStrParam:
+    raw_params = SStrParam(int(row["sparams"] or 0) & 0xFF)
+    if SStrParam.LOCKED_TRANS in raw_params:
+        return SStrParam.LOCKED_TRANS
+    if _is_xtranslator_locked_header(row):
+        return SStrParam.LOCKED_TRANS
+    if _unit_row_skip_reason(row):
+        return SStrParam.LOCKED_TRANS
+    if SStrParam.INCOMPLETE_TRANS in raw_params:
+        return SStrParam.INCOMPLETE_TRANS
+    if SStrParam.TRANSLATED in raw_params:
+        return SStrParam.TRANSLATED
+    if SStrParam.PENDING in raw_params:
+        return SStrParam.PENDING
+    if status_value == "untranslated":
+        return SStrParam.PENDING
+    return normalize_params_for_status(status_value, row["sparams"] or 0)
+
+
+def _is_xtranslator_locked_header(row: sqlite3.Row) -> bool:
+    return str(row["signature"] or "").strip().upper() == "TES4" and str(row["field"] or "").strip().upper() in {
+        "CNAM",
+        "SNAM",
+    }
+
+
+def _unit_row_skip_reason(row: sqlite3.Row) -> str:
+    unit = TranslationUnit(
+        plugin=str(row["plugin"]),
+        formid=int(row["formid"]),
+        formid_sanitized=int(row["formid_sanitized"] if row["formid_sanitized"] is not None else row["formid"]),
+        edid=str(row["edid"] or ""),
+        signature=str(row["signature"]),
+        field=str(row["field"]),
+        source=str(row["source"] or ""),
+        list_index=int(row["list_index"] or 0),
+        strid=int(row["strid"] or 0),
+    )
+    masked = build_masked_unit(unit)
+    return masked.skip_reason if masked.skip_llm else ""
 
 
 def _detect_masters_from_units(units: list[sqlite3.Row]) -> list[str]:

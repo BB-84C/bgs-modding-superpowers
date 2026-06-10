@@ -122,6 +122,36 @@ def test_collect_for_batch_caps_non_dnt_entries(
     assert subset.total_count() <= 20
 
 
+def test_collect_for_batch_default_prompt_cap_allows_more_than_fifty_terms(
+    tmp_path: Path, make_fixture_pack: PackFactory
+) -> None:
+    from bgs_translator.kb.glossary import GlossaryComposer
+    from bgs_translator.kb.reader import KBGlossaryReader
+
+    make_fixture_pack(
+        "canonical",
+        [
+            {
+                "record_id": f"term-{index:03d}",
+                "source": f"Mission Board Term{index:03d}",
+                "target": f"术语{index:03d}",
+            }
+            for index in range(100)
+        ],
+    )
+    reader = KBGlossaryReader(kb_root=tmp_path, user_packs_root=tmp_path / "user-packs")
+    try:
+        subset = GlossaryComposer(reader).collect_for_batch(
+            ["Mission Board " + " ".join(f"Term{index:03d}" for index in range(100))],
+            "zh-cn",
+            "SkyrimSE",
+        )
+    finally:
+        reader.close()
+
+    assert subset.total_count() == 100
+
+
 def test_collect_for_batch_scores_high_occurrence_before_low_occurrence(
     tmp_path: Path, make_fixture_pack: PackFactory
 ) -> None:
@@ -234,3 +264,63 @@ def test_prompt_rendering_formats_confidence_hints(
     assert "Iron Sword → 铁剑 (item, preferred, prefer this exact form)" in glossary.splitlines()
     assert "Moonstone → 月长石 (item, candidate; LLM may use judgment)" in glossary.splitlines()
     assert dnt.splitlines() == ["EnaiSiaion"]
+
+
+def test_prompt_rendering_omits_protected_placeholder_terms(
+    tmp_path: Path, make_fixture_pack: PackFactory
+) -> None:
+    from bgs_translator.kb.glossary import GlossaryComposer
+    from bgs_translator.kb.reader import KBGlossaryReader
+
+    make_fixture_pack(
+        "canonical",
+        [
+            {
+                "record_id": "alias-only",
+                "source": "<Alias=PrimaryRef>",
+                "target": "<Alias=PrimaryRef>",
+                "category": "lore_term",
+            },
+            {
+                "record_id": "alias-label",
+                "source": "<Alias=TargetLocation> Security",
+                "target": "<Alias=TargetLocation>安保",
+                "category": "ui_label",
+            },
+            {
+                "record_id": "global-dnt",
+                "source": "<Global=MissionBoardPassenger01Amount> <Alias=PrimaryRef>",
+                "target": "<Global=MissionBoardPassenger01Amount> <Alias=PrimaryRef>",
+                "scope": "do_not_translate",
+                "category": "lore_term",
+            },
+            {
+                "record_id": "real-term",
+                "source": "Mission Board",
+                "target": "任务板",
+                "category": "ui_label",
+            },
+        ],
+    )
+    reader = KBGlossaryReader(kb_root=tmp_path, user_packs_root=tmp_path / "user-packs")
+    try:
+        composer = GlossaryComposer(reader)
+        subset = composer.collect_for_batch(
+            [
+                "<Alias=PrimaryRef>",
+                "<Alias=TargetLocation> Security",
+                "Use the Mission Board",
+            ],
+            "zh-cn",
+            "Starfield",
+        )
+        glossary = composer.render_prompt_subset(subset, "glossary_subset_rendered")
+        dnt = composer.render_prompt_subset(subset, "do_not_translate_list")
+    finally:
+        reader.close()
+
+    assert "Mission Board → 任务板 (ui_label, canonical)" in glossary.splitlines()
+    assert "<Alias=" not in glossary
+    assert "<Global=" not in glossary
+    assert "{{P" not in glossary
+    assert dnt == ""

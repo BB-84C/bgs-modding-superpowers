@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -22,6 +23,39 @@ class StringsFile:
     entries: dict[int, str]
 
 
+@dataclass(frozen=True)
+class StringsSource:
+    """A loose or archive-backed STRINGS-family file source."""
+
+    path: Path
+    list_kind: StringsListKind
+    archive_path: Path | None = None
+    member_path: str | None = None
+
+
+_ARCHIVE_PATTERNS_BY_GAME: dict[str, tuple[str, ...]] = {
+    "Fallout4": (
+        "{stem} - main.ba2",
+        "{stem} - interface.ba2",
+        "{stem}.ba2",
+    ),
+    "Fallout76": (
+        "{stem} - main.ba2",
+        "{stem} - Localization.ba2",
+        "{stem} - interface.ba2",
+        "{stem}.ba2",
+        "seventysix - localization.ba2",
+    ),
+    "Starfield": (
+        "{stem} - main.ba2",
+        "{stem} - main02.ba2",
+        "{stem} - Localization.ba2",
+        "{stem} - interface.ba2",
+        "{stem}.ba2",
+    ),
+}
+
+
 def find_strings_files(plugin_path: Path, target_lang_code: str = "english") -> dict[str, Path]:
     """Locate sibling localized STRINGS-family files for ``plugin_path``."""
 
@@ -32,6 +66,27 @@ def find_strings_files(plugin_path: Path, target_lang_code: str = "english") -> 
         candidate = strings_dir / f"{stem}_{target_lang_code}.{list_kind}"
         if candidate.exists():
             found[list_kind] = candidate
+    return found
+
+
+def find_strings_sources(
+    plugin_path: Path,
+    target_lang_code: str = "english",
+    *,
+    game: str | None = None,
+) -> dict[str, StringsSource]:
+    """Locate loose or BA2-backed localized STRINGS-family sources."""
+
+    language_candidates = _language_slug_candidates(target_lang_code)
+    found: dict[str, StringsSource] = {}
+    for language_slug in language_candidates:
+        for kind, path in find_strings_files(plugin_path, language_slug).items():
+            found.setdefault(kind, StringsSource(path=path, list_kind=kind))
+    missing = [kind for kind in ("STRINGS", "DLSTRINGS", "ILSTRINGS") if kind not in found]
+    if missing:
+        found.update(
+            _find_archive_strings_sources(plugin_path, language_candidates, missing, game=game)
+        )
     return found
 
 
@@ -50,7 +105,7 @@ def _decode_entries(raw_entries: dict[int, bytes], encoding_chain: list[str]) ->
         if encoding_used is None:
             encoding_used = encoding
         elif encoding != encoding_used:
-            text, encoding_used = decode_with_chain(raw, [encoding_used])
+            encoding_used = "mixed"
         decoded[string_id] = text
     return decoded, encoding_used or (encoding_chain[0] if encoding_chain else "")
 
@@ -58,7 +113,22 @@ def _decode_entries(raw_entries: dict[int, bytes], encoding_chain: list[str]) ->
 def read_strings_file(path: Path, encoding_chain: list[str]) -> StringsFile:
     """Parse a Bethesda STRINGS, DLSTRINGS, or ILSTRINGS file."""
 
-    data = path.read_bytes()
+    return read_strings_bytes(path, path.read_bytes(), encoding_chain)
+
+
+def read_strings_source(source: StringsSource, encoding_chain: list[str]) -> StringsFile:
+    """Parse a loose or archive-backed localized string table."""
+
+    if source.archive_path and source.member_path:
+        data = BA2Archive(source.archive_path).read_member(source.member_path)
+        display = Path(f"{source.archive_path}!{source.member_path}")
+        return read_strings_bytes(display, data, encoding_chain)
+    return read_strings_file(source.path, encoding_chain)
+
+
+def read_strings_bytes(path: Path, data: bytes, encoding_chain: list[str]) -> StringsFile:
+    """Parse STRINGS-family bytes using ``path`` for diagnostics and list-kind detection."""
+
     if len(data) < 8:
         raise ValueError(f"STRINGS file too short: {path}")
     count, data_size = struct.unpack_from("<II", data, 0)
@@ -95,4 +165,166 @@ def read_strings_file(path: Path, encoding_chain: list[str]) -> StringsFile:
     return StringsFile(path=path, list_kind=list_kind, encoding=encoding, entries=entries)
 
 
-__all__ = ["StringsFile", "StringsListKind", "find_strings_files", "read_strings_file"]
+@dataclass(frozen=True)
+class _BA2Entry:
+    name: str
+    offset: int
+    packed_size: int
+    size: int
+
+
+class BA2Archive:
+    """Minimal BA2 GNRL reader for localized string resources."""
+
+    _HEADER_SIZE = 24
+    _STARFIELD_EXTRA_HEADER_SIZE = 8
+    _ENTRY_SIZE = 36
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._entries: dict[str, _BA2Entry] | None = None
+
+    def read_member(self, member_path: str) -> bytes:
+        entries = self._read_directory()
+        normalized = _normalize_archive_member(member_path)
+        entry = entries.get(normalized)
+        if entry is None:
+            raise FileNotFoundError(f"{member_path} not found in {self.path}")
+        with self.path.open("rb") as stream:
+            stream.seek(entry.offset)
+            raw = stream.read(entry.packed_size or entry.size)
+        if entry.packed_size:
+            return zlib.decompress(raw)
+        return raw
+
+    def has_member(self, member_path: str) -> bool:
+        return _normalize_archive_member(member_path) in self._read_directory()
+
+    def _read_directory(self) -> dict[str, _BA2Entry]:
+        if self._entries is not None:
+            return self._entries
+        with self.path.open("rb") as stream:
+            header = stream.read(self._HEADER_SIZE)
+            if len(header) < self._HEADER_SIZE:
+                raise ValueError(f"BA2 header too short: {self.path}")
+            magic, version, archive_type, file_count, name_table_offset = struct.unpack(
+                "<4sI4sIQ", header
+            )
+            if magic != b"BTDX":
+                raise ValueError(f"Not a BA2 archive: {self.path}")
+            if archive_type != b"GNRL":
+                self._entries = {}
+                return self._entries
+            if version == 2:
+                stream.read(self._STARFIELD_EXTRA_HEADER_SIZE)
+            elif version not in {1, 8}:
+                raise ValueError(f"Unsupported BA2 version {version}: {self.path}")
+
+            raw_entries = [stream.read(self._ENTRY_SIZE) for _ in range(file_count)]
+            stream.seek(name_table_offset)
+            names = [_read_ba2_name(stream) for _ in range(file_count)]
+
+        entries: dict[str, _BA2Entry] = {}
+        for name, raw in zip(names, raw_entries, strict=True):
+            if len(raw) < self._ENTRY_SIZE:
+                continue
+            _name_hash, _ext, _dir_hash, _unknown, offset, packed_size, size, _sentinel = (
+                struct.unpack("<IIIIQIII", raw)
+            )
+            entries[_normalize_archive_member(name)] = _BA2Entry(
+                name=name,
+                offset=offset,
+                packed_size=packed_size,
+                size=size,
+            )
+        self._entries = entries
+        return entries
+
+
+def _read_ba2_name(stream) -> str:
+    raw_length = stream.read(2)
+    if len(raw_length) < 2:
+        return ""
+    length = struct.unpack("<H", raw_length)[0]
+    return stream.read(length).decode("utf-8", errors="replace")
+
+
+def _find_archive_strings_sources(
+    plugin_path: Path,
+    target_lang_codes: list[str],
+    missing: list[str],
+    *,
+    game: str | None,
+) -> dict[str, StringsSource]:
+    found: dict[str, StringsSource] = {}
+    stem = plugin_path.stem
+    needed = set(missing)
+    members = [
+        (kind, f"strings/{stem}_{target_lang_code}.{kind.lower()}")
+        for target_lang_code in target_lang_codes
+        for kind in ("STRINGS", "DLSTRINGS", "ILSTRINGS")
+        if kind in needed
+    ]
+    for archive_path in _candidate_archives(plugin_path, game=game):
+        try:
+            archive = BA2Archive(archive_path)
+            for kind, member_path in members:
+                if kind in found:
+                    continue
+                if archive.has_member(member_path):
+                    found[kind] = StringsSource(
+                        path=Path(f"{archive_path}!{member_path}"),
+                        list_kind=kind,
+                        archive_path=archive_path,
+                        member_path=member_path,
+                    )
+            if needed.issubset(found.keys()):
+                break
+        except (OSError, ValueError, zlib.error):
+            continue
+    return found
+
+
+def _candidate_archives(plugin_path: Path, *, game: str | None) -> list[Path]:
+    available = {path.name.casefold(): path for path in plugin_path.parent.glob("*.ba2")}
+    patterns = _ARCHIVE_PATTERNS_BY_GAME.get(game or "", ("{stem} - main.ba2", "{stem}.ba2"))
+    candidates: list[Path] = []
+    for pattern in patterns:
+        candidate = available.get(pattern.format(stem=plugin_path.stem).casefold())
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
+def _normalize_archive_member(path: str) -> str:
+    return path.replace("\\", "/").casefold()
+
+
+def _language_slug_candidates(target_lang_code: str) -> list[str]:
+    normalized = target_lang_code.casefold().replace("-", "").replace("_", "")
+    aliases = {
+        "en": ["english", "en"],
+        "english": ["english", "en"],
+        "zhcn": ["chinese", "zhhans", "zh-hans", "zh_cn"],
+        "chinese": ["chinese", "zhhans", "zh-hans", "zh_cn"],
+        "zhhans": ["zhhans", "chinese", "zh-hans", "zh_cn"],
+    }
+    candidates = aliases.get(normalized, [target_lang_code.casefold()])
+    deduped: list[str] = []
+    for candidate in candidates:
+        if candidate not in deduped:
+            deduped.append(candidate)
+    return deduped
+
+
+__all__ = [
+    "BA2Archive",
+    "StringsFile",
+    "StringsListKind",
+    "StringsSource",
+    "find_strings_files",
+    "find_strings_sources",
+    "read_strings_bytes",
+    "read_strings_file",
+    "read_strings_source",
+]

@@ -102,12 +102,13 @@ def test_page_routes_return_full_html_documents_with_browser_cookie(
     assert response.status_code == 200
     assert response.text.startswith("<!doctype html>")
     assert '/assets/xtl-page.js?active=batches' in response.text
-    assert 'http-equiv="refresh" content="2"' in response.text
+    assert 'http-equiv="refresh"' not in response.text
     assert "xtl-batches" in response.text
     assert COOKIE_NAME in response.cookies
 
     script = client.get("/assets/xtl-page.js?active=batches")
     assert script.status_code == 200
+    assert script.headers["Cache-Control"] == "no-store, no-cache, max-age=0"
     assert "window.__xtlBatchMetrics" in script.text
 
 
@@ -120,7 +121,7 @@ def test_shell_status_summary_wraps_in_narrow_desktop_panes(tmp_path: Path, monk
     assert 'xtl-status-summary" id="xtl-status-summary"' in html
     assert 'data-marker="status-gui-alive"' in html
     assert 'class="xtl-status-separator">|' in html
-    assert "本项目累计费用" in html
+    assert "本项目累计费用" not in html
 
 
 def test_document_html_wraps_shell_in_scrollable_app_root(tmp_path: Path, monkeypatch) -> None:
@@ -135,7 +136,7 @@ def test_document_html_wraps_shell_in_scrollable_app_root(tmp_path: Path, monkey
     html = web_app._document_html("entries", "ryos-zhcn")
 
     assert '<div class="xtl-app theme-' in html
-    assert 'src="/assets/xtl-page.js?active=entries&amp;project=ryos-zhcn"' in html
+    assert 'src="/assets/xtl-page.js?active=entries&amp;project=ryos-zhcn&amp;v=' in html
     assert 'href="/batches?project=ryos-zhcn"' in html
 
 
@@ -230,6 +231,7 @@ def test_prompt_html_exposes_preview_markers(tmp_path: Path, monkeypatch) -> Non
         "btn-approve-batch",
         "btn-approve-all",
         "btn-discard-batch",
+        "status-start-planned-run",
         "status-preview-response",
     ]:
         assert f'data-marker="{marker}"' in html
@@ -237,7 +239,14 @@ def test_prompt_html_exposes_preview_markers(tmp_path: Path, monkeypatch) -> Non
     assert 'data-marker="prompt-scope-controls"' in html
     assert "xtl-prompt-workbench" in html
     assert "xtl-prompt-aside" in html
-    assert "当前显示的是历史预览或示例提示词\uff0c不会发送给 AI" in html
+    assert "当前显示的是历史预览或示例提示词\uff0c不会发送给 AI；历史任务不能恢复" in html
+    assert "历史任务只用于审计，不能恢复或重新启动" in html
+    assert "启动这份计划并等待确认" not in html
+
+    script = web_app._prompt_script("ryos-zhcn")
+    assert "/plans/${encodeURIComponent(item.plan_id)}/run" not in script
+    assert "startPlannedRun" not in script
+    assert "setStartPlanStatus" in script
 
 
 def test_profiles_html_has_ordinary_player_setup_guidance(tmp_path: Path, monkeypatch) -> None:
@@ -329,6 +338,10 @@ def test_planned_batch_labels_are_player_readable(tmp_path: Path, monkeypatch) -
 
     plan_dir = paths.project_root("ryos-zhcn") / "batches" / "plan-readable"
     plan_dir.mkdir(parents=True)
+    (paths.project_root("ryos-zhcn") / "project.toml").write_text(
+        "[project]\nsource_plugin_path = \"D:/mods/adwryos.esm\"\n",
+        encoding="utf-8",
+    )
     (plan_dir / "plan.json").write_text(
         """
         {
@@ -349,9 +362,36 @@ def test_planned_batch_labels_are_player_readable(tmp_path: Path, monkeypatch) -
 
     assert planned[0]["label"].startswith("历史第 1 批")
     assert "2 条待翻译" in planned[0]["label"]
+    assert "ryos-zhcn / adwryos.esm / 历史第 1 批：2 条" in planned[0]["audit_label"]
     assert "计划 51be614a" not in planned[0]["label"]
     assert "批次 4acd4605" not in planned[0]["label"]
     assert planned[0]["item_count"] == 2
+
+
+def test_start_planned_run_api_rejects_historical_restarts(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.web import app as web_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    project_root = paths.project_root("ryos-zhcn")
+    project_root.mkdir(parents=True)
+    (project_root / "project.toml").write_text("[project]\ngame = \"Starfield\"\n", encoding="utf-8")
+    plan_dir = paths.project_root("ryos-zhcn") / "batches" / "plan-start"
+    plan_dir.mkdir(parents=True)
+    plan_id = "51be614a-06f1-43d5-bf03-863edff61050"
+    (plan_dir / "plan.json").write_text(
+        json.dumps({"plan_id": plan_id, "sample_system_prompt": "RYOS prompt", "batches": []}),
+        encoding="utf-8",
+    )
+    client = TestClient(web_app.fastapi_app)
+    response = client.post(
+        f"/api/projects/ryos-zhcn/plans/{plan_id}/run",
+        headers={"Authorization": f"Bearer {ensure_shared_secret()}"},
+    )
+
+    assert response.status_code == 410
+    assert "历史任务只用于审计" in response.json()["detail"]
 
 
 def test_planned_batch_keeps_glossary_evidence_for_prompt_explanation(
@@ -426,14 +466,15 @@ def test_prompt_live_preview_label_is_not_raw_ids(tmp_path: Path, monkeypatch) -
 
     script = web_app._prompt_script("ryos-zhcn")
 
-    assert "当前第 1 组文本" in script
+    assert "当前第 ${index}/${totalBatches} 组" in script
+    assert "本次任务共 ${totalItems} 条" in script
     assert "当前没有等待确认的批次" in script
     assert "这是历史预览" in script
     assert "不会发送给 AI" in script
     assert "setPreviewControls(false)" in script
     assert "setPreviewControls(true)" in script
     assert "本次任务后续批次自动发送给 AI" in script
-    assert "可能继续产生费用" in script
+    assert "可能继续产生费用" not in script
     assert "msg.run_id} / ${msg.batch_id" not in script
     assert "select.dataset.runId" in script
     assert "确认失败" in script
@@ -444,7 +485,27 @@ def test_prompt_live_preview_label_is_not_raw_ids(tmp_path: Path, monkeypatch) -
     assert "因预算省略" in script
 
 
-def test_shell_status_warns_about_running_cost_and_uses_player_labels(
+def test_prompt_preview_label_shows_batch_and_total_counts(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.web import app as web_app
+
+    label = web_app._preview_select_label(
+        web_app.PreviewRequest(
+            project="du_overtime",
+            run_id="rn_demo",
+            batch_id="batch-1",
+            system_prompt="prompt",
+            items=[{"id": f"I{index}"} for index in range(20)],
+            batch_index=1,
+            total_batches=18,
+            total_items=500,
+        )
+    )
+
+    assert label == "当前第 1/18 组：本组 20 条，本次任务共 500 条，等待确认"
+
+
+def test_shell_status_warns_about_running_tasks_and_uses_player_labels(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
@@ -462,7 +523,7 @@ def test_shell_status_warns_about_running_cost_and_uses_player_labels(
     html = web_app._shell_html("project")
 
     assert "有 1 个任务运行中" in html
-    assert "可能继续计费" in html
+    assert "已发送请求可能仍在服务商侧处理" in html
     assert 'data-marker="link-running-tasks"' in html
     assert "查看/停止运行中任务" in html
     assert "BGS 汉化助手 / bgs-translator" in html
@@ -511,13 +572,100 @@ def test_entries_html_uses_player_facing_filter_labels(tmp_path: Path, monkeypat
     assert "名称文本" in html
     assert "FULL" in html
     assert "搜索原文、译文或条目编号" in html
+    assert "全选当前列表" in html
+    assert "全部清空" in html
+    assert "批量标记已翻译" in html
+    assert "批量退回未翻译" in html
+    assert "每组条数" in html
+    assert "field-entries-batch-size" in html
+    assert "btn-entries-bulk-translated" in html
+    assert "btn-entries-bulk-untranslated" in html
+    assert "xtl-selection-status" in html
+    assert "已选择 0 / 当前列表 0 条" in html
+    assert "按住 Shift 点击复选框" in html
+    assert "提交队列只会接收未翻译条目" in html
     assert "条目编号" in script
+    assert "lastSelectionAnchorRowId" in script
+    assert "function setSelectionRange" in script
+    assert "event.shiftKey" in script
+    assert "function selectAllVisibleRows" in script
+    assert "function clearSelectedRows" in script
+    assert "function bulkUpdateStatus" in script
+    assert "entries.map(entry => entry.row_id)" in script
+    assert "entry.status === 'untranslated'" in script
+    assert "batch_size: batchSize" in script
+    assert "已选择 ${selectedCount} / 当前列表 ${total} 条" in script
     assert "内部 ID" not in html
     assert "内部 ID" not in script
     assert "这会让该文本保持原文" in script
     assert "标记为不需要翻译" in script
     assert "这会清空当前译文" in script
     assert "不会修改原始 MOD 文件" in script
+
+
+def test_entries_bulk_status_api_updates_partial_rows(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.core.memory import insert_units, open_memory_db
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+    from bgs_translator.sst.status import SStrParam
+    from bgs_translator.web import app as web_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    project_root = paths.project_root("ryos-zhcn")
+    project_root.mkdir(parents=True, exist_ok=True)
+    (project_root / "project.toml").write_text("[project]\ngame = \"Starfield\"\n", encoding="utf-8")
+    conn = open_memory_db(project_root)
+    try:
+        insert_units(
+            conn,
+            [
+                TranslationUnit("A.esm", 1, 1, "needsReviewA", "BOOK", "DESC", source="Needs review A"),
+                TranslationUnit("A.esm", 2, 2, "needsReviewB", "BOOK", "DESC", source="Needs review B"),
+            ],
+        )
+        conn.execute("UPDATE units SET status = 'partial', sparams = ?, dest = '复查 A' WHERE edid = 'needsReviewA'", (int(SStrParam.INCOMPLETE_TRANS),))
+        conn.execute("UPDATE units SET status = 'partial', sparams = ?, dest = '复查 B' WHERE edid = 'needsReviewB'", (int(SStrParam.INCOMPLETE_TRANS),))
+        row_ids = [str(row[0]) for row in conn.execute("SELECT row_id FROM units ORDER BY formid").fetchall()]
+        conn.commit()
+    finally:
+        conn.close()
+
+    client = TestClient(web_app.fastapi_app)
+    headers = {"Authorization": f"Bearer {ensure_shared_secret()}"}
+    translated = client.post(
+        "/api/projects/ryos-zhcn/entries/bulk-status",
+        json={"row_ids": row_ids, "status": "translated"},
+        headers=headers,
+    )
+    assert translated.status_code == 200
+    assert translated.json()["updated_count"] == 2
+    conn = open_memory_db(project_root)
+    try:
+        rows = conn.execute("SELECT status, sparams, dest FROM units ORDER BY formid").fetchall()
+    finally:
+        conn.close()
+    assert [(row[0], row[1], row[2]) for row in rows] == [
+        ("translated", int(SStrParam.TRANSLATED), "复查 A"),
+        ("translated", int(SStrParam.TRANSLATED), "复查 B"),
+    ]
+
+    untranslated = client.post(
+        "/api/projects/ryos-zhcn/entries/bulk-status",
+        json={"row_ids": row_ids, "status": "untranslated"},
+        headers=headers,
+    )
+    assert untranslated.status_code == 200
+    assert untranslated.json()["updated_count"] == 2
+    conn = open_memory_db(project_root)
+    try:
+        rows = conn.execute("SELECT status, sparams, dest FROM units ORDER BY formid").fetchall()
+    finally:
+        conn.close()
+    assert [(row[0], row[1], row[2]) for row in rows] == [
+        ("untranslated", int(SStrParam.NONE), None),
+        ("untranslated", int(SStrParam.NONE), None),
+    ]
 
 
 def test_batches_script_translates_run_and_event_labels(tmp_path: Path, monkeypatch) -> None:
@@ -530,14 +678,36 @@ def test_batches_script_translates_run_and_event_labels(tmp_path: Path, monkeypa
     assert "function preferredRunId()" in script
     assert "run.status === 'running'" in script
     assert "'run.complete': '全部完成'" in script
+    assert "'run.abandoned': '已中断，仅审计'" in script
     assert "'prompt.preview_request': '等待你确认提示词'" in script
+    assert "'batch.request_sent': '已发送给模型'" in script
+    assert "'batch.response_received': '模型已返回'" in script
+    assert "'batch.abandoned': '已中断，仅审计'" in script
+    assert "'batch.waiting_preview': '已中断，仅审计'" in script
     assert "title=\"${esc(event.kind)}${esc(titleBatch)}\"" in script
     assert "第 ${index + 1} 组" in script
     assert "cancelRun()" in script
+    assert "discardRunTranslations()" in script
+    assert "discard-translations" in script
+    assert "discarded: '已抛弃'" in script
+    assert "确认抛弃" in script
+    assert "runSelectInteracting" in script
+    assert "runOptionsSignature" in script
+    assert "currentBatches" in script
+    assert "applyRealtimeEvent(msg)" in script
+    assert "function updateBatchFromRealtimeEvent" in script
+    assert "skipped: 'run-select-open'" in script
+    assert "pauseAutoRefreshForRunSelect()" in script
+    assert "resumeAutoRefreshForRunSelect" in script
+    assert "refreshAll({force: true})" in script
+    assert "refreshAll({keepSince: true})" not in script
+    assert "pollEvents" not in script
+    assert "window.setInterval(refreshActiveRunIfNeeded, 5000)" in script
+    assert "function scheduleRealtimeRefresh" in script
     assert "method: 'POST'" in script
 
 
-def test_batches_html_exposes_cancel_run_controls(tmp_path: Path, monkeypatch) -> None:
+def test_batches_html_exposes_cancel_and_discard_controls(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
     from bgs_translator.web import app as web_app
 
@@ -545,8 +715,12 @@ def test_batches_html_exposes_cancel_run_controls(tmp_path: Path, monkeypatch) -
 
     assert 'data-marker="btn-cancel-run"' in html
     assert 'data-marker="status-cancel-run"' in html
+    assert 'data-marker="btn-discard-run-translations"' in html
+    assert 'data-marker="status-discard-run"' in html
     assert "AI 翻译任务" in html
     assert "请求停止会让当前选中的运行中任务在安全检查点结束" in html
+    assert "抛弃这次翻译" in html
+    assert "只清除当前历史任务写入项目记忆库的译文" in html
 
 
 def test_batches_html_prefers_running_run_and_disables_finished_cancel(tmp_path: Path, monkeypatch) -> None:
@@ -566,6 +740,7 @@ def test_batches_html_prefers_running_run_and_disables_finished_cancel(tmp_path:
 
     assert '<option value="rn_live" title="rn_live" selected>' in html
     assert '<button class="xtl-btn danger xtl-priority-action" data-marker="btn-cancel-run" id="xtl-cancel-run" disabled>' not in html
+    assert '<button class="xtl-btn danger" data-marker="btn-discard-run-translations" id="xtl-discard-run-translations" disabled>' in html
 
     monkeypatch.setattr(
         web_app,
@@ -579,6 +754,7 @@ def test_batches_html_prefers_running_run_and_disables_finished_cancel(tmp_path:
 
     assert '<option value="rn_done" title="rn_done" selected>' in html
     assert '<button class="xtl-btn danger xtl-priority-action" data-marker="btn-cancel-run" id="xtl-cancel-run" disabled>' in html
+    assert '<button class="xtl-btn danger" data-marker="btn-discard-run-translations" id="xtl-discard-run-translations" disabled>' not in html
 
 
 def test_cancel_run_api_writes_cli_compatible_marker(tmp_path: Path, monkeypatch) -> None:
@@ -606,6 +782,86 @@ def test_cancel_run_api_writes_cli_compatible_marker(tmp_path: Path, monkeypatch
     assert response.status_code == 200
     assert response.json()["cancel_requested"] is True
     assert (run_dir / "cancel.requested").read_text(encoding="utf-8") == "cancel requested\n"
+
+
+def test_discard_run_translations_api_clears_only_selected_run(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.core.memory import (
+        insert_run,
+        insert_units,
+        open_memory_db,
+        update_unit_translation,
+    )
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+    from bgs_translator.web import app as web_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    project_root = paths.project_root("ryos-zhcn")
+    conn = open_memory_db(project_root)
+    try:
+        insert_units(
+            conn,
+            [
+                TranslationUnit("A.esm", 1, 1, "A", "QUST", "FULL", source="Quest A"),
+                TranslationUnit("A.esm", 2, 2, "B", "QUST", "NNAM", source="Quest B"),
+            ],
+        )
+        row_ids = [str(row[0]) for row in conn.execute("SELECT row_id FROM units ORDER BY formid").fetchall()]
+        insert_run(conn, "rn_done", "plan", "2026-06-08T00:00:00+00:00", 1, project="ryos-zhcn")
+        conn.execute("UPDATE runs SET status = 'complete' WHERE run_id = 'rn_done'")
+        update_unit_translation(
+            conn,
+            row_id=row_ids[0],
+            dest="任务 A",
+            status="translated",
+            sparams=0,
+            via_llm=True,
+            profile_used="profile",
+            sdk_via="synthetic",
+            cost_estimate_usd=0.01,
+            cost_exact=True,
+            retry_count=0,
+            last_batch_id="batch-a",
+            last_run_id="rn_done",
+        )
+        update_unit_translation(
+            conn,
+            row_id=row_ids[1],
+            dest="任务 B",
+            status="translated",
+            sparams=0,
+            via_llm=True,
+            profile_used="profile",
+            sdk_via="synthetic",
+            cost_estimate_usd=0.01,
+            cost_exact=True,
+            retry_count=0,
+            last_batch_id="batch-b",
+            last_run_id="rn_other",
+        )
+    finally:
+        conn.close()
+
+    client = TestClient(web_app.fastapi_app)
+    response = client.post(
+        "/api/projects/ryos-zhcn/runs/rn_done/discard-translations",
+        headers={"Authorization": f"Bearer {ensure_shared_secret()}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["discarded_count"] == 1
+    conn = open_memory_db(project_root)
+    try:
+        rows = conn.execute(
+            "SELECT dest, status, via_llm, last_run_id FROM units ORDER BY formid"
+        ).fetchall()
+        run_status = conn.execute("SELECT status FROM runs WHERE run_id = 'rn_done'").fetchone()[0]
+    finally:
+        conn.close()
+    assert rows[0] == (None, "untranslated", 0, None)
+    assert rows[1] == ("任务 B", "translated", 1, "rn_other")
+    assert run_status == "discarded"
 
 
 def test_project_close_summary_counts_manual_edits_after_export(tmp_path: Path, monkeypatch) -> None:
@@ -823,6 +1079,11 @@ def test_project_html_explains_sst_and_reload_safely(tmp_path: Path, monkeypatch
     assert "不是 MOD 本体" in html
     assert "导入新的 MOD 文件" in html
     assert "field-import-plugin-path" in html
+    assert 'data-marker="panel-project-translation-budgets"' in html
+    assert 'data-marker="field-budget-glossary-max-terms"' in html
+    assert 'data-marker="field-budget-glossary-max-prompt-chars"' in html
+    assert 'data-marker="field-budget-glossary-candidate-source-terms"' in html
+    assert 'data-marker="btn-save-translation-budgets"' in html
     script = web_app._project_script("ryos-zhcn")
     assert "导出命令完成\uff0c但没有生成 SST 文件" in script
     assert "正在重新读取项目状态" in script
@@ -831,6 +1092,50 @@ def test_project_html_explains_sst_and_reload_safely(tmp_path: Path, monkeypatch
     assert "/api/projects/import" in script
     assert "missing_strings" in script
     assert "ambiguous_game" in script
+
+
+def test_project_home_shows_signature_status_statistics(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.core.memory import insert_units, open_memory_db
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+    from bgs_translator.web import app as web_app
+
+    project_root = paths.project_root("ryos-zhcn")
+    project_root.mkdir(parents=True, exist_ok=True)
+    (project_root / "project.toml").write_text("[project]\ngame = \"Starfield\"\n", encoding="utf-8")
+    conn = open_memory_db(project_root)
+    try:
+        insert_units(
+            conn,
+            [
+                TranslationUnit("A.esm", 1, 1, "menuDone", "MESG", "FULL", source="Done"),
+                TranslationUnit("A.esm", 2, 2, "menuTodo", "MESG", "FULL", source="Todo"),
+                TranslationUnit("A.esm", 3, 3, "bookReview", "BOOK", "DESC", source="Review"),
+                TranslationUnit("A.esm", 4, 4, "bookLocked", "BOOK", "DESC", source="Locked"),
+            ],
+        )
+        conn.execute("UPDATE units SET status = 'translated', dest = '完成' WHERE edid = 'menuDone'")
+        conn.execute("UPDATE units SET status = 'partial', dest = '复查' WHERE edid = 'bookReview'")
+        conn.execute("UPDATE units SET status = 'locked', dest = source WHERE edid = 'bookLocked'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = web_app._project_summary("ryos-zhcn")
+    stats = {row["signature"]: row for row in summary["signature_status"]}
+    assert stats["MESG"]["total"] == 2
+    assert stats["MESG"]["translated"] == 1
+    assert stats["MESG"]["pending_ai"] == 1
+    assert stats["BOOK"]["partial"] == 1
+    assert stats["BOOK"]["locked"] == 1
+
+    html = web_app._project_html("ryos-zhcn")
+    assert 'data-marker="panel-project-signature-stats"' in html
+    assert "Record Signature 统计" in html
+    assert "菜单、提示消息、开始选项" in html
+    assert "<b>MESG</b>" in html
+    assert "<b>BOOK</b>" in html
 
 
 def test_project_reload_api_reads_source_plugin_status(tmp_path: Path, monkeypatch) -> None:
@@ -887,8 +1192,34 @@ def test_run_option_label_hides_technical_id_by_default(tmp_path: Path, monkeypa
 
     assert label.startswith("已完成\uff1a最近一次任务")
     assert "3 组文本" in label
-    assert "$0.0029" in label
+    assert "$0.0029" not in label
     assert "ID rn_621df" not in label
+
+
+def test_run_option_label_marks_abandoned_runs_as_audit_only(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.web import app as web_app
+
+    label = web_app._run_option_label(
+        {"run_id": "rn_abandoned", "status": "abandoned", "batches_total": 18, "cost_total_usd": 0.0},
+        1,
+    )
+
+    assert label.startswith("已中断，仅审计\uff1a最近一次任务")
+    assert "18 组文本" in label
+
+
+def test_run_option_label_translates_discarded_runs(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.web import app as web_app
+
+    label = web_app._run_option_label(
+        {"run_id": "rn_discarded", "status": "discarded", "batches_total": 1, "cost_total_usd": 0.0},
+        1,
+    )
+
+    assert label.startswith("已抛弃\uff1a最近一次任务")
+    assert "1 组文本" in label
 
 
 def test_event_kind_label_translates_common_internal_names(tmp_path: Path, monkeypatch) -> None:
@@ -896,5 +1227,10 @@ def test_event_kind_label_translates_common_internal_names(tmp_path: Path, monke
     from bgs_translator.web import app as web_app
 
     assert web_app._event_kind_label("batch.progress") == "批次进度更新"
+    assert web_app._event_kind_label("batch.request_sent") == "已发送给模型"
+    assert web_app._event_kind_label("batch.response_received") == "模型已返回"
+    assert web_app._event_kind_label("batch.abandoned") == "已中断，仅审计"
+    assert web_app._event_kind_label("batch.waiting_preview") == "已中断，仅审计"
+    assert web_app._event_kind_label("run.abandoned") == "已中断，仅审计"
     assert web_app._event_kind_label("prompt.preview_request") == "等待你确认提示词"
     assert web_app._event_kind_label("unknown.internal") == "unknown.internal"

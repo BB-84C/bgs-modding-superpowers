@@ -22,6 +22,7 @@ from bgs_translator.pipeline.batcher import Batch, BatchPlan
 from bgs_translator.pipeline.clients.base import LLMResponse, TokenUsage
 from bgs_translator.pipeline.mask import build_masked_unit
 from bgs_translator.pipeline.runner import BatchRunner
+from bgs_translator.sst.status import SStrParam
 
 
 class _KnownTranslationClient:
@@ -88,12 +89,21 @@ def test_runner_writes_dest_to_memory_sqlite(translator_home: Path) -> None:
     conn = sqlite3.connect(project_root / "memory" / "memory.sqlite")
     row = conn.execute(
         """
-        SELECT dest, status, via_llm, profile_used, sdk_via, last_batch_id
+        SELECT dest, status, sparams, via_llm, profile_used, sdk_via, last_batch_id, last_run_id
         FROM units
         """
     ).fetchone()
     assert result.succeeded == 1
-    assert row == ("Bonjour", "translated", 1, "mock-profile", "synthetic", "batch-1")
+    assert row == (
+        "Bonjour",
+        "translated",
+        int(SStrParam.TRANSLATED),
+        1,
+        "mock-profile",
+        "synthetic",
+        "batch-1",
+        "run-persist",
+    )
 
 
 def test_runner_writes_audit_artifacts(translator_home: Path) -> None:

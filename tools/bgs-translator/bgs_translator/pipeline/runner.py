@@ -40,7 +40,7 @@ class BatchEvent:
 
     run_id: str
     batch_id: str
-    kind: Literal["start", "in_flight", "complete", "failed", "cancelled", "rate_limited"]
+    kind: Literal["start", "in_flight", "complete", "failed", "cancelled", "abandoned", "rate_limited"]
     timestamp: datetime
     detail: dict[str, Any] = field(default_factory=dict)
 
@@ -55,6 +55,7 @@ class RunResult:
     retried: int
     manual_review: int
     cancelled: int
+    abandoned: int
     cost_usd: float
     cost_exact: bool
 
@@ -81,12 +82,17 @@ class _BatchOutcome:
     retried: int = 0
     manual_review: int = 0
     cancelled: int = 0
+    abandoned: int = 0
     tokens_in: int | None = None
     tokens_out: int | None = None
     cost_usd: float | None = None
     cost_exact: bool = False
     failures: list[ValidationFailure] = field(default_factory=list)
     translated_units: list[TranslatedUnit] = field(default_factory=list)
+
+
+class PreviewAbandoned(RuntimeError):
+    """A batch lost its preview before calling AI and must be started over."""
 
 
 class BatchRunner:
@@ -142,14 +148,24 @@ class BatchRunner:
         )
         try:
             semaphore = asyncio.Semaphore(max(1, self.rate_tracker.profile.max_concurrency))
-            outcomes = await asyncio.gather(
-                *(
-                    self._run_batch(
-                        run_id, run_dir, batch, semaphore, event_queue, cancel_event, memory_conn
-                    )
-                    for batch in self.plan.batches
+            if getattr(self.client, "stop_run_on_abandon", False):
+                outcomes = await self._run_preview_guarded_batches(
+                    run_id,
+                    run_dir,
+                    semaphore,
+                    event_queue,
+                    cancel_event,
+                    memory_conn,
                 )
-            )
+            else:
+                outcomes = await asyncio.gather(
+                    *(
+                        self._run_batch(
+                            run_id, run_dir, batch, semaphore, event_queue, cancel_event, memory_conn
+                        )
+                        for batch in self.plan.batches
+                    )
+                )
         except Exception:
             finished_at = datetime.now(UTC).isoformat()
             if memory_conn is not None:
@@ -186,10 +202,15 @@ class BatchRunner:
             retried=sum(outcome.retried for outcome in outcomes),
             manual_review=sum(outcome.manual_review for outcome in outcomes),
             cancelled=sum(outcome.cancelled for outcome in outcomes),
+            abandoned=sum(outcome.abandoned for outcome in outcomes),
             cost_usd=self.cost_tracker.estimated_total(),
             cost_exact=self.cost_tracker.cost_exact,
         )
-        run_status = "failed" if result.manual_review or result.cancelled else "complete"
+        run_status = (
+            "abandoned"
+            if result.abandoned
+            else ("failed" if result.manual_review or result.cancelled else "complete")
+        )
         finished_at = datetime.now(UTC).isoformat()
         memory_conn = sqlite3.connect(memory_path) if memory_path.exists() else None
         try:
@@ -210,7 +231,9 @@ class BatchRunner:
             if memory_conn is not None:
                 memory_conn.close()
         self._emit_gui_event(
-            "run.complete" if run_status == "complete" else "run.failed",
+            "run.complete"
+            if run_status == "complete"
+            else ("run.abandoned" if run_status == "abandoned" else "run.failed"),
             run_id=run_id,
             payload={
                 "run_id": run_id,
@@ -220,6 +243,7 @@ class BatchRunner:
                 "retried": result.retried,
                 "manual_review": result.manual_review,
                 "cancelled": result.cancelled,
+                "abandoned": result.abandoned,
                 "cost_total_usd": result.cost_usd,
                 "cost_exact": result.cost_exact,
             },
@@ -242,6 +266,212 @@ class BatchRunner:
         )
         return result
 
+    async def _run_preview_guarded_batches(
+        self,
+        run_id: str,
+        run_dir: Path,
+        semaphore: asyncio.Semaphore,
+        event_queue: asyncio.Queue[BatchEvent] | None,
+        cancel_event: asyncio.Event | None,
+        memory_conn: sqlite3.Connection | None,
+    ) -> list[_BatchOutcome]:
+        outcomes: list[_BatchOutcome] = []
+        preview_batch = getattr(self.client, "preview_batch", None)
+        translate_preapproved = getattr(self.client, "translate_preapproved_batch", None)
+        if not callable(preview_batch) or not callable(translate_preapproved):
+            return await self._run_preview_guarded_batches_legacy(
+                run_id,
+                run_dir,
+                semaphore,
+                event_queue,
+                cancel_event,
+                memory_conn,
+            )
+
+        batch_index = 0
+        while batch_index < len(self.plan.batches):
+            batch = self.plan.batches[batch_index]
+            try:
+                decision = await preview_batch(batch, self._system_prompt(batch))
+            except PreviewAbandoned as exc:
+                outcomes.append(
+                    await self._record_preview_abandoned_batch(
+                        run_id,
+                        batch,
+                        event_queue,
+                        memory_conn,
+                        str(exc),
+                    )
+                )
+                break
+            if not isinstance(decision, dict):
+                decision = {"op": "approved", "prompt": self._system_prompt(batch)}
+            response = decision.get("response")
+            prompt = str(decision.get("prompt", self._system_prompt(batch)))
+            op = str(decision.get("op", "approved"))
+            if op == "approve_all":
+                remaining = self.plan.batches[batch_index:]
+                outcomes.extend(
+                    await asyncio.gather(
+                        *(
+                            self._run_batch(
+                                run_id,
+                                run_dir,
+                                remaining_batch,
+                                semaphore,
+                                event_queue,
+                                cancel_event,
+                                memory_conn,
+                                preapproved_prompt=prompt
+                                if remaining_batch.batch_id == batch.batch_id
+                                else self._system_prompt(remaining_batch),
+                            )
+                            for remaining_batch in remaining
+                        )
+                    )
+                )
+                break
+            outcome = await self._run_batch(
+                run_id,
+                run_dir,
+                batch,
+                semaphore,
+                event_queue,
+                cancel_event,
+                memory_conn,
+                preapproved_prompt=prompt,
+                preapproved_response=response if isinstance(response, LLMResponse) else None,
+            )
+            outcomes.append(outcome)
+            batch_index += 1
+            if outcome.abandoned or outcome.cancelled:
+                break
+        return outcomes
+
+    async def _run_preview_guarded_batches_legacy(
+        self,
+        run_id: str,
+        run_dir: Path,
+        semaphore: asyncio.Semaphore,
+        event_queue: asyncio.Queue[BatchEvent] | None,
+        cancel_event: asyncio.Event | None,
+        memory_conn: sqlite3.Connection | None,
+    ) -> list[_BatchOutcome]:
+        outcomes: list[_BatchOutcome] = []
+        batch_index = 0
+        while batch_index < len(self.plan.batches):
+            batch = self.plan.batches[batch_index]
+            outcome = await self._run_batch(run_id, run_dir, batch, semaphore, event_queue, cancel_event, memory_conn)
+            outcomes.append(outcome)
+            batch_index += 1
+            if outcome.abandoned or outcome.cancelled:
+                break
+            if getattr(self.client, "allow_parallel_batches", False) and batch_index < len(self.plan.batches):
+                outcomes.extend(
+                    await asyncio.gather(
+                        *(
+                            self._run_batch(
+                                run_id,
+                                run_dir,
+                                remaining,
+                                semaphore,
+                                event_queue,
+                                cancel_event,
+                                memory_conn,
+                            )
+                            for remaining in self.plan.batches[batch_index:]
+                        )
+                    )
+                )
+                break
+        return outcomes
+
+    async def _record_preview_abandoned_batch(
+        self,
+        run_id: str,
+        batch: Batch,
+        event_queue: asyncio.Queue[BatchEvent] | None,
+        memory_conn: sqlite3.Connection | None,
+        reason: str,
+    ) -> _BatchOutcome:
+        await self._emit(event_queue, run_id, batch.batch_id, "start")
+        started_at = datetime.now(UTC).isoformat()
+        if memory_conn is not None:
+            insert_batch(
+                memory_conn,
+                batch.batch_id,
+                run_id,
+                started_at,
+                len(batch.items),
+                plan_id=self.plan.plan_id,
+                profile_snapshot_json=self._profile_snapshot_json(),
+            )
+        self._emit_gui_event(
+            "batch.start",
+            run_id=run_id,
+            batch_id=batch.batch_id,
+            payload={
+                "batch_id": batch.batch_id,
+                "run_id": run_id,
+                "item_count": len(batch.items),
+                "total": len(batch.items),
+                "profile": self.rate_tracker.profile.name,
+                "model": self.rate_tracker.profile.model,
+            },
+        )
+        failure = ValidationFailure(
+            item_id=batch.batch_id,
+            gate="prompt_preview",
+            reason=reason,
+            soft=False,
+        )
+        finished_at = datetime.now(UTC).isoformat()
+        if memory_conn is not None:
+            update_batch(
+                memory_conn,
+                batch.batch_id,
+                run_id=run_id,
+                status="abandoned",
+                finished_at=finished_at,
+                tokens_in=None,
+                tokens_out=None,
+                cost_usd=None,
+            )
+        self._emit_gui_event(
+            "batch.abandoned",
+            run_id=run_id,
+            batch_id=batch.batch_id,
+            payload={
+                "batch_id": batch.batch_id,
+                "run_id": run_id,
+                "status": "abandoned",
+                "item_count": len(batch.items),
+                "done": 0,
+                "total": len(batch.items),
+                "reason": reason,
+            },
+        )
+        self._emit_gui_event(
+            "cost.update",
+            run_id=run_id,
+            batch_id=batch.batch_id,
+            payload={
+                "run_id": run_id,
+                "batch_id": batch.batch_id,
+                "cost_total_usd": self.cost_tracker.estimated_total(),
+                "cost": self.cost_tracker.estimated_total(),
+                "cost_exact": self.cost_tracker.cost_exact,
+            },
+        )
+        await self._emit(
+            event_queue,
+            run_id,
+            batch.batch_id,
+            "abandoned",
+            {"failures": [failure.model_dump()]},
+        )
+        return _BatchOutcome(abandoned=len(batch.items), failures=[failure])
+
     async def _run_batch(
         self,
         run_id: str,
@@ -251,9 +481,12 @@ class BatchRunner:
         event_queue: asyncio.Queue[BatchEvent] | None,
         cancel_event: asyncio.Event | None,
         memory_conn: sqlite3.Connection | None,
+        *,
+        preapproved_prompt: str | None = None,
+        preapproved_response: LLMResponse | None = None,
     ) -> _BatchOutcome:
         async with semaphore:
-            if cancel_event is not None and cancel_event.is_set():
+            if self._cancel_requested(run_dir, cancel_event):
                 await self._emit(event_queue, run_id, batch.batch_id, "cancelled")
                 return _BatchOutcome(cancelled=len(batch.items))
             await self._emit(event_queue, run_id, batch.batch_id, "start")
@@ -306,17 +539,25 @@ class BatchRunner:
                     payload={"batch_id": batch.batch_id, "run_id": run_id, "reason": "cost_cap"},
                 )
                 return _BatchOutcome(cancelled=len(batch.items))
-            outcome = await self._attempt_batch(run_dir, batch, cancel_event, memory_conn)
-            for items_done in range(1, outcome.succeeded + 1):
+            outcome = await self._attempt_batch(
+                run_id,
+                run_dir,
+                batch,
+                cancel_event,
+                memory_conn,
+                preapproved_prompt=preapproved_prompt,
+                preapproved_response=preapproved_response,
+            )
+            if outcome.succeeded:
                 self._emit_gui_event(
                     "batch.progress",
                     run_id=run_id,
                     batch_id=batch.batch_id,
                     payload={
                         "batch_id": batch.batch_id,
-                        "items_done": items_done,
+                        "items_done": outcome.succeeded,
                         "items_total": len(batch.items),
-                        "done": items_done,
+                        "done": outcome.succeeded,
                         "total": len(batch.items),
                     },
                 )
@@ -336,7 +577,9 @@ class BatchRunner:
                     retry_count=outcome.retried,
                 )
             self._emit_gui_event(
-                "batch.complete" if batch_status == "complete" else "batch.failed",
+                "batch.complete"
+                if batch_status == "complete"
+                else ("batch.abandoned" if batch_status == "abandoned" else "batch.failed"),
                 run_id=run_id,
                 batch_id=batch.batch_id,
                 payload={
@@ -370,32 +613,122 @@ class BatchRunner:
                 event_queue,
                 run_id,
                 batch.batch_id,
-                "cancelled" if outcome.cancelled else ("failed" if batch_status == "failed" else "complete"),
+                "abandoned"
+                if outcome.abandoned
+                else ("cancelled" if outcome.cancelled else ("failed" if batch_status == "failed" else "complete")),
                 asdict(outcome) | {"failures": [failure.model_dump() for failure in outcome.failures]},
             )
             return outcome
 
     async def _attempt_batch(
         self,
+        run_id: str,
         run_dir: Path,
         batch: Batch,
         cancel_event: asyncio.Event | None,
         memory_conn: sqlite3.Connection | None,
+        *,
+        preapproved_prompt: str | None = None,
+        preapproved_response: LLMResponse | None = None,
     ) -> _BatchOutcome:
         failures: list[ValidationFailure] = []
         for attempt in range(self.max_retries + 1):
-            if cancel_event is not None and cancel_event.is_set():
+            if self._cancel_requested(run_dir, cancel_event):
                 return _BatchOutcome(cancelled=len(batch.items), failures=failures)
+            request_started_at: datetime | None = None
             try:
-                response = await self.client.translate_batch(batch, self._system_prompt(batch))
+                if preapproved_response is not None and attempt == 0:
+                    response = preapproved_response
+                elif preapproved_prompt is not None:
+                    translate_preapproved = getattr(self.client, "translate_preapproved_batch", None)
+                    request_started_at = datetime.now(UTC)
+                    self._emit_gui_event(
+                        "batch.request_sent",
+                        run_id=run_id,
+                        batch_id=batch.batch_id,
+                        payload={
+                            "batch_id": batch.batch_id,
+                            "run_id": run_id,
+                            "attempt": attempt + 1,
+                            "total": len(batch.items),
+                            "profile": self.rate_tracker.profile.name,
+                            "model": self.rate_tracker.profile.model,
+                        },
+                    )
+                    if callable(translate_preapproved):
+                        response = await translate_preapproved(batch, preapproved_prompt)
+                    else:
+                        response = await self.client.translate_batch(batch, preapproved_prompt)
+                else:
+                    request_started_at = datetime.now(UTC)
+                    self._emit_gui_event(
+                        "batch.request_sent",
+                        run_id=run_id,
+                        batch_id=batch.batch_id,
+                        payload={
+                            "batch_id": batch.batch_id,
+                            "run_id": run_id,
+                            "attempt": attempt + 1,
+                            "total": len(batch.items),
+                            "profile": self.rate_tracker.profile.name,
+                            "model": self.rate_tracker.profile.model,
+                        },
+                    )
+                    response = await self.client.translate_batch(batch, self._system_prompt(batch))
             except asyncio.CancelledError:
                 return _BatchOutcome(cancelled=len(batch.items), failures=failures)
+            except PreviewAbandoned as exc:
+                failures.append(
+                    ValidationFailure(
+                        item_id=batch.batch_id,
+                        gate="prompt_preview",
+                        reason=str(exc),
+                        soft=False,
+                    )
+                )
+                return _BatchOutcome(abandoned=len(batch.items), failures=failures)
+            except Exception as exc:
+                log.exception("Batch %s failed before an LLM response was persisted", batch.batch_id)
+                failures.append(
+                    ValidationFailure(
+                        item_id=batch.batch_id,
+                        gate="llm_request",
+                        reason=str(exc),
+                        soft=False,
+                    )
+                )
+                return _BatchOutcome(
+                    manual_review=len(batch.items),
+                    retried=attempt,
+                    failures=failures,
+                )
+            elapsed_seconds = (
+                (datetime.now(UTC) - request_started_at).total_seconds()
+                if request_started_at is not None
+                else 0.0
+            )
+            self._emit_gui_event(
+                "batch.response_received",
+                run_id=run_id,
+                batch_id=batch.batch_id,
+                payload={
+                    "batch_id": batch.batch_id,
+                    "run_id": run_id,
+                    "attempt": attempt + 1,
+                    "total": len(batch.items),
+                    "elapsed_seconds": round(elapsed_seconds, 1),
+                    "tokens_in": response.usage.input_tokens,
+                    "tokens_out": response.usage.output_tokens,
+                    "cost_usd": response.cost_usd,
+                    "cost_exact": response.cost_exact,
+                },
+            )
             self.cost_tracker.record(response.usage, response.cost_usd if response.cost_exact else None)
             self._persist_response(run_dir, batch.batch_id, attempt, response)
             hard_failures = self._validate_response(batch, response)
             failures.extend(hard_failures)
             if not hard_failures:
-                return self._persist_translated_units(memory_conn, batch, response, attempt, failures)
+                return self._persist_translated_units(memory_conn, run_id, batch, response, attempt, failures)
         return _BatchOutcome(
             manual_review=len(batch.items),
             retried=self.max_retries,
@@ -409,6 +742,7 @@ class BatchRunner:
     def _persist_translated_units(
         self,
         memory_conn: sqlite3.Connection | None,
+        run_id: str,
         batch: Batch,
         response: LLMResponse,
         attempt: int,
@@ -438,6 +772,7 @@ class BatchRunner:
                         cost_exact=response.cost_exact,
                         retry_count=attempt,
                         last_batch_id=batch.batch_id,
+                        last_run_id=run_id,
                     )
                 except (sqlite3.Error, ValueError) as exc:
                     persist_failures.append(
@@ -517,6 +852,10 @@ class BatchRunner:
         self._write_json(run_dir / "plan.json", _to_jsonable(self.plan))
         (run_dir / "system-prompt.md").write_text(self.plan.sample_system_prompt, encoding="utf-8")
 
+    @staticmethod
+    def _cancel_requested(run_dir: Path, cancel_event: asyncio.Event | None) -> bool:
+        return bool(cancel_event is not None and cancel_event.is_set()) or (run_dir / "cancel.requested").exists()
+
     def _persist_response(self, run_dir: Path, batch_id: str, attempt: int, response: LLMResponse) -> None:
         response_dir = run_dir / "responses"
         retry_dir = run_dir / "retries"
@@ -561,6 +900,8 @@ class BatchRunner:
     def _batch_status(self, outcome: _BatchOutcome) -> str:
         if outcome.cancelled:
             return "cancelled"
+        if outcome.abandoned:
+            return "abandoned"
         if outcome.manual_review:
             return "failed"
         if outcome.succeeded:
@@ -583,6 +924,8 @@ class BatchRunner:
         )
 
     def _system_prompt(self, batch: Batch) -> str:
+        if batch.system_prompt:
+            return batch.system_prompt
         if batch.parent_context_summary:
             return f"{self.plan.sample_system_prompt}\n\n{batch.parent_context_summary}"
         return self.plan.sample_system_prompt
@@ -592,7 +935,7 @@ class BatchRunner:
         event_queue: asyncio.Queue[BatchEvent] | None,
         run_id: str,
         batch_id: str,
-        kind: Literal["start", "in_flight", "complete", "failed", "cancelled", "rate_limited"],
+        kind: Literal["start", "in_flight", "complete", "failed", "cancelled", "abandoned", "rate_limited"],
         detail: dict[str, Any] | None = None,
     ) -> None:
         if event_queue is None:
@@ -668,4 +1011,4 @@ def _raw_response_payload(response: LLMResponse, fallback: Any) -> Any:
     return fallback
 
 
-__all__ = ["BatchEvent", "BatchRunner", "RunResult"]
+__all__ = ["BatchEvent", "BatchRunner", "PreviewAbandoned", "RunResult"]

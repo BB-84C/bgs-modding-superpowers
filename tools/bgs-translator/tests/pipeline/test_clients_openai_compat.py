@@ -70,3 +70,44 @@ async def test_openai_compat_empty_content_returns_empty_completion_marker(
     assert response.empty_completion is True
     assert "batch-empty" in caplog.text
     assert "req-empty" in caplog.text
+
+
+async def test_openai_compat_retries_json_schema_rejection_as_json_object(
+    monkeypatch: Any,
+    caplog: Any,
+) -> None:
+    captured: list[dict[str, Any]] = []
+
+    class FakeCompletions:
+        async def create(self, **kwargs: Any) -> Any:
+            captured.append(kwargs)
+            if len(captured) == 1:
+                raise RuntimeError(
+                    "Invalid schema for response_format 'BatchTranslation': invalid_json_schema"
+                )
+            return SimpleNamespace(
+                id="req-json-object",
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"items":{"I1":"你好"}}'))],
+                usage=_Usage(),
+            )
+
+    class FakeChat:
+        def __init__(self) -> None:
+            self.completions = FakeCompletions()
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **_: Any) -> None:
+            self.chat = FakeChat()
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI))
+    import bgs_translator.pipeline.clients.openai_compat_cc as module
+
+    monkeypatch.setattr(module, "resolve_api_key", lambda profile: "sk-test")
+    client = module.OpenAICompatChatCompletionsClient(_profile())
+
+    with caplog.at_level(logging.WARNING):
+        response = await client.translate_batch(_batch(), "system")
+
+    assert response.items == {"I1": "你好"}
+    assert [call["response_format"]["type"] for call in captured] == ["json_schema", "json_object"]
+    assert "retrying" in caplog.text

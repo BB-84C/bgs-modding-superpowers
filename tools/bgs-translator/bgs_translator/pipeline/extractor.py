@@ -40,7 +40,7 @@ def collect_units_for_run(
         params.append(limit)
     rows = conn.execute(
         f"""
-        SELECT plugin, formid, formid_sanitized, edid, signature, field,
+        SELECT row_id, plugin, formid, formid_sanitized, edid, signature, field,
                source, index_n, index_max, list_index, strid
         FROM units
         {where}
@@ -51,24 +51,27 @@ def collect_units_for_run(
     ).fetchall()
     seen_sources: set[str] = set()
     units: list[TranslationUnit] = []
+    if row_ids:
+        row_order = {row_id: index for index, row_id in enumerate(row_ids)}
+        rows = sorted(rows, key=lambda row: row_order.get(str(row[0]), len(row_order)))
     for row in rows:
-        source = str(row[6])
+        source = str(row[7])
         if dedupe_sources and source in seen_sources:
             continue
         seen_sources.add(source)
         units.append(
             TranslationUnit(
-                plugin=str(row[0]),
-                formid=int(row[1]),
-                formid_sanitized=int(row[2]),
-                edid=None if row[3] is None else str(row[3]),
-                signature=str(row[4]),
-                field=str(row[5]),
+                plugin=str(row[1]),
+                formid=int(row[2]),
+                formid_sanitized=int(row[3]),
+                edid=None if row[4] is None else str(row[4]),
+                signature=str(row[5]),
+                field=str(row[6]),
                 source=source,
-                index_n=int(row[7]),
-                index_max=int(row[8]),
-                list_index=int(row[9]),
-                strid=int(row[10]),
+                index_n=int(row[8]),
+                index_max=int(row[9]),
+                list_index=int(row[10]),
+                strid=int(row[11]),
             )
         )
     return units

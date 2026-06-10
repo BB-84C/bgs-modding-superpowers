@@ -71,7 +71,13 @@ Launch the browser control panel with:
 xtl gui
 ```
 
-The panel is for configuration and monitoring: AI service accounts, prompt preview, batch progress, cancellation, cost tracking, glossary controls, and export checks. It uses the amber/green/mono terminal theme in a local browser page.
+The panel is for configuration and monitoring: AI service accounts, prompt preview, batch progress, cancellation, glossary controls, and export checks. It uses the amber/green/mono terminal theme in a local browser page. Billing is not estimated in the GUI; use the provider dashboard for real usage and cost.
+
+For local development, restart the browser GUI with the reusable PowerShell harness. It stops the stale GUI PID or port owner, starts the correct web module entry point, and waits for `/healthz`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\restart-web-gui.ps1 -Port 7847
+```
 
 The old Tk panel is still available as an opt-in fallback during cut-over:
 

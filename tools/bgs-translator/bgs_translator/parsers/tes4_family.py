@@ -98,6 +98,7 @@ class TES4FamilyWalker:
         self.encoding_chain = encoding_chain or ["utf-8", "cp1252"]
         self.strings_files = strings_files or {}
         self.header: TES4Header | None = None
+        self.header_record: Record | None = None
 
     def walk(self) -> Iterator[Record]:
         """Open the plugin, parse the TES4 header, and yield contained records."""
@@ -105,6 +106,8 @@ class TES4FamilyWalker:
         data = self._read_plugin_bytes()
         f = io.BytesIO(data)
         self.header = self._parse_tes4_header(f)
+        if self.header_record is not None:
+            yield self.header_record
         file_end = len(data)
         while f.tell() < file_end:
             sig = f.read(4)
@@ -131,6 +134,7 @@ class TES4FamilyWalker:
         record = self._read_record(f)
         if record.sig != "TES4":
             raise ValueError(f"Expected TES4 header in {self.plugin_path}, found {record.sig}")
+        self.header_record = record
 
         form_version = max(record.form_version, 0)
         masters: list[str] = []

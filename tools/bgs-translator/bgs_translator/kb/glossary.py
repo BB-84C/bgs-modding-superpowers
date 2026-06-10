@@ -8,6 +8,13 @@ from typing import ClassVar, Literal
 from bgs_translator.kb.models import GlossaryEntry, ResolvedTerm
 from bgs_translator.kb.reader import KBGlossaryReader
 from bgs_translator.kb.retriever import GlossaryRetrievalResult, GlossaryRetriever
+from bgs_translator.pipeline.mask import (
+    contains_prompt_protected_span,
+    mask_prompt_protected_spans,
+)
+
+DEFAULT_PROMPT_GLOSSARY_MAX_TERMS = 500
+DEFAULT_PROMPT_GLOSSARY_MAX_CHARS = 80000
 
 
 @dataclass
@@ -47,7 +54,7 @@ class GlossaryComposer:
         target_lang: str,
         game: str,
         mod_slug: str | None = None,
-        max_entries: int = 50,
+        max_entries: int = DEFAULT_PROMPT_GLOSSARY_MAX_TERMS,
     ) -> GlossarySubset:
         """Collect, score, cap, and bucket glossary entries for a batch."""
         result = self.collect_for_batch_with_evidence(
@@ -65,8 +72,8 @@ class GlossaryComposer:
         target_lang: str,
         game: str,
         mod_slug: str | None = None,
-        max_terms: int = 50,
-        max_prompt_chars: int = 8000,
+        max_terms: int = DEFAULT_PROMPT_GLOSSARY_MAX_TERMS,
+        max_prompt_chars: int = DEFAULT_PROMPT_GLOSSARY_MAX_CHARS,
     ) -> GlossaryRetrievalResult:
         """Collect glossary entries and retain full match evidence."""
         return self.retriever.collect_for_batch(
@@ -110,7 +117,11 @@ class GlossaryComposer:
 
         lines: list[str] = []
         for scope in ("player", "mod", "vanilla"):
-            lines.extend(_render_glossary_line(entry) for entry in subset.entries_by_scope[scope])
+            lines.extend(
+                line
+                for entry in subset.entries_by_scope[scope]
+                if (line := _render_glossary_line(entry)) is not None
+            )
         return "\n".join(lines)
 
     def _score_entry(self, entry: GlossaryEntry, source_strings: list[str]) -> float:
@@ -142,7 +153,9 @@ def _entry_matches_term(entry: GlossaryEntry, term: str) -> bool:
     return any(form.casefold() == term_folded for form in entry.all_source_forms)
 
 
-def _render_glossary_line(entry: GlossaryEntry) -> str:
+def _render_glossary_line(entry: GlossaryEntry) -> str | None:
+    if _entry_contains_protected_span(entry):
+        return None
     category = entry.category or "uncategorized"
     if entry.confidence == "preferred":
         confidence = "preferred, prefer this exact form"
@@ -150,14 +163,31 @@ def _render_glossary_line(entry: GlossaryEntry) -> str:
         confidence = "candidate; LLM may use judgment"
     else:
         confidence = "canonical"
-    return f"{entry.source} → {entry.target} ({category}, {confidence})"
+    protected_map: dict[str, str] = {}
+    source, protected_map = mask_prompt_protected_spans(entry.source, protected_map)
+    target, _protected_map = mask_prompt_protected_spans(entry.target, protected_map)
+    return f"{source} → {target} ({category}, {confidence})"
 
 
 def _dedupe_source_forms(entries: list[GlossaryEntry]) -> list[str]:
     forms: list[str] = []
     for entry in entries:
+        if _entry_contains_protected_span(entry):
+            continue
         forms.extend(entry.all_source_forms)
-    return list(dict.fromkeys(forms))
+    return list(dict.fromkeys(mask_prompt_protected_spans(form)[0] for form in forms))
+
+
+def _entry_contains_protected_span(entry: GlossaryEntry) -> bool:
+    return any(
+        contains_prompt_protected_span(text)
+        for text in [
+            entry.source,
+            entry.target,
+            *entry.source_aliases,
+            *entry.target_aliases,
+        ]
+    )
 
 
 __all__ = ["GlossaryComposer", "GlossarySubset"]

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import ClassVar, Protocol
 
 from bgs_translator.parsers.encoding import DEFAULT_ENCODING_CHAINS, decode_with_chain
-from bgs_translator.parsers.strings_io import StringsFile, find_strings_files, read_strings_file
+from bgs_translator.parsers.strings_io import StringsFile, find_strings_sources, read_strings_source
 from bgs_translator.parsers.tes3 import TES3Subrecord, TES3Walker
 from bgs_translator.parsers.tes4_family import Record, Subrecord, TES4FamilyWalker, TranslationUnit
 
@@ -72,7 +72,7 @@ def extract_translation_units(
 
     active_schema = schema or UNIVERSAL_FALLBACK_SCHEMA
     encoding_chain = DEFAULT_ENCODING_CHAINS.get(game, ["utf-8", "cp1252"])
-    strings_files = _load_strings_files(plugin_path, encoding_chain)
+    strings_files = _load_strings_files(plugin_path, encoding_chain, game=game)
     walker = TES4FamilyWalker(
         plugin_path,
         encoding_chain=encoding_chain,
@@ -155,10 +155,15 @@ def extract_tes3_translation_units(
                 )
 
 
-def _load_strings_files(plugin_path: Path, encoding_chain: list[str]) -> dict[str, StringsFile]:
+def _load_strings_files(
+    plugin_path: Path,
+    encoding_chain: list[str],
+    *,
+    game: str | None = None,
+) -> dict[str, StringsFile]:
     loaded: dict[str, StringsFile] = {}
-    for list_kind, path in find_strings_files(plugin_path).items():
-        loaded[list_kind] = read_strings_file(path, encoding_chain)
+    for list_kind, source in find_strings_sources(plugin_path, game=game).items():
+        loaded[list_kind] = read_strings_source(source, encoding_chain)
     return loaded
 
 

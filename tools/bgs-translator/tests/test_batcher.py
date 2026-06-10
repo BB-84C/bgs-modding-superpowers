@@ -30,6 +30,15 @@ class FakeReader:
             entries.append(entry("place.whiterun", "Whiterun", "白漫城", "place"))
         if any("SKSE" in source for source in source_strings):
             entries.append(entry("brand.skse", "SKSE", "SKSE", "brand", scope="do_not_translate"))
+        if any("Deliver" in source for source in source_strings):
+            entries.append(
+                entry(
+                    "quest.deliver.alias",
+                    "Deliver <Alias=PrimaryRef> to <Alias=TargetLocation>",
+                    "将<Alias=PrimaryRef>送至<Alias=TargetLocation>",
+                    "lore_term",
+                )
+            )
         return entries
 
     def query_user_scope_entries(
@@ -123,6 +132,23 @@ def test_batch_size_defaults_are_enforced() -> None:
     assert sorted(len(batch.items) for batch in batch_plan.batches) == [1, 40]
 
 
+def test_forced_input_order_batches_honor_custom_batch_size() -> None:
+    batch_plan = plan(
+        [unit(f"Quest objective {i}", "QUST", "FULL") for i in range(500)],
+        batch_size=100,
+        force_input_order_batches=True,
+    )
+    assert [len(batch.items) for batch in batch_plan.batches] == [100, 100, 100, 100, 100]
+
+    one_per_batch = plan(
+        [unit(f"Quest objective {i}", "QUST", "FULL") for i in range(500)],
+        batch_size=1,
+        force_input_order_batches=True,
+    )
+    assert len(one_per_batch.batches) == 500
+    assert all(len(batch.items) == 1 for batch in one_per_batch.batches)
+
+
 def test_parent_context_groups_info_in_same_dialogue() -> None:
     batch_plan = plan(
         [
@@ -138,16 +164,24 @@ def test_parent_context_groups_info_in_same_dialogue() -> None:
     assert {frozenset(ids) for ids in grouped_parent_ids} == {frozenset({0x123}), frozenset({0x456})}
 
 
-def test_glossary_hash_differs_between_different_subsets() -> None:
+def test_batch_level_glossary_combines_terms_for_same_chunk() -> None:
     batch_plan = plan([unit("Travel to Whiterun"), unit("Requires SKSE")])
-    subset_ids = [
-        {entry.record_id for entry in batch.glossary_subset}
-        for batch in batch_plan.batches
-    ]
-    assert {frozenset(ids) for ids in subset_ids} == {
-        frozenset({"place.whiterun"}),
-        frozenset({"brand.skse"}),
+    assert len(batch_plan.batches) == 1
+    assert {entry.record_id for entry in batch_plan.batches[0].glossary_subset} == {
+        "place.whiterun",
+        "brand.skse",
     }
+
+
+def test_each_chunk_has_its_own_system_prompt_glossary() -> None:
+    batch_plan = plan([unit("Travel to Whiterun"), unit("Requires SKSE")], batch_size=1)
+    prompts = [batch.system_prompt or "" for batch in batch_plan.batches]
+
+    assert len(prompts) == 2
+    assert "Whiterun → 白漫城" in prompts[0]
+    assert "\nSKSE\n" not in prompts[0]
+    assert "Whiterun → 白漫城" not in prompts[1]
+    assert "\nSKSE\n" in prompts[1]
 
 
 def test_token_estimates_and_sample_prompt_are_populated() -> None:
@@ -155,3 +189,19 @@ def test_token_estimates_and_sample_prompt_are_populated() -> None:
     assert batch_plan.est_input_tokens > 0
     assert batch_plan.est_output_tokens > 0
     assert batch_plan.sample_system_prompt.strip()
+
+
+def test_system_prompt_masks_protected_spans_in_context_and_glossary() -> None:
+    batch_plan = plan(
+        [unit("Deliver <Alias=PrimaryRef> to <Alias=TargetLocation>", "QUST", "NNAM")],
+        game_context_lore_summary="Keep <Alias=TargetLocation> protected.",
+        mod_context_theme="Uses <Alias=PrimaryRef> and <Global=MissionBoardPassenger01Amount> dynamically.",
+        style_directives="Never expose <Alias=TargetLocation> or <Global=MissionBoardPassenger01Amount> in prompts.",
+    )
+    prompt = batch_plan.batches[0].system_prompt or ""
+
+    assert "<Alias=" not in prompt
+    assert "<Global=" not in prompt
+    assert "Deliver {{P0}} to {{P1}} → 将{{P0}}送至{{P1}}" not in prompt
+    assert "Deliver  to" not in prompt
+    assert "Never expose {{P0}} or {{P1}} in prompts." in prompt

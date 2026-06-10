@@ -218,17 +218,17 @@ Format per resolved item: original Q text preserved verbatim. **Decision** and *
 
 ## OQ-15: Glossary entry confidence-weighted prompt ranking
 
-**Current default**: top 50 glossary entries by score (occurrence × scope priority × confidence) included in prompt.
+**Current default**: top 500 glossary entries by score (occurrence × scope priority × confidence) included in prompt.
 
-**Open**: 50 may be too aggressive or too conservative. Tune based on observed prompt rendering.
+**Open**: 500 may be too aggressive or too conservative. Tune based on observed prompt rendering.
 
 **When to decide**: after batch runs surface "glossary too crowded" or "important term missing" issues.
 
 **Decision criteria**: prompt rendering observed during real batch runs.
 
-**Decision (2026-06-06): ongoing tuning post-v1.0. Ship with current ceiling. Expose `glossary_max_entries` knob in `project.toml` for per-project override.**
+**Decision (2026-06-09): user explicitly raised the default ceiling to 500 for large Starfield batches. Keep ongoing tuning post-v1.0 and expose `glossary_max_entries` knob in `project.toml` for per-project override.**
 
-**Reasoning**: 50 is a defensible starting point but unverifiable without data. The right shape is: ship the cap, expose it as a TOML override so users can experiment per-project, and refine the default after empirical data. Adding the TOML knob is a tiny code change that makes future tuning possible without requiring a release. (This is a small scope addition to the PRD's persistence layout — adding `[translation] glossary_max_entries` to `project.toml`. Approved per orchestrator discretion as minor.)
+**Reasoning**: 50 was too low for the active 500/351-entry Starfield stress tests. The right shape remains: ship the cap, expose it as a TOML override so users can experiment per-project, and refine the default after empirical data. Adding the TOML knob is a tiny code change that makes future tuning possible without requiring a release. (This is a small scope addition to the PRD's persistence layout — adding `[translation] glossary_max_entries` to `project.toml`. Approved per orchestrator discretion as minor.)
 
 ---
 

@@ -33,6 +33,9 @@ class BehaviorSettings(BaseModel):
     sst_version: Literal["SSU9", "SSU8", "SSU7", "SSU6", "SSU5", "SSU4", "SSU3", "SSU2"] = "SSU9"
     skip_kb_migration: bool = False
     prompt_preview_required: bool = False
+    glossary_max_terms: int = Field(default=500, ge=1, le=2000)
+    glossary_max_prompt_chars: int = Field(default=80000, ge=1000, le=500000)
+    glossary_candidate_source_terms: int = Field(default=32, ge=1, le=5000)
 
 
 class Settings(BaseModel):
@@ -78,6 +81,9 @@ _KEY_ALIASES = {
     "sst_version": "behavior.sst_version",
     "skip_kb_migration": "behavior.skip_kb_migration",
     "prompt_preview_required": "behavior.prompt_preview_required",
+    "glossary_max_terms": "behavior.glossary_max_terms",
+    "glossary_max_prompt_chars": "behavior.glossary_max_prompt_chars",
+    "glossary_candidate_source_terms": "behavior.glossary_candidate_source_terms",
 }
 
 

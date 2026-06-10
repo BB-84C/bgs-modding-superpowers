@@ -38,7 +38,7 @@ MASK_PATTERNS: list[tuple[str, str, bool, str | None]] = [
     ("format_brace_named", r"\{[A-Za-z_][A-Za-z0-9_]*\}", True, None),
     ("format_brace_indexed", r"\{\d+\}", True, None),
     ("alias_substitution", r"<Alias[.\w]*=[\w]+>", False, None),
-    ("global_substitution", r"<(Global|spell|GameSetting)\.[\w]+>", False, None),
+    ("global_substitution", r"<(Global|spell|GameSetting)(?:[.=])[\w]+>", False, None),
     ("tag_open_font", r"<font[^>]*>", True, "tag_close_font"),
     ("tag_close_font", r"</font>", True, "tag_open_font"),
     ("newline_structural", r"\r?\n", False, None),
@@ -47,6 +47,11 @@ MASK_PATTERNS: list[tuple[str, str, bool, str | None]] = [
 _COMPILED_MASK_PATTERNS = [
     (kind, re.compile(pattern), position_locked, paired_with)
     for kind, pattern, position_locked, paired_with in MASK_PATTERNS
+]
+_COMPILED_PROMPT_MASK_PATTERNS = [
+    (kind, re.compile(pattern))
+    for kind, pattern, _position_locked, _paired_with in MASK_PATTERNS
+    if kind != "newline_structural"
 ]
 _PLACEHOLDER_RE = re.compile(r"\{\{P\d+\}\}")
 _MCM_PREFIX_RE = re.compile(r"^(\$[A-Za-z_]\w*)(\s+)?")
@@ -84,6 +89,57 @@ def mask_source(source: str) -> tuple[str, dict[str, MaskToken], str | None]:
             pieces.append(text[pos])
             pos += 1
     return "".join(pieces), mask_map, mcm_prefix
+
+
+def mask_prompt_protected_spans(
+    text: str,
+    existing: dict[str, str] | None = None,
+) -> tuple[str, dict[str, str]]:
+    """Replace protected prompt examples with generic placeholders.
+
+    System prompts should teach the model about ``{{P0}}`` placeholders, not
+    leak raw BGS substitution syntax such as ``<Alias=TargetLocation>``.
+    """
+
+    protected_map = existing if existing is not None else {}
+    pieces: list[str] = []
+    pos = 0
+    next_index = len(protected_map)
+    while pos < len(text):
+        matched = False
+        for _kind, regex in _COMPILED_PROMPT_MASK_PATTERNS:
+            match = regex.match(text, pos)
+            if match is None:
+                continue
+            original = match.group(0)
+            placeholder = protected_map.get(original)
+            if placeholder is None:
+                placeholder = f"{{{{P{next_index}}}}}"
+                protected_map[original] = placeholder
+                next_index += 1
+            pieces.append(placeholder)
+            pos = match.end()
+            matched = True
+            break
+        if not matched:
+            pieces.append(text[pos])
+            pos += 1
+    return "".join(pieces), protected_map
+
+
+def contains_prompt_protected_span(text: str) -> bool:
+    """Return whether ``text`` includes a protected span unsafe for prompt terms."""
+
+    return any(regex.search(text) is not None for _kind, regex in _COMPILED_PROMPT_MASK_PATTERNS)
+
+
+def strip_prompt_protected_spans(text: str) -> str:
+    """Remove protected spans before glossary/RAG matching."""
+
+    result = text
+    for _kind, regex in _COMPILED_PROMPT_MASK_PATTERNS:
+        result = regex.sub(" ", result)
+    return " ".join(result.split())
 
 
 def apply_skip_heuristics(source: str) -> str | None:
@@ -182,6 +238,9 @@ __all__ = [
     "MaskedUnit",
     "apply_skip_heuristics",
     "build_masked_unit",
+    "contains_prompt_protected_span",
+    "mask_prompt_protected_spans",
     "mask_source",
+    "strip_prompt_protected_spans",
     "unmask_dest",
 ]

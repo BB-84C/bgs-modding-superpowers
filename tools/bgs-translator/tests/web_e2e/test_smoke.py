@@ -8,6 +8,7 @@ import struct
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from test_strings_io import _strings_bytes, write_ba2_gnrl
 
 
 def test_healthz_returns_ok(tmp_path: Path, monkeypatch) -> None:
@@ -42,6 +43,11 @@ def _minimal_tes4_plugin(*, localized: bool = False) -> bytes:
     flags = 0x80 if localized else 0
     child = _tes4_record(b"WEAP", _tes4_subrecord(b"FULL", b"Test Sword\x00"), fv=552)
     return _tes4_header(flags=flags, fv=552) + _tes4_grup(child)
+
+
+def _localized_tes4_plugin_with_full_strid(strid: int) -> bytes:
+    child = _tes4_record(b"WEAP", _tes4_subrecord(b"FULL", struct.pack("<I", strid)), fv=552)
+    return _tes4_header(flags=0x80, fv=552) + _tes4_grup(child)
 
 
 def test_projects_api_requires_auth_and_accepts_bearer(tmp_path: Path, monkeypatch) -> None:
@@ -278,27 +284,103 @@ def test_batch_queue_api_writes_cli_handoff_request(tmp_path: Path, monkeypatch)
         json={"project_name": "demo-import", "plugin_path": str(plugin)},
     )
     assert created.status_code == 200, created.text
+    from bgs_translator.core.memory import insert_units
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+
     conn = sqlite3.connect(paths.project_root("demo-import") / "memory" / "memory.sqlite")
-    row_id = str(conn.execute("SELECT row_id FROM units LIMIT 1").fetchone()[0])
+    insert_units(
+        conn,
+        [TranslationUnit("Demo.esm", 99, 99, "AliasOnly", "QUST", "QMDP", source="<Alias=TargetLocation>")],
+    )
+    row_ids = [str(row[0]) for row in conn.execute("SELECT row_id FROM units ORDER BY rowid LIMIT 2").fetchall()]
     conn.close()
 
     response = client.post(
         "/api/projects/demo-import/batch-queue",
         headers=headers,
-        json={"row_ids": [row_id]},
+        json={"row_ids": row_ids, "batch_size": 1},
     )
 
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["queued_count"] == 1
+    assert data["llm_skipped_count"] == 1
+    assert data["llm_skipped_reasons"] == {"all_protected": 1}
     assert "--queue" in data["command"]
     queue_path = Path(data["queue_path"])
     assert queue_path.is_file()
     queue = json.loads(queue_path.read_text(encoding="utf-8"))
-    assert queue["row_ids"] == [row_id]
+    assert queue["row_ids"] == row_ids[:1]
+    assert queue["batch_size"] == 1
+    assert queue["llm_skipped_count"] == 1
     assert queue["profile"] == "OpenRouter-Test"
     assert "CLI" not in data["message"]
     assert data["command"].startswith("xtl batch plan")
+    assert "--batch-size 1" in data["command"]
+    assert data["batch_size"] == 1
+    assert data["group_count"] == 1
+    assert data["last_group_size"] == 1
+
+    hidden = client.get("/api/projects/demo-import/entries?sig=QUST", headers=headers)
+    assert hidden.status_code == 200
+    assert hidden.json() == []
+
+
+def test_batch_queue_api_reports_actual_group_size_when_under_cap(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.config.profiles import ProfilesConfig, ProviderProfile, save_profiles
+    from bgs_translator.web.app import fastapi_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    plugin = tmp_path / "Demo.esm"
+    plugin.write_bytes(_minimal_tes4_plugin())
+    save_profiles(
+        ProfilesConfig(
+            active="OpenRouter-Test",
+            profiles={
+                "OpenRouter-Test": ProviderProfile(
+                    name="OpenRouter-Test",
+                    sdk_kind="openai-compat",
+                    base_url="https://openrouter.ai/api/v1",
+                    model="anthropic/claude-opus-4.6",
+                    api_key_env="OPENROUTER_API_KEY",
+                    json_mode="json_object",
+                )
+            },
+        )
+    )
+    client = TestClient(fastapi_app)
+    headers = {"Authorization": f"Bearer {ensure_shared_secret()}"}
+    created = client.post(
+        "/api/projects/import",
+        headers=headers,
+        json={"project_name": "demo-import", "plugin_path": str(plugin)},
+    )
+    assert created.status_code == 200, created.text
+    from bgs_translator.core.memory import insert_units
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+
+    conn = sqlite3.connect(paths.project_root("demo-import") / "memory" / "memory.sqlite")
+    insert_units(
+        conn,
+        [TranslationUnit("Demo.esm", 100, 100, "Second", "QUST", "FULL", source="Second objective")],
+    )
+    row_ids = [str(row[0]) for row in conn.execute("SELECT row_id FROM units ORDER BY rowid LIMIT 2").fetchall()]
+    conn.close()
+
+    response = client.post(
+        "/api/projects/demo-import/batch-queue",
+        headers=headers,
+        json={"row_ids": row_ids, "batch_size": 500},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["queued_count"] == 2
+    assert data["batch_size"] == 500
+    assert data["group_count"] == 1
+    assert data["last_group_size"] == 2
 
 
 def test_project_import_api_rejects_duplicate_project(tmp_path: Path, monkeypatch) -> None:
@@ -348,6 +430,117 @@ def test_project_import_api_reports_localized_plugin_missing_strings(
     assert not (tmp_path / "translator" / "projects" / "localized-import").exists()
 
 
+def test_project_import_api_reads_localized_plugin_strings_from_ba2(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config import paths
+    from bgs_translator.web.app import fastapi_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    plugin = tmp_path / "Localized.esm"
+    plugin.write_bytes(_localized_tes4_plugin_with_full_strid(1001))
+    ba2 = tmp_path / "Localized - main.ba2"
+    write_ba2_gnrl(
+        ba2,
+        {
+            "strings/Localized_english.strings": _strings_bytes({1001: b"Archive Sword"}),
+        },
+    )
+
+    client = TestClient(fastapi_app)
+    response = client.post(
+        "/api/projects/import",
+        headers={"Authorization": f"Bearer {ensure_shared_secret()}"},
+        json={"project_name": "localized-import", "plugin_path": str(plugin)},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["strings"]["archives"] == {"STRINGS": str(ba2)}
+    assert data["units_extracted"] == 1
+    conn = sqlite3.connect(paths.project_root("localized-import") / "memory" / "memory.sqlite")
+    try:
+        row = conn.execute("SELECT source FROM units").fetchone()
+    finally:
+        conn.close()
+    assert row == ("Archive Sword",)
+
+
+def test_project_import_page_can_pick_plugin_with_windows_dialog(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.web import app as web_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    plugin = tmp_path / "mods" / "Picked.esm"
+    plugin.parent.mkdir(parents=True)
+    plugin.write_bytes(_minimal_tes4_plugin())
+    monkeypatch.setattr(
+        web_app,
+        "_select_plugin_file",
+        lambda current_path="": {"path": str(plugin), "canceled": False},
+    )
+
+    html = web_app._project_import_panel_html()
+    assert 'data-marker="btn-import-browse-plugin"' in html
+    assert "浏览文件" in html
+
+    client = TestClient(web_app.fastapi_app)
+    selected = client.post(
+        "/api/projects/select-plugin-file",
+        headers={"Authorization": f"Bearer {ensure_shared_secret()}"},
+        json={"current_path": ""},
+    )
+
+    assert selected.status_code == 200, selected.text
+    assert selected.json() == {"path": str(plugin), "canceled": False}
+
+
+def test_entries_quick_translate_uses_in_page_confirmation(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.web import app as web_app
+
+    html = web_app._entries_html(None) + web_app._entries_script(None)
+
+    assert 'data-marker="dialog-entry-quick-confirm"' in html
+    assert 'data-marker="btn-entry-quick-confirm"' in html
+    assert "将使用当前 AI 账号快速翻译 1 条文本" in html
+    assert "window.confirm('将使用当前 AI 账号快速翻译" not in html
+
+
+def test_translation_budget_settings_api_persists_values(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
+    from bgs_translator.config.settings import load_settings
+    from bgs_translator.web.app import fastapi_app
+    from bgs_translator.web.security import ensure_shared_secret
+
+    client = TestClient(fastapi_app)
+    headers = {"Authorization": f"Bearer {ensure_shared_secret()}"}
+
+    response = client.post(
+        "/api/settings/behavior/translation-budgets",
+        headers=headers,
+        json={
+            "glossary_max_terms": 777,
+            "glossary_max_prompt_chars": 123456,
+            "glossary_candidate_source_terms": 1000,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "glossary_max_terms": 777,
+        "glossary_max_prompt_chars": 123456,
+        "glossary_candidate_source_terms": 1000,
+    }
+    settings = load_settings()
+    assert settings.behavior.glossary_max_terms == 777
+    assert settings.behavior.glossary_max_prompt_chars == 123456
+    assert settings.behavior.glossary_candidate_source_terms == 1000
+
+
 def test_pending_previews_api_returns_unresolved_requests(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("BGS_MODDING_SUPERPOWERS_HOME", str(tmp_path))
     from bgs_translator.web import app as web_app
@@ -382,6 +575,9 @@ def test_pending_previews_api_returns_unresolved_requests(tmp_path: Path, monkey
             "glossary_subset": [{"source": "Starfield", "target": "星空"}],
             "glossary_evidence": [],
             "do_not_translate": ["RYOS"],
+            "batch_index": None,
+            "total_batches": None,
+            "total_items": None,
             "timeout_seconds": 300.0,
         }
     ]

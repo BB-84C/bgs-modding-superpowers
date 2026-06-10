@@ -45,6 +45,7 @@ from bgs_translator.config.profiles import (
 )
 from bgs_translator.config.settings import load_settings, update_setting
 from bgs_translator.core.memory import (
+    discard_run_translations,
     fetch_events_for_run,
     get_unit_by_row_id,
     insert_units,
@@ -60,8 +61,9 @@ from bgs_translator.kb.reader import KBGlossaryReader
 from bgs_translator.parsers.extractor import extract_translation_units
 from bgs_translator.parsers.form_versions import detect_game_from_header
 from bgs_translator.parsers.schemas import get_schema_for_game
-from bgs_translator.parsers.strings_io import find_strings_files
+from bgs_translator.parsers.strings_io import find_strings_sources
 from bgs_translator.parsers.tes4_family import TES4FamilyWalker, TES4Header
+from bgs_translator.sst.status import SStrParam
 from bgs_translator.web.events import broadcast_ws, connect_ws
 from bgs_translator.web.security import (
     ensure_shared_secret,
@@ -113,7 +115,14 @@ def page_script_asset(active: str = Query(...), project: str | None = Query(None
 
     if active not in set(_PAGE_ROUTES.values()):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown page script")
-    return Response(_document_script(active, _selected_project_name(project)), media_type="application/javascript")
+    return Response(
+        _document_script(active, _selected_project_name(project)),
+        media_type="application/javascript",
+        headers={
+            "Cache-Control": "no-store, no-cache, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 class PreviewRequest(BaseModel):
@@ -127,6 +136,9 @@ class PreviewRequest(BaseModel):
     glossary_subset: list[dict[str, Any]] = []
     glossary_evidence: list[dict[str, Any]] = []
     do_not_translate: list[str] = []
+    batch_index: int | None = None
+    total_batches: int | None = None
+    total_items: int | None = None
     timeout_seconds: float = 300.0
 
 
@@ -167,6 +179,23 @@ class EntryBatchQueueRequest(BaseModel):
     """Selected entry ids to hand off to CLI batch planning."""
 
     row_ids: list[str]
+    batch_size: int | None = None
+
+
+class EntryBulkStatusRequest(BaseModel):
+    """Selected entry ids to mark with one XTL/xTranslator status."""
+
+    row_ids: list[str]
+    status: str
+    reason: str = "Web Entries tab bulk status update"
+
+
+class TranslationBudgetSave(BaseModel):
+    """Advanced translation-planning budget settings."""
+
+    glossary_max_terms: int
+    glossary_max_prompt_chars: int
+    glossary_candidate_source_terms: int
 
 
 class ProfileSave(BaseModel):
@@ -224,6 +253,12 @@ class ProjectImportRequest(BaseModel):
     game: str | None = None
     source_lang: str = "en"
     target_lang: str = "zh-cn"
+
+
+class ProjectPluginFilePickRequest(BaseModel):
+    """Open a native file picker for a local ESP/ESM/ESL plugin."""
+
+    current_path: str = ""
 
 
 class LanguageSave(BaseModel):
@@ -309,6 +344,21 @@ def pending_previews(_auth: None = Depends(require_shared_secret)) -> list[dict[
     return [request.model_dump() for request, _future in _PENDING_PREVIEWS.values()]
 
 
+@fastapi_app.post("/api/projects/{project}/plans/{plan_id}/run")
+def api_start_plan_run(
+    project: str,
+    plan_id: str,
+    _auth: None = Depends(require_shared_secret),
+) -> dict[str, Any]:
+    """Historical plans are audit-only; they are not restartable from the GUI."""
+
+    del project, plan_id
+    raise HTTPException(
+        status.HTTP_410_GONE,
+        "历史任务只用于审计，不能从这里恢复或重新启动。请从条目页重新选择文本并提交新的批量翻译队列。",
+    )
+
+
 @fastapi_app.post("/internal/events")
 async def push_event(
     event: EventPush,
@@ -337,6 +387,16 @@ def api_project_import(
     return _import_project_from_plugin(payload)
 
 
+@fastapi_app.post("/api/projects/select-plugin-file")
+def api_project_select_plugin_file(
+    payload: ProjectPluginFilePickRequest,
+    _auth: None = Depends(require_shared_secret),
+) -> dict[str, Any]:
+    """Open the Windows file picker and return a local plugin path."""
+
+    return _select_plugin_file(payload.current_path)
+
+
 @fastapi_app.get("/api/projects/{project}")
 def api_project(project: str, _auth: None = Depends(require_shared_secret)) -> dict[str, Any]:
     """Return one project summary."""
@@ -346,11 +406,29 @@ def api_project(project: str, _auth: None = Depends(require_shared_secret)) -> d
 
 @fastapi_app.post("/api/projects/{project}/reload")
 def api_project_reload(project: str, _auth: None = Depends(require_shared_secret)) -> dict[str, Any]:
-    """Re-read project metadata, source-plugin status, and sqlite-derived counts."""
+    """Re-read project metadata, source-plugin status, parser cache, and sqlite-derived counts."""
 
     project_root = paths.project_root(project)
     if not (project_root / "project.toml").exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"project not found: {project}")
+    data = _project_toml_data(project_root)
+    project_data = data.get("project") if isinstance(data.get("project"), dict) else {}
+    plugin_path = Path(str(project_data.get("source_plugin_path") or ""))
+    game = str(project_data.get("game") or "")
+    inserted = 0
+    if plugin_path.is_file() and game:
+        try:
+            schema = get_schema_for_game(game)
+            units = list(extract_translation_units(plugin_path, game, schema=schema))
+            plugin_sha = _sha256(plugin_path)
+            _write_cache(project_root, plugin_path, units, plugin_sha, schema)
+            conn = open_memory_db(project_root)
+            try:
+                inserted = insert_units(conn, units)
+            finally:
+                conn.close()
+        except KeyError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"暂不支持这个游戏：{game}") from exc
     summary = _project_summary(project)
     source = _project_source_details(project, verify_sha=True)
     return {
@@ -358,7 +436,8 @@ def api_project_reload(project: str, _auth: None = Depends(require_shared_secret
         "project": project,
         "summary": summary,
         "source": source,
-        "message": "已重新读取项目配置、源插件状态和本项目条目统计；不会修改原始 MOD 文件。",
+        "inserted_units": inserted,
+        "message": f"已重新解析源插件并补入 {inserted} 条新文本；不会修改原始 MOD 文件。",
     }
 
 
@@ -383,6 +462,17 @@ def api_project_entries(
         entry_status=None if _all_filter(entry_status) else entry_status,
         search=search,
     )
+
+
+@fastapi_app.post("/api/projects/{project}/entries/bulk-status")
+def api_bulk_update_project_entries_status(
+    project: str,
+    payload: EntryBulkStatusRequest,
+    _auth: None = Depends(require_shared_secret),
+) -> dict[str, Any]:
+    """Persist a manual status update for selected entries."""
+
+    return _bulk_update_entries_status(project, payload.row_ids, payload.status, reason=payload.reason)
 
 
 @fastapi_app.get("/api/projects/{project}/entries/{row_id}")
@@ -463,7 +553,7 @@ def api_create_project_batch_queue(
 ) -> dict[str, Any]:
     """Create a GUI-selected batch queue request for later CLI planning."""
 
-    return _create_batch_queue(project, payload.row_ids)
+    return _create_batch_queue(project, payload.row_ids, batch_size=payload.batch_size)
 
 
 @fastapi_app.get("/api/projects/{project}/close-summary")
@@ -586,6 +676,33 @@ def api_cancel_project_run(
     marker = run_dir / "cancel.requested"
     marker.write_text("cancel requested\n", encoding="utf-8")
     return {"ok": True, "run_id": run_id, "cancel_requested": True}
+
+
+@fastapi_app.post("/api/projects/{project}/runs/{run_id}/discard-translations")
+def api_discard_run_translations(
+    project: str,
+    run_id: str,
+    _auth: None = Depends(require_shared_secret),
+) -> dict[str, Any]:
+    """Discard translations written by one historical run."""
+
+    conn = _open_project_db(project)
+    try:
+        run = conn.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        if run is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"run not found: {run_id}")
+        status_value = str(run[0] or "")
+        if status_value in {"running", "queued"} or any(payload.run_id == run_id for payload in _pending_previews(project)):
+            raise HTTPException(status.HTTP_409_CONFLICT, "这个任务还在运行或等待确认，请先停止任务。")
+        discarded_count = discard_run_translations(conn, run_id)
+    finally:
+        conn.close()
+    return {
+        "ok": True,
+        "run_id": run_id,
+        "discarded_count": discarded_count,
+        "message": f"已抛弃这次运行写入的 {discarded_count} 条译文。",
+    }
 
 
 @fastapi_app.get("/api/projects/{project}/runs/{run_id}/logs")
@@ -816,6 +933,32 @@ def api_preview_required(value: bool, _auth: None = Depends(require_shared_secre
     return {"prompt_preview_required": settings.behavior.prompt_preview_required}
 
 
+@fastapi_app.post("/api/settings/behavior/translation-budgets")
+def api_translation_budgets(
+    payload: TranslationBudgetSave,
+    _auth: None = Depends(require_shared_secret),
+) -> dict[str, int]:
+    """Persist advanced translation-planning budget settings."""
+
+    try:
+        settings = update_setting("behavior.glossary_max_terms", payload.glossary_max_terms)
+        settings = update_setting(
+            "behavior.glossary_max_prompt_chars",
+            payload.glossary_max_prompt_chars,
+        )
+        settings = update_setting(
+            "behavior.glossary_candidate_source_terms",
+            payload.glossary_candidate_source_terms,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {
+        "glossary_max_terms": settings.behavior.glossary_max_terms,
+        "glossary_max_prompt_chars": settings.behavior.glossary_max_prompt_chars,
+        "glossary_candidate_source_terms": settings.behavior.glossary_candidate_source_terms,
+    }
+
+
 @fastapi_app.post("/api/theme")
 def api_theme(payload: ThemeSave, _auth: None = Depends(require_shared_secret)) -> dict[str, str]:
     """Persist theme selection."""
@@ -950,14 +1093,13 @@ def _document_html(active: str, project: str | None = None) -> str:
     query = {"active": active}
     if project:
         query["project"] = project
+    query["v"] = str(Path(__file__).stat().st_mtime_ns)
     script_query = html.escape(urlencode(query), quote=True)
-    refresh = '<meta http-equiv="refresh" content="2">' if active == "batches" else ""
     return f"""<!doctype html>
 <html lang="{html.escape(settings.ui.language, quote=True)}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  {refresh}
   <title>{_APP_TITLE}</title>
   <style>{css}</style>
 </head>
@@ -1023,7 +1165,6 @@ def _shell_html(active: str, project: str | None = None) -> str:
     labels = _ui_labels(settings.ui.language)
     project = _selected_project_name(project)
     profile = _active_profile_label()
-    cost = _project_summary(project)["cost_spent"] if project else 0.0
     status_text, status_tone = _top_status(project)
     status_kind = "orphaned" if "历史任务未正常收尾" in status_text else status_tone
     theme_options = "".join(
@@ -1054,8 +1195,6 @@ def _shell_html(active: str, project: str | None = None) -> str:
       <span>项目: <b>{_esc(project or "未选择")}</b></span>
       <span class="xtl-status-separator">|</span>
       <span>AI: <b>{_esc(profile)}</b></span>
-      <span class="xtl-status-separator">|</span>
-      <span>本项目累计费用: <b>约 ${cost:.2f}</b></span>
       <span class="xtl-status-separator">|</span>
       <label class="xtl-status-control"><span>{labels["language"]}:</span><select class="xtl-status-select" data-marker="select-language" id="xtl-language-select">{language_options}</select></label>
       <span class="xtl-status-separator">|</span>
@@ -1180,6 +1319,7 @@ def _project_html(project: str | None) -> str:
           <div class="xtl-empty">还没有项目。可以在左侧导入 ESP/ESM/ESL 来创建翻译项目。</div>
         </div>
         """
+    settings = load_settings()
     summary = _project_summary(project)
     source = summary["source"]
     plugins = source["memory_plugins"] or []
@@ -1189,6 +1329,7 @@ def _project_html(project: str | None) -> str:
         source_status += "，指纹匹配"
     elif source["sha_status"] == "mismatch":
         source_status += "，指纹与建项时不同"
+    signature_stats = _project_signature_stats_html(summary["signature_status"])
     return f"""
     <div class="xtl-workbench">
       <div class="xtl-panel" data-marker="panel-project-detail">
@@ -1199,6 +1340,7 @@ def _project_html(project: str | None) -> str:
             <div class="xtl-metric"><div class="xtl-metric-label">游戏</div><div class="xtl-metric-value">{_esc(summary["game"])}</div></div>
             <div class="xtl-metric"><div class="xtl-metric-label">文本</div><div class="xtl-metric-value">{summary["units_total"]}</div></div>
             <div class="xtl-metric"><div class="xtl-metric-label">已译</div><div class="xtl-metric-value">{summary["units_translated"]}</div></div>
+            <div class="xtl-metric"><div class="xtl-metric-label">需 AI</div><div class="xtl-metric-value">{summary["units_pending_ai"]}</div></div>
           </div>
           <table class="xtl-table">
             <tr><th>项目名</th><td>{_esc(project)}</td></tr>
@@ -1210,11 +1352,18 @@ def _project_html(project: str | None) -> str:
             <tr><th>已加载条目来自</th><td>{_esc(memory_plugins)}</td></tr>
             <tr><th>文本总数</th><td>{summary["units_total"]}</td></tr>
             <tr><th>已翻译</th><td>{summary["units_translated"]}</td></tr>
+            <tr><th>需 AI 翻译</th><td>{summary["units_pending_ai"]}</td></tr>
             <tr><th>语言方向</th><td>{_esc(source["source_lang"])} → {_esc(source["target_lang"])}</td></tr>
             <tr><th>解析版本</th><td>{_esc(source["parser_version"] or "未知")}</td></tr>
-            <tr><th>费用</th><td>${summary["cost_spent"]:.4f}</td></tr>
           </table>
           <p class="xtl-help">普通玩家主要看“源插件”和“已加载条目来自”：这里应该是你想汉化的 ESP/ESM/ESL 文件。技术条目会在“条目”页按可读文本展示。</p>
+        </div>
+      </div>
+      <div class="xtl-panel" data-marker="panel-project-signature-stats">
+        <div class="xtl-panel-title">Record Signature 统计</div>
+        <div class="xtl-panel-body">
+          <div class="xtl-help">这里按文本来源类型统计翻译进度。普通玩家不用理解内部缩写，只需要看哪类文本还剩多少“待翻译”或“需复查”。</div>
+          {signature_stats}
         </div>
       </div>
       <div class="xtl-stack">
@@ -1223,7 +1372,7 @@ def _project_html(project: str | None) -> str:
           <div class="xtl-panel-title">工作流</div>
           <div class="xtl-panel-body">
             <p>1. 到“提示词”检查 AI 会收到的说明。</p>
-            <p>2. 到“批次”观察翻译进度和费用。</p>
+            <p>2. 到“批次”观察翻译进度、模型请求状态和返回情况。</p>
             <p>3. 完成后导出给 xTranslator 使用的翻译文件，再完成最终打包。</p>
             <div class="xtl-toolbar" data-marker="panel-project-actions">
               <button class="xtl-btn" data-marker="btn-reload-project" id="xtl-project-reload">重新读取项目状态</button>
@@ -1235,11 +1384,27 @@ def _project_html(project: str | None) -> str:
             <p class="xtl-help">重新读取会检查 project.toml、源插件是否还在、文件指纹是否改变，以及本项目记忆库统计；不会重新导入新 ESP/ESM/ESL，也不会修改原始 MOD 文件。SST 是给 xTranslator 导入的翻译文件，不是 MOD 本体。</p>
           </div>
         </div>
+        <div class="xtl-panel" data-marker="panel-project-translation-budgets">
+          <div class="xtl-panel-title">高级预算设置</div>
+          <div class="xtl-panel-body">
+            <div class="xtl-section-label">高级设置（不懂可以不改）：提示词术语数量、术语字符预算、候选召回范围</div>
+            <div class="xtl-form-grid compact">
+              <label><span>术语最多条数</span><input class="xtl-input" id="xtl-budget-glossary-max-terms" data-marker="field-budget-glossary-max-terms" type="number" min="1" max="2000" step="1" value="{settings.behavior.glossary_max_terms}"></label>
+              <label><span>术语文本字符预算</span><input class="xtl-input" id="xtl-budget-glossary-max-prompt-chars" data-marker="field-budget-glossary-max-prompt-chars" type="number" min="1000" max="500000" step="1000" value="{settings.behavior.glossary_max_prompt_chars}"></label>
+              <label><span>候选召回关键词数</span><input class="xtl-input" id="xtl-budget-glossary-candidate-source-terms" data-marker="field-budget-glossary-candidate-source-terms" type="number" min="1" max="5000" step="1" value="{settings.behavior.glossary_candidate_source_terms}"></label>
+            </div>
+            <div class="xtl-toolbar" style="margin-top: 10px">
+              <button class="xtl-btn primary" data-marker="btn-save-translation-budgets" id="xtl-budget-save">保存高级预算</button>
+              <span class="xtl-help" data-marker="status-translation-budgets" id="xtl-budget-status">这些设置会影响下一次生成提示词；不会改写已经在运行或已经完成的批次。</span>
+            </div>
+            <p class="xtl-help">调高这些值会让 AI 收到更多术语，也会增加输入 token 和等待时间；真实费用请以你使用的 AI 服务商后台为准，本工具不再估算费用。</p>
+          </div>
+        </div>
         <div class="xtl-panel" data-marker="panel-close-guard">
           <div class="xtl-panel-title">关闭前检查</div>
           <div class="xtl-panel-body">
             <div class="xtl-help" id="xtl-close-summary">正在检查是否有运行中的批次或未导出的手工修改...</div>
-            <p class="xtl-help">检测到可能仍在运行的 AI 翻译任务时，关闭页面不一定能停止已发出的请求，也不一定会停止计费。请先到“进度”页点“请求停止”。</p>
+            <p class="xtl-help">检测到可能仍在运行的 AI 翻译任务时，关闭页面不一定能停止已发出的请求。请先到“进度”页点“请求停止”。</p>
           </div>
         </div>
         <div class="xtl-panel">
@@ -1260,7 +1425,7 @@ def _project_import_panel_html() -> str:
       <div class="xtl-panel-body">
         <div class="xtl-form-grid compact">
           <label><span>项目名</span><input class="xtl-input" id="xtl-import-project-name" data-marker="field-import-project-name" placeholder="例如 my-starfield-mod-zhcn"></label>
-          <label class="wide"><span>ESP/ESM/ESL 文件路径</span><input class="xtl-input" id="xtl-import-plugin-path" data-marker="field-import-plugin-path" placeholder="例如 D:\\Starfield MO2\\mods\\某个MOD\\mod.esm"></label>
+          <label class="wide"><span>ESP/ESM/ESL 文件</span><span class="xtl-path-picker"><input class="xtl-input" id="xtl-import-plugin-path" data-marker="field-import-plugin-path" placeholder="点击“浏览文件”选择 .esm/.esp/.esl"><button type="button" class="xtl-btn" id="xtl-import-browse-plugin" data-marker="btn-import-browse-plugin">浏览文件</button></span></label>
           <label><span>游戏</span><select class="xtl-select" id="xtl-import-game" data-marker="field-import-game"><option value="">自动检测</option><option value="Starfield">Starfield</option><option value="Fallout4">Fallout 4</option><option value="Fallout76">Fallout 76</option><option value="SkyrimSE">Skyrim SE/AE</option><option value="SkyrimLE">Skyrim LE</option><option value="FalloutNV">Fallout New Vegas</option><option value="Fallout3">Fallout 3</option></select></label>
           <label><span>目标语言</span><input class="xtl-input" id="xtl-import-target-lang" value="zh-cn"></label>
         </div>
@@ -1272,6 +1437,29 @@ def _project_import_panel_html() -> str:
       </div>
     </div>
     """
+
+
+def _project_signature_stats_html(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<div class="xtl-empty">这个项目还没有可统计的条目。</div>'
+    lines = []
+    for row in rows:
+        signature = str(row.get("signature") or "未知")
+        lines.append(
+            "<tr>"
+            f"<td><b>{_esc(signature)}</b><div class=\"xtl-help\">{_esc(_signature_label(signature))}</div></td>"
+            f"<td>{int(row.get('total') or 0)}</td>"
+            f"<td>{int(row.get('translated') or 0)}</td>"
+            f"<td>{int(row.get('pending_ai') or 0)}</td>"
+            f"<td>{int(row.get('partial') or 0)}</td>"
+            f"<td>{int(row.get('locked') or 0)}</td>"
+            "</tr>"
+        )
+    return (
+        '<table class="xtl-table xtl-signature-stat-table">'
+        "<thead><tr><th>类型</th><th>总数</th><th>已翻译</th><th>待翻译</th><th>需复查</th><th>锁定/不翻译</th></tr></thead>"
+        f"<tbody>{''.join(lines)}</tbody></table>"
+    )
 
 
 def _project_script(project: str | None) -> str:
@@ -1310,6 +1498,12 @@ def _project_script(project: str | None) -> str:
         const stem = fileName.replace(/\.(esp|esm|esl)$/i, '');
         return stem.toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 56);
       }
+      function setPluginPath(value) {
+        const input = byId('xtl-import-plugin-path');
+        if (input) input.value = value || '';
+        const name = byId('xtl-import-project-name');
+        if (name && !name.value.trim()) name.value = projectNameFromPath(value);
+      }
       function importErrorText(err) {
         const detail = err && err.data ? err.data.detail : null;
         if (detail && detail.code === 'ambiguous_game') {
@@ -1346,6 +1540,24 @@ def _project_script(project: str | None) -> str:
         } catch (err) {
           setImportStatus(importErrorText(err), 'danger');
           console.warn('project import failed', err);
+        }
+      }
+      async function browsePluginFile() {
+        setImportStatus('正在打开 Windows 文件选择器...');
+        try {
+          const result = await api('/api/projects/select-plugin-file', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({current_path: byId('xtl-import-plugin-path')?.value || ''}),
+          });
+          if (!result || result.canceled || !result.path) {
+            setImportStatus('已取消选择，没有导入文件。');
+            return;
+          }
+          setPluginPath(result.path);
+          setImportStatus('已选择 MOD 文件。确认项目名后点击“导入并创建项目”。', 'good');
+        } catch (err) {
+          setImportStatus(`无法打开文件选择器：${err.message || err}`, 'danger');
         }
       }
       function showReloadResultIfNeeded() {
@@ -1438,16 +1650,48 @@ def _project_script(project: str | None) -> str:
           setStatus(`重新读取失败：${err.message}`, 'danger');
         }
       }
+      function setBudgetStatus(text, tone = '') {
+        const el = byId('xtl-budget-status');
+        if (!el) return;
+        el.textContent = text;
+        el.className = `xtl-help ${tone}`;
+      }
+      function budgetNumber(id, fallback) {
+        const value = Number(byId(id)?.value || fallback);
+        return Number.isFinite(value) ? Math.round(value) : fallback;
+      }
+      async function saveTranslationBudgets() {
+        const payload = {
+          glossary_max_terms: budgetNumber('xtl-budget-glossary-max-terms', 500),
+          glossary_max_prompt_chars: budgetNumber('xtl-budget-glossary-max-prompt-chars', 80000),
+          glossary_candidate_source_terms: budgetNumber('xtl-budget-glossary-candidate-source-terms', 32),
+        };
+        setBudgetStatus('正在保存高级预算...');
+        try {
+          const saved = await api('/api/settings/behavior/translation-budgets', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+          });
+          if (byId('xtl-budget-glossary-max-terms')) byId('xtl-budget-glossary-max-terms').value = saved.glossary_max_terms;
+          if (byId('xtl-budget-glossary-max-prompt-chars')) byId('xtl-budget-glossary-max-prompt-chars').value = saved.glossary_max_prompt_chars;
+          if (byId('xtl-budget-glossary-candidate-source-terms')) byId('xtl-budget-glossary-candidate-source-terms').value = saved.glossary_candidate_source_terms;
+          setBudgetStatus('已保存。下一次生成提示词会使用这些预算；当前运行中的任务不会被改写。', 'good');
+        } catch (err) {
+          setBudgetStatus(`保存失败：${err.message || err}`, 'danger');
+        }
+      }
       document.addEventListener('click', event => {
         if (event.target && event.target.id === 'xtl-project-export') exportProject();
         if (event.target && event.target.id === 'xtl-project-open-exports') openExports();
         if (event.target && event.target.id === 'xtl-project-reload') reloadProject();
+        if (event.target && event.target.id === 'xtl-budget-save') saveTranslationBudgets();
         if (event.target && event.target.id === 'xtl-import-project') importProject();
+        if (event.target && event.target.id === 'xtl-import-browse-plugin') browsePluginFile();
       });
       document.addEventListener('input', event => {
         if (event.target && event.target.id === 'xtl-import-plugin-path') {
-          const name = byId('xtl-import-project-name');
-          if (name && !name.value.trim()) name.value = projectNameFromPath(event.target.value);
+          setPluginPath(event.target.value);
         }
       });
       if (!window.__xtlCloseGuardBound) {
@@ -1480,9 +1724,14 @@ def _entries_html(project: str | None) -> str:
       <span class="xtl-label">文本字段</span><select class="xtl-select" data-marker="select-entries-field" id="xtl-entries-field"><option value="">全部</option><option value="FULL">名称文本（FULL）</option><option value="DESC">说明文本（DESC）</option></select>
       <span class="xtl-label">状态</span><select class="xtl-select" data-marker="select-entries-status" id="xtl-entries-status"><option value="">全部</option><option value="untranslated">未翻译</option><option value="translated">已翻译</option><option value="partial">需复查</option><option value="locked">锁定</option></select>
       <input class="xtl-input" data-marker="field-entries-search" id="xtl-entries-search" placeholder="搜索原文、译文或条目编号">
+      <button class="xtl-btn" data-marker="btn-entries-select-all" id="xtl-entries-select-all">全选当前列表</button>
+      <button class="xtl-btn" data-marker="btn-entries-clear-selection" id="xtl-entries-clear-selection">全部清空</button>
+      <button class="xtl-btn" data-marker="btn-entries-bulk-translated" id="xtl-entries-bulk-translated">批量标记已翻译</button>
+      <button class="xtl-btn danger" data-marker="btn-entries-bulk-untranslated" id="xtl-entries-bulk-untranslated">批量退回未翻译</button>
+      <span class="xtl-label">每组条数</span><input class="xtl-input xtl-number-input" data-marker="field-entries-batch-size" id="xtl-entries-batch-size" type="number" min="1" max="500" step="1" value="100">
       <button class="xtl-btn" data-marker="btn-entries-submit-queue" id="xtl-entries-submit-queue">提交到批量翻译队列</button>
     </div>
-    <div class="xtl-help" data-marker="status-entries-queue" id="xtl-entries-queue-status">勾选条目后可以交给批量队列；不会直接调用 AI，下一步仍需翻译助手生成提示词并让你预览。</div>
+    <div class="xtl-help xtl-selection-status" data-marker="status-entries-queue" id="xtl-entries-queue-status">已选择 0 / 当前列表 0 条。按住 Shift 点击复选框可以连续选择一段；提交队列只会接收未翻译条目。</div>
     <details class="xtl-help xtl-tech-details" id="xtl-entries-queue-tech" hidden><summary>技术详情</summary><code id="xtl-entries-queue-command"></code></details>
     <div class="xtl-workbench xtl-entries-workbench">
       <div class="xtl-panel" data-marker="panel-entries-table">
@@ -1498,7 +1747,7 @@ def _entries_html(project: str | None) -> str:
           <div>
             <div class="xtl-help">译文：可以手动修正 AI 结果。普通玩家只需要改这里。</div>
             <textarea class="xtl-entry-text" data-marker="field-entry-dest" id="xtl-entry-dest">{dest}</textarea>
-            <div class="xtl-help">快速翻译会真实调用当前 AI 账号，可能产生少量费用；结果只写入本项目记忆库，不会修改原始 MOD。复杂术语建议走批量翻译并先预览提示词。</div>
+            <div class="xtl-help">快速翻译会真实调用当前 AI 账号；结果只写入本项目记忆库，不会修改原始 MOD。复杂术语建议走批量翻译并先预览提示词。</div>
             <div class="xtl-toolbar" style="margin-top: 10px">
               <span class="xtl-label">保存状态</span>
               <select class="xtl-select" id="xtl-entry-status">
@@ -1514,6 +1763,13 @@ def _entries_html(project: str | None) -> str:
               <button class="xtl-btn danger" data-marker="btn-entry-orphan" id="xtl-entry-clear">清空译文</button>
             </div>
             <div class="xtl-help" data-marker="status-entry-save" id="xtl-entry-save-status">选择左侧条目后可以保存。</div>
+            <div class="xtl-inline-confirm" id="xtl-entry-quick-confirm" data-marker="dialog-entry-quick-confirm" hidden>
+              <div>将使用当前 AI 账号快速翻译 1 条文本。结果只写入本项目记忆库，不会修改原始 MOD。</div>
+              <div class="xtl-toolbar compact">
+                <button class="xtl-btn primary" data-marker="btn-entry-quick-confirm" id="xtl-entry-quick-confirm-ok">确认并调用 AI</button>
+                <button class="xtl-btn" data-marker="btn-entry-quick-cancel" id="xtl-entry-quick-confirm-cancel">取消</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1527,6 +1783,7 @@ def _batches_html(project: str | None) -> str:
     selected_run = _preferred_run_id(rows)
     selected_status = next((str(row.get("status") or "") for row in rows if str(row.get("run_id") or "") == selected_run), "")
     cancel_disabled = "disabled" if selected_status != "running" else ""
+    discard_disabled = "disabled" if selected_status in {"", "running", "queued"} else ""
     options = "".join(
         f'<option value="{_esc(str(row["run_id"]))}" title="{_esc(str(row["run_id"]))}" {"selected" if str(row["run_id"]) == selected_run else ""}>'
         f'{_esc(_run_option_label(row, index))}</option>'
@@ -1540,8 +1797,10 @@ def _batches_html(project: str | None) -> str:
       <button class="xtl-btn danger xtl-priority-action" data-marker="btn-cancel-run" id="xtl-cancel-run" {cancel_disabled}>请求停止</button>
       <select class="xtl-select" data-marker="select-run" id="xtl-run-select">{options}</select>
       <button class="xtl-btn" data-marker="btn-refresh-batches" id="xtl-refresh-batches">刷新</button>
-      <span class="xtl-help">这里显示 AI 汉化任务的实时进度和费用；刷新不会修改 MOD 文件。请求停止会让当前选中的运行中任务在安全检查点结束，已经发给 AI 的请求仍可能计费。</span>
+      <button class="xtl-btn danger" data-marker="btn-discard-run-translations" id="xtl-discard-run-translations" {discard_disabled}>抛弃这次翻译</button>
+      <span class="xtl-help">这里显示 AI 汉化任务的实时进度和模型请求状态；刷新不会修改 MOD 文件。请求停止会让当前选中的运行中任务在安全检查点结束，已经发给 AI 的请求可能仍在服务商侧处理。“抛弃这次翻译”只清除当前历史任务写入项目记忆库的译文，不会修改原始 MOD 文件。</span>
       <span class="xtl-help" data-marker="status-cancel-run" id="xtl-cancel-status"></span>
+      <span class="xtl-help" data-marker="status-discard-run" id="xtl-discard-status"></span>
     </div>
     <div class="xtl-workbench">
       <div class="xtl-stack">
@@ -1549,14 +1808,14 @@ def _batches_html(project: str | None) -> str:
           <div class="xtl-metric"><div class="xtl-metric-label">运行状态</div><div class="xtl-metric-value" id="xtl-run-status">等待</div></div>
           <div class="xtl-metric"><div class="xtl-metric-label">文本组数</div><div class="xtl-metric-value" id="xtl-run-batches">0</div></div>
           <div class="xtl-metric"><div class="xtl-metric-label">已完成</div><div class="xtl-metric-value" id="xtl-run-complete">0</div></div>
-          <div class="xtl-metric"><div class="xtl-metric-label">费用</div><div class="xtl-metric-value" id="xtl-run-cost">$0.0000</div></div>
+          <div class="xtl-metric"><div class="xtl-metric-label">账单</div><div class="xtl-metric-value" id="xtl-run-billing">看服务商后台</div></div>
         </div>
         <div class="xtl-panel" data-marker="panel-batches-table">
           <div class="xtl-panel-title">文本组进度</div>
           <div class="xtl-panel-body">
             <table class="xtl-table xtl-batch-table" id="xtl-batches">
-              <thead><tr><th>文本组</th><th>状态</th><th>文本</th><th>进度</th><th>费用</th></tr></thead>
-              <tbody><tr><td colspan="5">正在读取批次...</td></tr></tbody>
+              <thead><tr><th>文本组</th><th>状态</th><th>文本</th><th>进度</th></tr></thead>
+              <tbody><tr><td colspan="4">正在读取批次...</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -1564,7 +1823,7 @@ def _batches_html(project: str | None) -> str:
       <div class="xtl-panel">
         <div class="xtl-panel-title">实时记录</div>
         <div class="xtl-panel-body">
-          <div class="xtl-help">普通玩家只需要看“完成/失败/需要人工复查”和费用。下面的记录是给排查问题用的。</div>
+          <div class="xtl-help">普通玩家只需要看“完成/失败/需要人工复查”。下面的记录是给排查问题用的。</div>
           <div class="xtl-event-list" data-marker="panel-batch-events" id="xtl-batch-events">暂无事件。</div>
         </div>
       </div>
@@ -1578,13 +1837,17 @@ def _prompt_html(project: str | None) -> str:
     pending = _pending_previews(project)
     current_preview = pending[-1] if pending else None
     sample = current_preview.system_prompt if current_preview else (planned[0]["prompt"] if planned else _sample_prompt(project))
-    first_label = f"当前第 1 组文本：{len(current_preview.items) or '若干'} 条，等待确认" if current_preview else "当前没有等待确认的批次"
+    first_label = _preview_select_label(current_preview) if current_preview else "当前没有等待确认的批次"
     select_disabled = "" if current_preview else "disabled"
     action_disabled = "" if current_preview else "disabled"
-    preview_status = "等待你确认。" if current_preview else "当前显示的是历史预览或示例提示词，不会发送给 AI。"
+    preview_status = (
+        "等待你确认。"
+        if current_preview
+        else "当前显示的是历史预览或示例提示词，不会发送给 AI；历史任务不能恢复。"
+    )
     if planned:
         history_options = "".join(
-            f'<option value="{index}" {"selected" if index == 0 else ""}>{_esc(item["label"])}</option>'
+            f'<option value="{index}" {"selected" if index == 0 else ""}>{_esc(str(item.get("audit_label") or item["label"]))}</option>'
             for index, item in enumerate(planned)
         )
     else:
@@ -1622,15 +1885,16 @@ def _prompt_html(project: str | None) -> str:
           <button class="xtl-btn primary" data-marker="btn-approve-batch" id="xtl-approve" {action_disabled}>确认并翻译当前文本组</button>
           <button class="xtl-btn" data-marker="btn-approve-all" id="xtl-approve-all" {action_disabled}>本次任务后续都自动确认</button>
           <button class="xtl-btn danger" data-marker="btn-discard-batch" id="xtl-discard" {action_disabled}>跳过这一段</button>
-          <span class="xtl-help">只有上方显示“等待确认”时，按钮才会把内容发送给 AI。新手推荐只确认当前文本组；自动确认会继续发送后续文本组，可能继续产生费用。</span>
+          <span class="xtl-help">只有上方显示“等待确认”时，按钮才会把内容发送给 AI。新手推荐只确认当前文本组；自动确认会继续发送后续文本组。</span>
           <span class="xtl-help" data-marker="status-preview-response" id="xtl-preview-status">{_esc(preview_status)}</span>
+          <span class="xtl-help" data-marker="status-start-planned-run" id="xtl-start-plan-status">历史任务只用于审计，不能恢复或重新启动；要翻译这些文本，请回到条目页重新选择并提交新的批量队列。</span>
         </div>
         <details class="xtl-advanced xtl-history-preview">
           <summary>查看历史预览（不会发送给 AI）</summary>
           <div class="xtl-form-grid compact">
             <label class="wide"><span>历史批次</span><select class="xtl-select" data-marker="select-history-batch" id="xtl-history-batch-select">{history_options}</select></label>
           </div>
-          <p class="xtl-help">这里用于回看最近生成过的提示词。只有上方显示“等待确认”的当前批次，才可以点击确认发送给 AI。</p>
+          <p class="xtl-help">这里用于审计过去计划过哪些文本和当时的提示词。历史任务不能恢复，也不会从这里发送给 AI。</p>
         </details>
         <div class="xtl-bottom-split">
           <div class="xtl-panel" data-marker="panel-glossary-subset"><div class="xtl-panel-title">本次用到的专有名词</div><div class="xtl-panel-body" id="xtl-glossary">{first_glossary}</div></div>
@@ -1767,7 +2031,6 @@ def _profiles_html() -> str:
               <label><span>名称</span><input class="xtl-input" id="xtl-profile-name" data-marker="field-profile-name" placeholder="例如 openrouter"></label>
               <label><span>AI 服务类型</span><select class="xtl-select" id="xtl-profile-sdk" data-marker="select-profile-sdk"><option value="openai-compat">OpenRouter（推荐）/ DeepSeek / 其他兼容服务</option><option value="openai">OpenAI 官方账号</option><option value="anthropic">Claude 官方账号</option><option value="gemini">Gemini 官方账号</option></select></label>
               <label class="wide"><span>模型</span><input class="xtl-input" id="xtl-profile-model" data-marker="field-profile-model" placeholder="deepseek/deepseek-chat-v3-0324"></label>
-              <label><span>费用上限 USD</span><input class="xtl-input" id="xtl-profile-cost-cap" data-marker="field-profile-cost-cap" type="number" min="0" step="0.01" placeholder="例如 10.00"></label>
             </div>
             <div class="xtl-advanced" data-marker="panel-profile-advanced">
               <div class="xtl-section-label">高级设置（不懂可以不改）：服务地址、同时处理数量、AI 返回格式</div>
@@ -1883,7 +2146,7 @@ def _logs_html(project: str | None) -> str:
       <div class="xtl-panel" data-marker="panel-log-stream">
         <div class="xtl-panel-title">翻译记录摘要</div>
         <div class="xtl-panel-body">
-          <div class="xtl-help">普通玩家先看这里：完成、失败、费用、需要人工复查都会出现在这里。右侧文件区是排查问题时使用的技术日志。</div>
+          <div class="xtl-help">普通玩家先看这里：完成、失败、需要人工复查都会出现在这里。右侧文件区是排查问题时使用的技术日志。</div>
           <table class="xtl-table"><thead><tr><th>#</th><th>事件</th><th>批次</th></tr></thead><tbody id="xtl-log-events">{lines}</tbody></table>
         </div>
       </div>
@@ -1932,7 +2195,7 @@ def _settings_script() -> str:
         if (window.localStorage.getItem(orphanAckKey(summary)) !== '1') return;
         const text = summary.querySelector('[data-marker="status-gui-alive"]');
         const action = document.getElementById('xtl-ack-orphaned-status');
-        if (text) text.textContent = '历史任务提醒已知晓；当前没有检测到运行中计费任务';
+        if (text) text.textContent = '历史任务提醒已知晓；当前没有检测到运行中的翻译任务';
         summary.classList.remove('xtl-status-warn');
         summary.classList.add('xtl-status-good');
         if (action) action.remove();
@@ -2413,7 +2676,6 @@ def _profiles_script() -> str:
         byId('xtl-profile-env').value = 'BGS_TRANSLATOR_KEY_OPENROUTER';
         byId('xtl-profile-concurrency').value = '4';
         byId('xtl-profile-rpm').value = '';
-        byId('xtl-profile-cost-cap').value = '10.00';
         byId('xtl-profile-json-mode').value = 'json_schema';
         byId('xtl-profile-require-parameters').value = 'true';
         byId('xtl-profile-notes').value = '';
@@ -2438,7 +2700,6 @@ def _profiles_script() -> str:
         byId('xtl-profile-env').value = profile.api_key_env || '';
         byId('xtl-profile-concurrency').value = profile.max_concurrency || 4;
         byId('xtl-profile-rpm').value = profile.rate_limit_rpm || '';
-        byId('xtl-profile-cost-cap').value = profile.cost_cap_usd ?? '';
         byId('xtl-profile-json-mode').value = profile.json_mode || '';
         byId('xtl-profile-require-parameters').value = String(Boolean(profile.require_parameters));
         byId('xtl-profile-notes').value = profile.notes || '';
@@ -2463,7 +2724,7 @@ def _profiles_script() -> str:
           api_key_env: byId('xtl-profile-env').value.trim(),
           max_concurrency: Number(byId('xtl-profile-concurrency').value || 4),
           rate_limit_rpm: optionalNumber('xtl-profile-rpm'),
-          cost_cap_usd: optionalNumber('xtl-profile-cost-cap'),
+          cost_cap_usd: null,
           notes: byId('xtl-profile-notes').value,
           prompt_caching: false,
           json_mode: byId('xtl-profile-json-mode').value || null,
@@ -2626,23 +2887,42 @@ def _profiles_script() -> str:
 
 def _prompt_script(project: str | None) -> str:
     planned_json = _json_for_script(_planned_batches(project))
+    project_json = _json_for_script(project or "")
     script = """
     <script>
     (() => {
       let current = null;
       const planned = __PLANNED__;
+      const noLivePreviewLabel = '当前没有等待确认的批次';
       const promptBody = () => document.getElementById('xtl-prompt-body');
       const batchSelect = () => document.getElementById('xtl-batch-select');
       const historySelect = () => document.getElementById('xtl-history-batch-select');
       const statusLine = () => document.getElementById('xtl-preview-status');
+      const startPlanStatus = () => document.getElementById('xtl-start-plan-status');
       function setPreviewStatus(text, tone = '') {
         const el = statusLine();
         if (!el) return;
         el.textContent = text;
         el.className = `xtl-help ${tone}`;
       }
+      function setStartPlanStatus(text, tone = '') {
+        const el = startPlanStatus();
+        if (!el) return;
+        el.textContent = text;
+        el.className = `xtl-help ${tone}`;
+      }
       function shortId(value) {
         return String(value || '').slice(0, 8);
+      }
+      function previewLabel(msg) {
+        const count = Array.isArray(msg.items) ? msg.items.length : 0;
+        const batchText = count ? `${count} 条` : '若干条';
+        const index = Number(msg.batch_index || 1);
+        const totalBatches = Number(msg.total_batches || 0);
+        const totalItems = Number(msg.total_items || 0);
+        if (totalBatches && totalItems) return `当前第 ${index}/${totalBatches} 组：本组 ${batchText}，本次任务共 ${totalItems} 条，等待确认`;
+        if (totalBatches) return `当前第 ${index}/${totalBatches} 组：本组 ${batchText}，等待确认`;
+        return `当前第 ${index} 组文本：${batchText}，等待确认`;
       }
       function esc(value) {
         return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -2707,10 +2987,11 @@ def _prompt_script(project: str | None) -> str:
         if (select) {
           select.dataset.runId = '';
           select.dataset.batchId = '';
-          select.innerHTML = '<option>当前没有等待确认的批次</option>';
+          select.innerHTML = `<option>${esc(noLivePreviewLabel)}</option>`;
           select.disabled = true;
         }
         setPreviewStatus('这是历史预览；不会发送给 AI。');
+        setStartPlanStatus('历史任务只用于审计，不能恢复或重新启动。需要翻译时请回条目页重新提交新的批量队列。');
         if (promptBody()) promptBody().value = item.prompt || '';
         fillSidePanels(item.glossary_subset || [], item.do_not_translate || [], item.glossary_evidence || []);
       }
@@ -2726,7 +3007,7 @@ def _prompt_script(project: str | None) -> str:
           planned.forEach((item, index) => {
             const option = document.createElement('option');
             option.value = String(index);
-            option.textContent = item.label;
+            option.textContent = item.audit_label || item.label;
             select.appendChild(option);
           });
         }
@@ -2735,10 +3016,10 @@ def _prompt_script(project: str | None) -> str:
       function renderPreview(msg) {
         current = msg;
         setPreviewControls(true);
-        const count = Array.isArray(msg.items) ? msg.items.length : 0;
+        setStartPlanStatus('已有当前待确认批次，请先处理上方内容。');
         const select = batchSelect();
         if (select) {
-          select.innerHTML = `<option>当前第 1 组文本：${count || '若干'} 条，等待确认</option>`;
+          select.innerHTML = `<option>${esc(previewLabel(msg))}</option>`;
           select.dataset.runId = msg.run_id || '';
           select.dataset.batchId = msg.batch_id || '';
           select.disabled = false;
@@ -2773,7 +3054,7 @@ def _prompt_script(project: str | None) -> str:
         }
         if (op === 'approve_all') {
           const count = current && Array.isArray(current.items) ? current.items.length : '当前';
-          const ok = window.confirm(`这会让本次任务后续批次自动发送给 AI，可能继续产生费用。当前显示 ${count} 条文本，仍然不会修改原始 MOD 文件。确定继续吗？`);
+          const ok = window.confirm(`这会让本次任务后续批次自动发送给 AI。当前显示 ${count} 条文本，仍然不会修改原始 MOD 文件。确定继续吗？`);
           if (!ok) {
             setPreviewStatus('已取消自动确认；你仍然可以只确认当前批次。');
             return;
@@ -2797,7 +3078,7 @@ def _prompt_script(project: str | None) -> str:
         if (select) {
           select.dataset.runId = '';
           select.dataset.batchId = '';
-          select.innerHTML = '<option>当前没有等待确认的批次</option>';
+          select.innerHTML = `<option>${esc(noLivePreviewLabel)}</option>`;
           select.disabled = true;
         }
         setPreviewStatus(op === 'discarded' ? '已跳过这一段。' : '已发送确认，AI 正在继续翻译。', 'good');
@@ -2827,7 +3108,7 @@ def _prompt_script(project: str | None) -> str:
           if (select) {
             select.dataset.runId = '';
             select.dataset.batchId = '';
-            select.innerHTML = '<option>当前没有等待确认的批次</option>';
+            select.innerHTML = `<option>${esc(noLivePreviewLabel)}</option>`;
             select.disabled = true;
           }
           setPreviewStatus('当前没有等待确认的批次。页面只显示历史预览，不会发送给 AI。');
@@ -2843,7 +3124,7 @@ def _prompt_script(project: str | None) -> str:
     })();
     </script>
     """
-    return script.replace("__PLANNED__", planned_json)
+    return script.replace("__PLANNED__", planned_json).replace("__PROJECT__", project_json)
 
 
 def _batches_script(project: str | None) -> str:
@@ -2855,7 +3136,13 @@ def _batches_script(project: str | None) -> str:
       let currentRunId = '';
       let sinceEventId = 0;
       let userSelectedRun = false;
+      let runSelectInteracting = false;
+      let pendingRealtimeEvents = [];
       let runs = [];
+      let currentBatches = [];
+      let currentEvents = [];
+      let runOptionsSignature = '';
+      let realtimeRefreshTimer = 0;
       const metrics = window.__xtlBatchMetrics = {
         wsState: 'starting',
         wsMessages: [],
@@ -2875,24 +3162,35 @@ def _batches_script(project: str | None) -> str:
         running: '翻译中',
         queued: '排队中',
         orphaned: '未正常收尾',
+        abandoned: '已中断，仅审计',
+        paused: '已中断，仅审计',
+        waiting_preview: '已中断，仅审计',
         complete: '已完成',
         failed: '有问题',
         cancelled: '已取消',
+        discarded: '已抛弃',
         manual_review: '需人工复查',
       };
       const eventLabels = {
         'run.start': '开始翻译',
         'run.complete': '全部完成',
         'run.failed': '运行失败',
+        'run.abandoned': '已中断，仅审计',
+        'run.paused': '已中断，仅审计',
         'run.cancelled': '已取消',
         'batch.start': '批次开始',
         'batch.progress': '批次进度更新',
+        'batch.request_sent': '已发送给模型',
+        'batch.response_received': '模型已返回',
         'batch.complete': '批次完成',
         'batch.failed': '批次失败',
+        'batch.abandoned': '已中断，仅审计',
+        'batch.paused': '已中断，仅审计',
+        'batch.waiting_preview': '已中断，仅审计',
         'batch.cancelled': '批次取消',
         'prompt.preview_request': '等待你确认提示词',
         'prompt.preview_response': '已确认提示词',
-        'cost.update': '费用更新',
+        'cost.update': '用量记录',
         manual_review: '需要人工复查',
       };
       function api(path, options = {}) {
@@ -2900,10 +3198,6 @@ def _batches_script(project: str | None) -> str:
           if (!res.ok) throw new Error(`${path} -> ${res.status}`);
           return res.json();
         });
-      }
-      function money(value) {
-        const n = Number(value || 0);
-        return `$${n.toFixed(4)}`;
       }
       function shortId(value) {
         return String(value || '').slice(0, 8);
@@ -2923,7 +3217,6 @@ def _batches_script(project: str | None) -> str:
           : (run.status === 'complete' ? '已完成' : statusText(run.status));
         const parts = [`${state}：${index === 0 ? '最近一次任务' : `第 ${index + 1} 次任务`}`];
         if (run.batches_total) parts.push(`${run.batches_total} 组文本`);
-        if (run.cost_total_usd !== null && run.cost_total_usd !== undefined) parts.push(money(run.cost_total_usd));
         return parts.join('，');
       }
       function preferredRunId() {
@@ -2932,6 +3225,22 @@ def _batches_script(project: str | None) -> str:
       }
       function currentRun() {
         return runs.find(run => run.run_id === currentRunId) || null;
+      }
+      function isActiveRun(run) {
+        return Boolean(run && (run.status === 'running' || run.status === 'queued'));
+      }
+      function isRunSelectInteracting() {
+        const select = runSelect();
+        return Boolean(select && (runSelectInteracting || document.activeElement === select));
+      }
+      function pauseAutoRefreshForRunSelect() {
+        runSelectInteracting = true;
+      }
+      function resumeAutoRefreshForRunSelect() {
+        runSelectInteracting = false;
+        const pending = pendingRealtimeEvents;
+        pendingRealtimeEvents = [];
+        for (const msg of pending) applyRealtimeEvent(msg);
       }
       function updateCancelState(run) {
         const button = document.getElementById('xtl-cancel-run');
@@ -2944,6 +3253,21 @@ def _batches_script(project: str | None) -> str:
           status.textContent = run.status === 'orphaned'
             ? '这个历史任务没有正常收尾，但当前 GUI 没检测到它仍在运行。'
             : '当前选中的任务已结束，不需要停止。';
+        }
+      }
+      function updateDiscardState(run) {
+        const button = document.getElementById('xtl-discard-run-translations');
+        const status = document.getElementById('xtl-discard-status');
+        if (!button) return;
+        const canDiscard = Boolean(run && run.status !== 'running' && run.status !== 'queued');
+        button.disabled = !canDiscard;
+        button.title = canDiscard
+          ? '清除当前历史任务写入项目记忆库的译文'
+          : '运行中或等待确认的任务不能抛弃翻译，请先停止或等待结束';
+        if (status && !canDiscard && run) {
+          status.textContent = run.status === 'running' || run.status === 'queued'
+            ? '当前任务还在进行，不能抛弃已写入译文。'
+            : '';
         }
       }
       function progressFromEvents(batch, events) {
@@ -2961,15 +3285,22 @@ def _batches_script(project: str | None) -> str:
         const select = runSelect();
         if (!select) return;
         const previous = userSelectedRun ? (select.value || currentRunId) : (currentRunId || preferredRunId());
-        select.innerHTML = runs.length
-          ? runs.map((run, index) => `<option value="${esc(run.run_id)}" title="${esc(run.run_id)}">${esc(runLabel(run, index))}</option>`).join('')
-          : '<option value="">尚无运行</option>';
+        const signature = JSON.stringify(runs.map(run => [
+          run.run_id,
+          run.status,
+          run.batches_total,
+        ]));
+        if (signature !== runOptionsSignature) {
+          select.innerHTML = runs.length
+            ? runs.map((run, index) => `<option value="${esc(run.run_id)}" title="${esc(run.run_id)}">${esc(runLabel(run, index))}</option>`).join('')
+            : '<option value="">尚无运行</option>';
+          runOptionsSignature = signature;
+        }
         currentRunId = runs.some(run => run.run_id === previous) ? previous : preferredRunId();
         select.value = currentRunId;
       }
       function renderSummary(run, batches) {
         const completed = batches.filter(batch => batch.status === 'complete').length;
-        const cost = run ? run.cost_total_usd : batches.reduce((total, batch) => total + Number(batch.cost_usd || 0), 0);
         const set = (id, value) => {
           const el = document.getElementById(id);
           if (el) el.textContent = value;
@@ -2977,14 +3308,15 @@ def _batches_script(project: str | None) -> str:
         set('xtl-run-status', statusText(run ? run.status : ''));
         set('xtl-run-batches', String(run ? run.batches_total : batches.length));
         set('xtl-run-complete', String(completed));
-        set('xtl-run-cost', money(cost));
+        set('xtl-run-billing', '看服务商后台');
         updateCancelState(run);
+        updateDiscardState(run);
       }
       function renderBatches(batches, events) {
         const body = batchBody();
         if (!body) return;
         if (!batches.length) {
-          body.innerHTML = '<tr><td colspan="5">这个运行还没有批次记录。</td></tr>';
+          body.innerHTML = '<tr><td colspan="4">这个运行还没有批次记录。</td></tr>';
           return;
         }
         body.innerHTML = batches.map((batch, index) => {
@@ -2995,7 +3327,6 @@ def _batches_script(project: str | None) -> str:
             <td><span class="xtl-status-pill ${batch.status || ''}">${statusText(batch.status)}</span></td>
             <td>${batch.item_count || 0}</td>
             <td><div class="xtl-progress" data-marker="status-batch-progress-${esc(batch.batch_id)}"><span style="width:${pct}%"></span><b>${progress.done}/${progress.total || batch.item_count || 0}</b></div></td>
-            <td>${money(batch.cost_usd)}</td>
           </tr>`;
         }).join('');
       }
@@ -3019,9 +3350,20 @@ def _batches_script(project: str | None) -> str:
           count: latest.length,
         });
       }
-      async function refreshAll({keepSince = false, preferActive = false} = {}) {
+      async function refreshAll({keepSince = false, preferActive = false, force = false} = {}) {
         const started = performance.now();
         if (!project) return;
+        if (!force && isRunSelectInteracting()) {
+          pushMetric('refreshes', {
+            started,
+            ended: performance.now(),
+            keepSince,
+            preferActive,
+            runId: currentRunId,
+            skipped: 'run-select-open',
+          });
+          return;
+        }
         try {
           runs = await api(`/api/projects/${encodeURIComponent(project)}/runs`);
           if (!userSelectedRun && preferActive) {
@@ -3040,6 +3382,8 @@ def _batches_script(project: str | None) -> str:
             api(`/api/projects/${encodeURIComponent(project)}/runs/${encodeURIComponent(currentRunId)}/events?since=0`),
           ]);
           if (events.length) sinceEventId = Math.max(...events.map(event => Number(event.event_id || 0)));
+          currentBatches = batches;
+          currentEvents = events;
           renderSummary(currentRun, batches);
           renderBatches(batches, events);
           renderEvents(events, batches);
@@ -3053,12 +3397,108 @@ def _batches_script(project: str | None) -> str:
           });
         }
       }
-      async function pollEvents() {
-        if (!project || !currentRunId) return;
-        const events = await api(`/api/projects/${encodeURIComponent(project)}/runs/${encodeURIComponent(currentRunId)}/events?since=${sinceEventId}`);
-        if (!events.length) return;
-        sinceEventId = Math.max(sinceEventId, ...events.map(event => Number(event.event_id || 0)));
-        await refreshAll({keepSince: true});
+      function rememberRealtimeEvent(msg) {
+        if (!msg.event_id) return;
+        if (currentEvents.some(event => Number(event.event_id || 0) === Number(msg.event_id))) return;
+        currentEvents.push({
+          event_id: msg.event_id,
+          kind: msg.kind || '',
+          run_id: msg.run_id || '',
+          batch_id: msg.batch_id || '',
+          payload: msg.payload || {},
+          emitted_at: msg.emitted_at || '',
+        });
+        currentEvents = currentEvents.slice(-200);
+        sinceEventId = Math.max(sinceEventId, Number(msg.event_id || 0));
+      }
+      function updateBatchFromRealtimeEvent(msg) {
+        const batchId = msg.batch_id || (msg.payload && msg.payload.batch_id) || '';
+        if (!batchId) return;
+        let batch = currentBatches.find(item => item.batch_id === batchId);
+        if (!batch && msg.kind === 'batch.start') {
+          batch = {
+            batch_id: batchId,
+            run_id: msg.run_id || currentRunId,
+            status: 'running',
+            item_count: Number(msg.payload?.item_count || msg.payload?.total || 0),
+            cost_usd: 0,
+          };
+          currentBatches.push(batch);
+        }
+        if (!batch) return;
+        if (msg.kind === 'batch.start') {
+          batch.status = 'running';
+          batch.item_count = Number(msg.payload?.item_count || msg.payload?.total || batch.item_count || 0);
+        }
+        if (msg.kind === 'batch.request_sent') {
+          batch.status = 'running';
+          batch.item_count = Number(msg.payload?.total || batch.item_count || 0);
+        }
+        if (msg.kind === 'batch.response_received') {
+          batch.status = 'running';
+        }
+        if (msg.kind === 'batch.complete') {
+          batch.status = msg.payload?.status || 'complete';
+        }
+        if (msg.kind === 'batch.failed') batch.status = msg.payload?.status || 'failed';
+        if (msg.kind === 'batch.cancelled') batch.status = 'cancelled';
+      }
+      function updateRunFromRealtimeEvent(msg) {
+        const run = currentRun();
+        if (!run) return;
+        if (msg.kind === 'run.complete') run.status = 'complete';
+        if (msg.kind === 'run.failed') run.status = 'failed';
+        if (msg.kind === 'run.cancelled') run.status = 'cancelled';
+      }
+      function updateRunListFromRealtimeEvent(msg) {
+        if (!msg.run_id) return;
+        let run = runs.find(item => item.run_id === msg.run_id);
+        if (!run && msg.kind === 'run.start') {
+          run = {
+            run_id: msg.run_id,
+            status: 'running',
+            batches_total: Number(msg.payload?.batches_total || 0),
+          };
+          runs = [run, ...runs];
+          runOptionsSignature = '';
+        }
+        if (!run) return;
+        if (msg.kind === 'run.start') run.status = 'running';
+        if (msg.kind === 'run.complete') run.status = 'complete';
+        if (msg.kind === 'run.failed') run.status = 'failed';
+        if (msg.kind === 'run.cancelled') run.status = 'cancelled';
+        if (msg.payload?.batches_total) run.batches_total = Number(msg.payload.batches_total);
+      }
+      function applyRealtimeEvent(msg) {
+        if (!msg.run_id) return;
+        if (isRunSelectInteracting()) {
+          pendingRealtimeEvents.push(msg);
+          return;
+        }
+        updateRunListFromRealtimeEvent(msg);
+        if (!currentRunId && msg.kind === 'run.start') currentRunId = msg.run_id;
+        if (!userSelectedRun && msg.kind === 'run.start') currentRunId = msg.run_id;
+        if (msg.run_id !== currentRunId) {
+          renderRuns();
+          return;
+        }
+        rememberRealtimeEvent(msg);
+        updateBatchFromRealtimeEvent(msg);
+        updateRunFromRealtimeEvent(msg);
+        renderRuns();
+        renderSummary(currentRun(), currentBatches);
+        renderBatches(currentBatches, currentEvents);
+        renderEvents(currentEvents, currentBatches);
+      }
+      function scheduleRealtimeRefresh() {
+        window.clearTimeout(realtimeRefreshTimer);
+        realtimeRefreshTimer = window.setTimeout(() => {
+          if (!isRunSelectInteracting()) refreshAll({preferActive: true, force: true});
+        }, 250);
+      }
+      function refreshActiveRunIfNeeded() {
+        if (!isActiveRun(currentRun())) return;
+        refreshAll({preferActive: true});
       }
       async function cancelRun() {
         const status = document.getElementById('xtl-cancel-status');
@@ -3072,7 +3512,7 @@ def _batches_script(project: str | None) -> str:
           updateCancelState(run);
           return;
         }
-        if (!window.confirm('会请求当前翻译任务尽快停止。已经发送给 AI 的请求可能仍会产生费用，确定继续吗？')) return;
+        if (!window.confirm('会请求当前翻译任务尽快停止。已经发送给 AI 的请求可能仍在服务商侧处理，确定继续吗？')) return;
         if (status) status.textContent = '正在写入停止请求...';
         try {
           await api(`/api/projects/${encodeURIComponent(project)}/runs/${encodeURIComponent(currentRunId)}/cancel`, {method: 'POST'});
@@ -3082,17 +3522,75 @@ def _batches_script(project: str | None) -> str:
           if (status) status.textContent = `停止请求失败：${err.message}`;
         }
       }
+      function showDiscardConfirm(run) {
+        const status = document.getElementById('xtl-discard-status');
+        if (!status) return;
+        const label = run ? runLabel(run, runs.findIndex(item => item.run_id === run.run_id)) : '当前任务';
+        status.innerHTML = `<span class="xtl-inline-confirm">确认抛弃“${esc(label)}”写入的译文？这只会清空本项目记忆库里的译文，不会修改原始 MOD 文件。 <button type="button" class="xtl-btn danger" id="xtl-discard-confirm-ok">确认抛弃</button> <button type="button" class="xtl-btn" id="xtl-discard-confirm-cancel">取消</button></span>`;
+      }
+      function hideDiscardConfirm(message = '') {
+        const status = document.getElementById('xtl-discard-status');
+        if (status) status.textContent = message;
+      }
+      async function discardRunTranslations() {
+        const run = currentRun();
+        if (!project || !currentRunId) {
+          hideDiscardConfirm('先选择一次历史任务。');
+          return;
+        }
+        if (!run || run.status === 'running' || run.status === 'queued') {
+          hideDiscardConfirm('这个任务还在运行或等待确认，请先停止任务。');
+          updateDiscardState(run);
+          return;
+        }
+        showDiscardConfirm(run);
+      }
+      async function confirmDiscardRunTranslations() {
+        const status = document.getElementById('xtl-discard-status');
+        const run = currentRun();
+        if (!run || run.status === 'running' || run.status === 'queued') {
+          hideDiscardConfirm('这个任务还在运行或等待确认，请先停止任务。');
+          updateDiscardState(run);
+          return;
+        }
+        const button = document.getElementById('xtl-discard-run-translations');
+        if (button) button.disabled = true;
+        if (status) status.textContent = '正在抛弃这次运行写入的译文...';
+        try {
+          const response = await api(`/api/projects/${encodeURIComponent(project)}/runs/${encodeURIComponent(currentRunId)}/discard-translations`, {method: 'POST'});
+          hideDiscardConfirm(response.message || `已抛弃 ${response.discarded_count || 0} 条译文。`);
+          await refreshAll();
+        } catch (err) {
+          if (status) status.textContent = `抛弃失败：${err.message}`;
+        } finally {
+          updateDiscardState(currentRun());
+        }
+      }
       document.addEventListener('change', (event) => {
         if (event.target && event.target.id === 'xtl-run-select') {
           userSelectedRun = true;
           currentRunId = event.target.value || '';
           sinceEventId = 0;
-          refreshAll();
+          runSelectInteracting = false;
+          hideDiscardConfirm('');
+          refreshAll({force: true});
         }
       });
+      document.addEventListener('focusin', (event) => {
+        if (event.target && event.target.id === 'xtl-run-select') pauseAutoRefreshForRunSelect();
+      });
+      document.addEventListener('pointerdown', (event) => {
+        if (event.target && event.target.id === 'xtl-run-select') pauseAutoRefreshForRunSelect();
+      });
+      document.addEventListener('focusout', (event) => {
+        if (event.target && event.target.id === 'xtl-run-select') window.setTimeout(resumeAutoRefreshForRunSelect, 100);
+      });
       document.addEventListener('click', (event) => {
-        if (event.target && event.target.id === 'xtl-refresh-batches') refreshAll();
+        if (event.target && event.target.id === 'xtl-refresh-batches') refreshAll({force: true});
         if (event.target && event.target.id === 'xtl-cancel-run') cancelRun();
+        if (event.target && event.target.id === 'xtl-discard-run-translations') discardRunTranslations();
+        if (event.target && event.target.id === 'xtl-discard-confirm-ok') confirmDiscardRunTranslations();
+        if (event.target && event.target.id === 'xtl-discard-confirm-cancel') hideDiscardConfirm('已取消抛弃。');
       });
       const ws = new WebSocket(`ws://${location.host}/ws`);
       ws.onopen = () => {
@@ -3109,27 +3607,20 @@ def _batches_script(project: str | None) -> str:
       };
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
+        const actual = msg && msg.kind === 'event' && msg.event ? msg.event : msg;
         pushMetric('wsMessages', {
           at: performance.now(),
-          kind: msg.kind || '',
-          runId: msg.run_id || '',
-          eventId: msg.event_id || null,
+          kind: actual.kind || '',
+          runId: actual.run_id || '',
+          eventId: actual.event_id || null,
         });
-        if (msg.event_id || msg.run_id) {
-          if (msg.kind === 'run.start' && msg.run_id) {
-            if (!userSelectedRun) {
-              currentRunId = msg.run_id;
-              sinceEventId = 0;
-            }
-            refreshAll();
-          } else if (!currentRunId || msg.run_id === currentRunId) {
-            refreshAll({keepSince: true});
-          }
+        if (actual.event_id || actual.run_id) {
+          applyRealtimeEvent(actual);
+          scheduleRealtimeRefresh();
         }
       };
       refreshAll({preferActive: true});
-      window.setInterval(pollEvents, 1500);
-      window.setInterval(() => refreshAll({keepSince: true, preferActive: true}), 5000);
+      window.setInterval(refreshActiveRunIfNeeded, 5000);
     })();
     </script>
     """
@@ -3145,6 +3636,7 @@ def _entries_script(project: str | None) -> str:
       let entries = [];
       let selected = null;
       let checkedRows = new Set();
+      let lastSelectionAnchorRowId = '';
       let savedDest = '';
       let savedStatus = 'untranslated';
       let searchTimer = null;
@@ -3203,13 +3695,62 @@ def _entries_script(project: str | None) -> str:
         const el = byId('xtl-entries-queue-status');
         if (!el) return;
         el.textContent = text;
-        el.className = `xtl-help ${tone}`;
+        el.className = `xtl-help xtl-selection-status ${tone}`;
+      }
+      function selectableRowIds() {
+        return entries.map(entry => entry.row_id);
+      }
+      function queueableRowIds() {
+        return entries.filter(entry => entry.status === 'untranslated').map(entry => entry.row_id);
+      }
+      function updateSelectionStatus(tone = '') {
+        const total = selectableRowIds().length;
+        const selectable = new Set(selectableRowIds());
+        const queueable = new Set(queueableRowIds());
+        const selectedVisible = [...checkedRows].filter(rowId => selectable.has(rowId));
+        const selectedCount = selectedVisible.length;
+        const selectedQueueable = selectedVisible.filter(rowId => queueable.has(rowId)).length;
+        const suffix = total
+          ? `按住 Shift 点击复选框可以连续选择一段；其中 ${selectedQueueable} 条可提交到 AI 队列。`
+          : '当前列表没有可加入队列的未翻译条目。';
+        setQueueStatus(`已选择 ${selectedCount} / 当前列表 ${total} 条。${suffix}`, tone);
+      }
+      function setRowChecked(rowId, checked) {
+        if (!selectableRowIds().includes(rowId)) return;
+        if (checked) checkedRows.add(rowId);
+        if (!checked) checkedRows.delete(rowId);
+      }
+      function setSelectionRange(rowId, checked) {
+        const ids = selectableRowIds();
+        const currentIndex = ids.indexOf(rowId);
+        const anchorIndex = ids.indexOf(lastSelectionAnchorRowId);
+        if (currentIndex < 0) return;
+        if (anchorIndex < 0) {
+          setRowChecked(rowId, checked);
+          return;
+        }
+        const start = Math.min(anchorIndex, currentIndex);
+        const end = Math.max(anchorIndex, currentIndex);
+        ids.slice(start, end + 1).forEach(id => setRowChecked(id, checked));
+      }
+      function selectAllVisibleRows() {
+        selectableRowIds().forEach(rowId => checkedRows.add(rowId));
+        lastSelectionAnchorRowId = selectableRowIds()[0] || '';
+        renderTable();
+        updateSelectionStatus('good');
+      }
+      function clearSelectedRows() {
+        checkedRows.clear();
+        lastSelectionAnchorRowId = '';
+        renderTable();
+        updateSelectionStatus();
       }
       function renderTable() {
         const body = document.querySelector('#xtl-entries-table tbody');
         if (!body) return;
         if (!entries.length) {
           body.innerHTML = '<tr><td colspan="4">没有匹配的条目。换个筛选条件试试。</td></tr>';
+          updateSelectionStatus();
           return;
         }
         body.innerHTML = entries.map(entry => {
@@ -3217,10 +3758,9 @@ def _entries_script(project: str | None) -> str:
           const sigLabel = signatureLabels[entry.signature] ? `${signatureLabels[entry.signature]}（${entry.signature}）` : entry.signature;
           const fieldLabel = fieldLabels[entry.field] ? `${fieldLabels[entry.field]}（${entry.field}）` : entry.field;
           const checked = checkedRows.has(entry.row_id) ? ' checked' : '';
-          const disabled = entry.status === 'untranslated' ? '' : ' disabled';
           const meta = `类型：${sigLabel}；字段：${fieldLabel}；条目编号：${entry.edid || entry.row_id}`;
           return `<tr${active} data-row-id="${esc(entry.row_id)}" data-marker="row-entries-${esc(entry.row_id)}">
-            <td><input type="checkbox" class="xtl-entry-check" data-row-id="${esc(entry.row_id)}"${checked}${disabled} title="勾选后可提交到批量翻译队列"></td>
+            <td><input type="checkbox" class="xtl-entry-check" data-row-id="${esc(entry.row_id)}"${checked} title="勾选后可批量改状态；未翻译条目也可提交到 AI 队列"></td>
             <td title="${esc(meta)}"><span class="xtl-status-pill ${esc(entry.status)}">${esc(statusLabels[entry.status] || entry.status)}</span></td>
             <td title="${esc(meta)}">${esc(entry.source)}</td>
             <td title="${esc(meta)}">${esc(entry.dest || '')}</td>
@@ -3243,10 +3783,12 @@ def _entries_script(project: str | None) -> str:
         entries = await api(entryUrl());
         const visibleIds = new Set(entries.map(entry => entry.row_id));
         checkedRows = new Set([...checkedRows].filter(rowId => visibleIds.has(rowId)));
+        if (!visibleIds.has(lastSelectionAnchorRowId)) lastSelectionAnchorRowId = '';
         let next = null;
         if (keepSelection && selected) next = entries.find(entry => entry.row_id === selected.row_id) || null;
         renderTable();
         renderDetail(next || entries[0] || null);
+        updateSelectionStatus();
       }
       async function selectRow(rowId) {
         const local = entries.find(entry => entry.row_id === rowId);
@@ -3274,20 +3816,37 @@ def _entries_script(project: str | None) -> str:
         renderDetail(updated);
         setSaveStatus('已保存到本项目记忆库，并写入手动编辑记录。', 'good');
       }
-      async function quickTranslateEntry() {
+      function showQuickTranslateConfirm() {
         if (!selected) {
           setSaveStatus('先选择一个条目。', 'danger');
           return;
         }
-        if (!window.confirm('将使用当前 AI 账号快速翻译 1 条文本，可能产生少量费用。结果只写入本项目记忆库，不会修改原始 MOD。继续？')) {
-          setSaveStatus('已取消快速翻译，没有调用 AI。');
+        const panel = byId('xtl-entry-quick-confirm');
+        if (panel) {
+          panel.hidden = false;
+          panel.dataset.rowId = selected.row_id;
+        }
+        setSaveStatus('请在下方确认是否调用当前 AI 账号快速翻译。');
+      }
+      function hideQuickTranslateConfirm() {
+        const panel = byId('xtl-entry-quick-confirm');
+        if (panel) {
+          panel.hidden = true;
+          panel.dataset.rowId = '';
+        }
+      }
+      async function quickTranslateEntry(rowId = '') {
+        const targetRowId = rowId || (selected ? selected.row_id : '');
+        if (!targetRowId) {
+          setSaveStatus('先选择一个条目。', 'danger');
           return;
         }
+        hideQuickTranslateConfirm();
         const button = byId('xtl-entry-quick-translate');
         if (button) button.disabled = true;
         setSaveStatus('正在使用当前 AI 账号快速翻译当前条目...', '');
         try {
-          const response = await api(`/api/projects/${encodeURIComponent(project)}/entries/${encodeURIComponent(selected.row_id)}/quick-translate`, {
+          const response = await api(`/api/projects/${encodeURIComponent(project)}/entries/${encodeURIComponent(targetRowId)}/quick-translate`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({apply: true}),
@@ -3297,9 +3856,8 @@ def _entries_script(project: str | None) -> str:
           const index = entries.findIndex(entry => entry.row_id === updated.row_id);
           if (index >= 0) entries[index] = updated;
           renderDetail(updated);
-          const cost = response.cost_usd == null ? '' : ` 费用约 $${Number(response.cost_usd).toFixed(6)}。`;
           const validation = response.validation && response.validation.failures && response.validation.failures.length ? ' 已标记为需复查。' : '';
-          setSaveStatus(`快速翻译已写入本项目记忆库：${response.profile || '当前账号'}。${cost}${validation}`, response.validation && response.validation.failures && response.validation.failures.length ? '' : 'good');
+          setSaveStatus(`快速翻译已写入本项目记忆库：${response.profile || '当前账号'}。${validation}`, response.validation && response.validation.failures && response.validation.failures.length ? '' : 'good');
         } catch (error) {
           setSaveStatus(`快速翻译失败：${error.message || error} 请到“账号”页检查 API Key、模型和余额，或稍后重试。`, 'danger');
         } finally {
@@ -3309,9 +3867,10 @@ def _entries_script(project: str | None) -> str:
       async function submitBatchQueue() {
         const rowIds = [...checkedRows];
         if (!rowIds.length) {
-          setQueueStatus('请先在左侧列表勾选至少一个未翻译条目。', 'danger');
+          setQueueStatus('请先在左侧列表勾选至少一个条目。提交队列只会接收其中未翻译、适合交给 AI 的条目。', 'danger');
           return;
         }
+        const batchSize = Math.max(1, Math.min(500, Number(byId('xtl-entries-batch-size')?.value || 100)));
         const button = byId('xtl-entries-submit-queue');
         if (button) button.disabled = true;
         setQueueStatus('正在写入批量队列请求...', '');
@@ -3319,37 +3878,93 @@ def _entries_script(project: str | None) -> str:
           const response = await api(`/api/projects/${encodeURIComponent(project)}/batch-queue`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({row_ids: rowIds}),
+            body: JSON.stringify({row_ids: rowIds, batch_size: batchSize}),
           });
           checkedRows.clear();
+          lastSelectionAnchorRowId = '';
           renderTable();
           const skipped = response.skipped_count ? `，跳过 ${response.skipped_count} 个非未翻译条目` : '';
+          const llmSkipped = response.llm_skipped_count ? `；其中 ${response.llm_skipped_count} 条只有占位符/数字等内容，不会交给 AI` : '';
           const tech = byId('xtl-entries-queue-tech');
           const command = byId('xtl-entries-queue-command');
           if (tech && command) {
             command.textContent = response.command || '';
             tech.hidden = !response.command;
           }
-          setQueueStatus(`已加入待翻译清单 ${response.queued_count} 个条目${skipped}，还没有开始计费。下一步请让翻译助手生成提示词；如果开启了预览，你会先在“提示词”页确认后才会开始批量翻译。`, 'good');
+          const groupSummary = response.group_count === 1
+            ? `预计 1 组，实际 ${response.last_group_size || response.queued_count} 条`
+            : `预计 ${response.group_count} 组，每组最多 ${response.batch_size} 条，最后一组 ${response.last_group_size} 条`;
+          setQueueStatus(`已加入待翻译清单 ${response.queued_count} 个条目，${groupSummary}${skipped}${llmSkipped}，还没有调用 AI。下一步请让翻译助手生成提示词；如果开启了预览，你会先在“提示词”页确认后才会开始批量翻译。`, 'good');
         } catch (error) {
           setQueueStatus(`提交失败：${error.message || error}`, 'danger');
         } finally {
           if (button) button.disabled = false;
         }
       }
+      async function bulkUpdateStatus(newStatus) {
+        const rowIds = [...checkedRows];
+        if (!rowIds.length) {
+          setQueueStatus('请先在左侧列表勾选至少一个条目。', 'danger');
+          return;
+        }
+        const label = statusLabels[newStatus] || newStatus;
+        const buttons = [
+          byId('xtl-entries-bulk-translated'),
+          byId('xtl-entries-bulk-untranslated'),
+        ].filter(Boolean);
+        buttons.forEach(button => { button.disabled = true; });
+        setQueueStatus(`正在批量标记为${label}...`);
+        try {
+          const response = await api(`/api/projects/${encodeURIComponent(project)}/entries/bulk-status`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              row_ids: rowIds,
+              status: newStatus,
+              reason: `Web Entries tab bulk mark ${newStatus}`,
+            }),
+          });
+          checkedRows.clear();
+          lastSelectionAnchorRowId = '';
+          await loadEntries({keepSelection: true});
+          const skipped = response.skipped_count ? `，跳过 ${response.skipped_count} 条：${(response.skipped || []).slice(0, 3).map(item => item.reason).join('；')}` : '';
+          setQueueStatus(`已批量标记 ${response.updated_count || 0} 条为${label}${skipped}。`, response.updated_count ? 'good' : 'danger');
+        } catch (error) {
+          setQueueStatus(`批量标记失败：${error.message || error}`, 'danger');
+        } finally {
+          buttons.forEach(button => { button.disabled = false; });
+        }
+      }
       document.addEventListener('click', event => {
         if (event.target && event.target.classList && event.target.classList.contains('xtl-entry-check')) {
           const rowId = event.target.getAttribute('data-row-id');
-          if (rowId && event.target.checked) checkedRows.add(rowId);
-          if (rowId && !event.target.checked) checkedRows.delete(rowId);
-          setQueueStatus(checkedRows.size ? `已勾选 ${checkedRows.size} 个未翻译条目。` : '勾选条目后可以交给批量队列；不会直接调用 AI，下一步仍需翻译助手生成提示词并让你预览。');
+          if (rowId && event.shiftKey) {
+            setSelectionRange(rowId, event.target.checked);
+            renderTable();
+          } else if (rowId) {
+            setRowChecked(rowId, event.target.checked);
+          }
+          if (rowId) lastSelectionAnchorRowId = rowId;
+          updateSelectionStatus();
           event.stopPropagation();
           return;
         }
         const row = event.target && event.target.closest ? event.target.closest('#xtl-entries-table tbody tr[data-row-id]') : null;
         if (row) selectRow(row.getAttribute('data-row-id'));
+        if (event.target && event.target.id === 'xtl-entries-select-all') {
+          selectAllVisibleRows();
+        }
+        if (event.target && event.target.id === 'xtl-entries-clear-selection') {
+          clearSelectedRows();
+        }
         if (event.target && event.target.id === 'xtl-entries-submit-queue') {
           submitBatchQueue();
+        }
+        if (event.target && event.target.id === 'xtl-entries-bulk-translated') {
+          bulkUpdateStatus('translated');
+        }
+        if (event.target && event.target.id === 'xtl-entries-bulk-untranslated') {
+          bulkUpdateStatus('untranslated');
         }
         if (event.target && event.target.id === 'xtl-entry-save') {
           saveEntry({
@@ -3364,7 +3979,15 @@ def _entries_script(project: str | None) -> str:
           setSaveStatus('已恢复为当前保存的译文，还没有再次写入。');
         }
         if (event.target && event.target.id === 'xtl-entry-quick-translate') {
-          quickTranslateEntry();
+          showQuickTranslateConfirm();
+        }
+        if (event.target && event.target.id === 'xtl-entry-quick-confirm-ok') {
+          const panel = byId('xtl-entry-quick-confirm');
+          quickTranslateEntry(panel?.dataset?.rowId || '');
+        }
+        if (event.target && event.target.id === 'xtl-entry-quick-confirm-cancel') {
+          hideQuickTranslateConfirm();
+          setSaveStatus('已取消快速翻译，没有调用 AI。');
         }
         if (event.target && event.target.id === 'xtl-entry-lock' && selected) {
           if (!window.confirm('这会让该文本保持原文，并标记为不需要翻译。不会修改原始 MOD 文件。确定吗？')) return;
@@ -3397,12 +4020,77 @@ def _theme_file(name: str) -> str:
     return (Path(__file__).parent / "themes" / name).read_text(encoding="utf-8")
 
 
-def _create_batch_queue(project: str, row_ids: list[str]) -> dict[str, Any]:
+def _bulk_update_entries_status(
+    project: str,
+    row_ids: list[str],
+    status_value: str,
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    from bgs_translator.cli.edit import _append_audit, _apply_edit, _get_unit
+
+    selected_ids = list(dict.fromkeys(item.strip() for item in row_ids if isinstance(item, str) and item.strip()))
+    if not selected_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先勾选至少一个条目。")
+    if len(selected_ids) > 500:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "一次最多批量修改 500 个条目。")
+    new_status = status_value.strip().lower()
+    allowed_statuses = {"untranslated", "translated", "partial", "locked"}
+    if new_status not in allowed_statuses:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"status must be one of {sorted(allowed_statuses)}")
+
+    project_root = paths.project_root(project)
+    conn = open_memory_db(project_root)
+    updated: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    try:
+        for row_id in selected_ids:
+            before = _get_unit(conn, row_id)
+            if before is None:
+                skipped.append({"row_id": row_id, "reason": "条目已经不存在"})
+                continue
+            source = str(before.get("source") or "")
+            current_dest = before.get("dest")
+            if new_status == "untranslated":
+                next_dest = None
+            elif new_status == "locked":
+                next_dest = str(current_dest or source)
+            else:
+                next_dest = str(current_dest or "").strip()
+                if not next_dest:
+                    skipped.append({"row_id": row_id, "reason": "没有译文，不能标记为已翻译或需复查"})
+                    continue
+            conn.execute("BEGIN")
+            after = _apply_edit(conn, row_id, dest=next_dest, status=new_status)
+            conn.commit()
+            _append_audit(project_root, row_id=row_id, before=before, after=after, reason=reason, operation="bulk-status")
+            updated.append(after)
+    except sqlite3.Error as exc:
+        conn.rollback()
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from exc
+    finally:
+        conn.close()
+
+    return {
+        "ok": True,
+        "project": project,
+        "status": new_status,
+        "updated_count": len(updated),
+        "skipped_count": len(skipped),
+        "skipped": skipped,
+        "entries": updated,
+    }
+
+
+def _create_batch_queue(project: str, row_ids: list[str], *, batch_size: int | None = None) -> dict[str, Any]:
     selected_ids = list(dict.fromkeys(item.strip() for item in row_ids if isinstance(item, str) and item.strip()))
     if not selected_ids:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先勾选至少一个条目。")
     if len(selected_ids) > 500:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "一次最多提交 500 个条目到批量队列。")
+    normalized_batch_size = int(batch_size or 100)
+    if normalized_batch_size < 1 or normalized_batch_size > 500:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "每组条数必须在 1 到 500 之间。")
 
     project_root = paths.project_root(project)
     data = _project_toml_data(project_root)
@@ -3421,12 +4109,13 @@ def _create_batch_queue(project: str, row_ids: list[str]) -> dict[str, Any]:
             SELECT row_id, plugin, formid, edid, signature, field, source, dest, status
             FROM units
             WHERE row_id IN ({placeholders})
-            ORDER BY signature, field, formid, index_n
             """,
             selected_ids,
         ).fetchall()
     finally:
         conn.close()
+    row_order = {row_id: index for index, row_id in enumerate(selected_ids)}
+    rows = sorted(rows, key=lambda row: row_order.get(str(row[0]), len(row_order)))
     found_ids = {str(row[0]) for row in rows}
     missing = [row_id for row_id in selected_ids if row_id not in found_ids]
     if missing:
@@ -3434,7 +4123,17 @@ def _create_batch_queue(project: str, row_ids: list[str]) -> dict[str, Any]:
     untranslated = [row for row in rows if str(row[8]) == "untranslated"]
     if not untranslated:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "勾选的条目都不是“未翻译”状态，不会加入批量队列。")
-    queued_ids = [str(row[0]) for row in untranslated]
+    llm_skip_reasons = _queue_llm_skip_reasons(untranslated)
+    llm_skipped_count = sum(llm_skip_reasons.values())
+    queued_rows = [row for row in untranslated if not _queue_row_skip_reason(row)]
+    if not queued_rows:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "勾选的未翻译条目都是占位符、数字或内部标识，不需要交给 AI 翻译。",
+        )
+    queued_ids = [str(row[0]) for row in queued_rows]
+    group_count = (len(queued_ids) + normalized_batch_size - 1) // normalized_batch_size
+    last_group_size = len(queued_ids) % normalized_batch_size or normalized_batch_size
     queue_id = f"queue-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
     queue_dir = project_root / "batches" / "selection-queue"
     queue_dir.mkdir(parents=True, exist_ok=True)
@@ -3444,13 +4143,19 @@ def _create_batch_queue(project: str, row_ids: list[str]) -> dict[str, Any]:
         target_lang=target_lang,
         profile_name=profile_name,
         game=game,
+        batch_size=normalized_batch_size,
     )
     payload = {
         "queue_id": queue_id,
         "project": project,
         "created_at": datetime.now(UTC).isoformat(),
         "row_ids": queued_ids,
+        "batch_size": normalized_batch_size,
+        "group_count": group_count,
+        "last_group_size": last_group_size,
         "skipped_non_untranslated": [str(row[0]) for row in rows if str(row[8]) != "untranslated"],
+        "llm_skipped_count": llm_skipped_count,
+        "llm_skipped_reasons": llm_skip_reasons,
         "target_lang": target_lang,
         "game": game,
         "profile": profile_name,
@@ -3467,7 +4172,7 @@ def _create_batch_queue(project: str, row_ids: list[str]) -> dict[str, Any]:
                 "source": str(row[6]),
                 "status": str(row[8]),
             }
-            for row in untranslated[:50]
+            for row in queued_rows[:50]
         ],
     }
     queue_path = queue_dir / f"{queue_id}.json"
@@ -3477,10 +4182,35 @@ def _create_batch_queue(project: str, row_ids: list[str]) -> dict[str, Any]:
         "queue_id": queue_id,
         "queue_path": str(queue_path),
         "queued_count": len(queued_ids),
+        "batch_size": normalized_batch_size,
+        "group_count": group_count,
+        "last_group_size": last_group_size,
         "skipped_count": len(rows) - len(untranslated),
+        "llm_skipped_count": llm_skipped_count,
+        "llm_skipped_reasons": llm_skip_reasons,
         "command": command,
         "message": "已把勾选条目加入待翻译清单。下一步请让翻译助手生成提示词，并等待你预览确认。",
     }
+
+
+def _queue_llm_skip_reasons(rows: list[Any]) -> dict[str, int]:
+    reasons: Counter[str] = Counter()
+    for row in rows:
+        if reason := _queue_row_skip_reason(row):
+            reasons[reason] += 1
+    return dict(sorted(reasons.items()))
+
+
+def _queue_row_skip_reason(row: Any) -> str:
+    return _masked_skip_reason(
+        plugin=str(row[1]),
+        formid=int(row[2]),
+        formid_sanitized=int(row[2]),
+        edid=str(row[3] or ""),
+        signature=str(row[4]),
+        field=str(row[5]),
+        source=str(row[6] or ""),
+    )
 
 
 def _batch_queue_command(
@@ -3490,6 +4220,7 @@ def _batch_queue_command(
     target_lang: str,
     profile_name: str,
     game: str,
+    batch_size: int,
 ) -> str:
     parts = [
         "xtl",
@@ -3502,6 +4233,8 @@ def _batch_queue_command(
         "ui_label",
         "--target-lang",
         target_lang,
+        "--batch-size",
+        str(batch_size),
     ]
     if profile_name:
         parts.extend(["--profile", profile_name])
@@ -3718,13 +4451,15 @@ def _import_project_from_plugin(payload: ProjectImportRequest) -> dict[str, Any]
     except KeyError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"暂不支持这个游戏：{selected_game}") from exc
 
-    strings_status = _localized_strings_status(plugin, header.is_localized, payload.source_lang)
+    strings_status = _localized_strings_status(
+        plugin, header.is_localized, payload.source_lang, selected_game
+    )
     if header.is_localized and not strings_status["found"]:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             {
                 "code": "missing_strings",
-                "message": "这个插件使用本地化 Strings 文件，但旁边没有找到对应的 Strings/DLStrings/ILStrings。请把插件和 Strings 文件放在同一个 MOD 目录后再导入。",
+                "message": "这个插件使用本地化 Strings 文件，但没有从同目录 Strings 或 BA2 archive 里解析到文本。请确认插件旁边有对应 archive，或在 MO2 中启用包含该插件文本的 MOD。",
                 "strings": strings_status,
             },
         )
@@ -3775,6 +4510,66 @@ def _import_project_from_plugin(payload: ProjectImportRequest) -> dict[str, Any]
     }
 
 
+def _select_plugin_file(current_path: str = "") -> dict[str, Any]:
+    initial_dir = _plugin_dialog_initial_dir(current_path)
+    env = os.environ.copy()
+    if initial_dir:
+        env["XTL_FILE_DIALOG_INITIAL_DIR"] = str(initial_dir)
+    script = r"""
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = '选择要导入的 MOD 文件'
+$dialog.Filter = 'Bethesda MOD 文件 (*.esm;*.esp;*.esl)|*.esm;*.esp;*.esl|所有文件 (*.*)|*.*'
+$dialog.CheckFileExists = $true
+$dialog.Multiselect = $false
+if ($env:XTL_FILE_DIALOG_INITIAL_DIR -and (Test-Path -LiteralPath $env:XTL_FILE_DIALOG_INITIAL_DIR)) {
+  $dialog.InitialDirectory = $env:XTL_FILE_DIALOG_INITIAL_DIR
+}
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+  [pscustomobject]@{ path = $dialog.FileName; canceled = $false } | ConvertTo-Json -Compress
+} else {
+  [pscustomobject]@{ path = ''; canceled = $true } | ConvertTo-Json -Compress
+}
+"""
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-STA", "-Command", script],
+        capture_output=True,
+        check=False,
+        encoding="utf-8",
+        env=env,
+        timeout=300,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or "Windows 文件选择器启动失败。"
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail)
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    if not lines:
+        return {"path": "", "canceled": True}
+    try:
+        data = json.loads(lines[-1])
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Windows 文件选择器返回了无法读取的结果。") from exc
+    path = str(data.get("path") or "")
+    if path and Path(path).suffix.casefold() not in {".esp", ".esm", ".esl"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请选择 .esm、.esp 或 .esl 文件。")
+    return {"path": path, "canceled": bool(data.get("canceled") or not path)}
+
+
+def _plugin_dialog_initial_dir(current_path: str) -> Path | None:
+    raw = current_path.strip()
+    if raw:
+        candidate = Path(raw).expanduser()
+        if candidate.is_file():
+            return candidate.parent
+        if candidate.is_dir():
+            return candidate
+    for candidate in (Path("D:/Starfield MO2/mods"), Path("D:/awesome-bgs-mod-master/.artifacts/bgs-mod-plugins")):
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
 def _read_tes4_header_for_import(plugin: Path) -> TES4Header:
     walker = TES4FamilyWalker(plugin)
     next(walker.walk(), None)
@@ -3783,14 +4578,21 @@ def _read_tes4_header_for_import(plugin: Path) -> TES4Header:
     return walker.header
 
 
-def _localized_strings_status(plugin: Path, localized: bool, source_lang: str) -> dict[str, Any]:
+def _localized_strings_status(
+    plugin: Path, localized: bool, source_lang: str, game: str | None = None
+) -> dict[str, Any]:
     slug = "english" if source_lang.casefold() == "en" else source_lang.casefold()
-    found = find_strings_files(plugin, slug)
+    found = find_strings_sources(plugin, slug, game=game)
     required = ["STRINGS", "DLSTRINGS", "ILSTRINGS"] if localized else []
     return {
         "localized": localized,
         "language_slug": slug,
-        "found": {kind: str(path) for kind, path in found.items()},
+        "found": {kind: str(source.path) for kind, source in found.items()},
+        "archives": {
+            kind: str(source.archive_path)
+            for kind, source in found.items()
+            if source.archive_path is not None
+        },
         "missing": [kind for kind in required if kind not in found],
         "required": required,
     }
@@ -3832,7 +4634,14 @@ def _page_href(page: str, project: str | None) -> str:
 
 def _project_summary(project: str | None) -> dict[str, Any]:
     if project is None:
-        return {"game": "", "units_total": 0, "units_translated": 0, "cost_spent": 0.0, "source": _empty_source_details()}
+        return {
+            "game": "",
+            "units_total": 0,
+            "units_translated": 0,
+            "units_pending_ai": 0,
+            "source": _empty_source_details(),
+            "signature_status": [],
+        }
     project_root = paths.project_root(project)
     game = "Unknown"
     data = _project_toml_data(project_root)
@@ -3841,21 +4650,172 @@ def _project_summary(project: str | None) -> dict[str, Any]:
         game = str((data.get("project") or {}).get("game") or game)
     memory_path = project_root / "memory" / "memory.sqlite"
     if not memory_path.exists():
-        return {"game": game, "units_total": 0, "units_translated": 0, "cost_spent": 0.0, "source": source}
-    conn = sqlite3.connect(memory_path)
-    try:
-        units_total = int(conn.execute("SELECT COUNT(*) FROM units").fetchone()[0])
-        units_translated = int(conn.execute("SELECT COUNT(*) FROM units WHERE status = 'translated'").fetchone()[0])
-        cost = conn.execute("SELECT COALESCE(SUM(cost_total_usd), 0) FROM runs").fetchone()[0]
         return {
             "game": game,
-            "units_total": units_total,
-            "units_translated": units_translated,
-            "cost_spent": float(cost or 0.0),
+            "units_total": 0,
+            "units_translated": 0,
+            "units_pending_ai": 0,
             "source": source,
+            "signature_status": [],
+        }
+    conn = sqlite3.connect(memory_path)
+    try:
+        signature_status = _signature_status_rows(conn)
+        return {
+            "game": game,
+            "units_total": sum(int(row.get("total") or 0) for row in signature_status),
+            "units_translated": sum(int(row.get("translated") or 0) for row in signature_status),
+            "units_pending_ai": sum(int(row.get("pending_ai") or 0) for row in signature_status),
+            "source": source,
+            "signature_status": signature_status,
         }
     finally:
         conn.close()
+
+
+def _signature_status_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT plugin, formid, formid_sanitized, edid, signature, field, source, dest, status, sparams
+        FROM units
+        """
+    ).fetchall()
+    stats: dict[str, Counter[str]] = {}
+    for row in rows:
+        signature = str(row[4] or "")
+        bucket = stats.setdefault(signature, Counter())
+        status_value = _effective_unit_status(
+            status=str(row[8] or ""),
+            sparams=int(row[9] or 0),
+            skip_reason=_translation_unit_skip_reason(row),
+            signature=signature,
+            field=str(row[5] or ""),
+        )
+        bucket["total"] += 1
+        if status_value == "translated":
+            bucket["translated"] += 1
+        elif status_value == "locked":
+            bucket["locked"] += 1
+        elif status_value in {"partial", "manual_review", "failed"}:
+            bucket["partial"] += 1
+        elif status_value == "untranslated":
+            bucket["pending_ai"] += 1
+        else:
+            bucket["other"] += 1
+    return [
+        {
+            "signature": signature,
+            "total": int(counter["total"]),
+            "translated": int(counter["translated"]),
+            "pending_ai": int(counter["pending_ai"]),
+            "partial": int(counter["partial"]),
+            "locked": int(counter["locked"]),
+            "other": int(counter["other"]),
+        }
+        for signature, counter in sorted(stats.items(), key=lambda item: (-int(item[1]["total"]), item[0].casefold()))
+        if int(counter["total"]) > 0
+    ]
+
+
+def _translation_unit_skip_reason(row: Any) -> str:
+    return _masked_skip_reason(
+        plugin=str(row[0]),
+        formid=int(row[1]),
+        formid_sanitized=int(row[2] if row[2] is not None else row[1]),
+        edid=str(row[3] or ""),
+        signature=str(row[4]),
+        field=str(row[5]),
+        source=str(row[6] or ""),
+    )
+
+
+def _entry_row_skip_reason(row: sqlite3.Row | dict[str, Any]) -> str:
+    if isinstance(row, sqlite3.Row):
+        return _masked_skip_reason(
+            plugin=str(row["plugin"]),
+            formid=int(row["formid"]),
+            formid_sanitized=int(row["formid_sanitized"] if row["formid_sanitized"] is not None else row["formid"]),
+            edid=str(row["edid"] or ""),
+            signature=str(row["signature"]),
+            field=str(row["field"]),
+            source=str(row["source"] or ""),
+        )
+    return _masked_skip_reason(
+        plugin=str(row.get("plugin") or ""),
+        formid=int(row.get("formid") or 0),
+        formid_sanitized=int(row.get("formid_sanitized") or row.get("formid") or 0),
+        edid=str(row.get("edid") or ""),
+        signature=str(row.get("signature") or ""),
+        field=str(row.get("field") or ""),
+        source=str(row.get("source") or ""),
+    )
+
+
+def _effective_unit_status(
+    *,
+    status: str,
+    sparams: int = 0,
+    skip_reason: str = "",
+    signature: str = "",
+    field: str = "",
+) -> str:
+    params = SStrParam(int(sparams or 0) & 0xFF)
+    if SStrParam.LOCKED_TRANS in params:
+        return "locked"
+    if signature.strip().upper() == "TES4" and field.strip().upper() in {"CNAM", "SNAM"}:
+        return "locked"
+    if skip_reason:
+        return "locked"
+    if SStrParam.INCOMPLETE_TRANS in params:
+        return "partial"
+    if SStrParam.TRANSLATED in params:
+        return "translated"
+    if SStrParam.PENDING in params:
+        return "untranslated"
+    status_value = status.strip().lower()
+    return status_value
+
+
+def _masked_skip_reason(
+    *,
+    plugin: str,
+    formid: int,
+    formid_sanitized: int,
+    edid: str,
+    signature: str,
+    field: str,
+    source: str,
+) -> str:
+    from bgs_translator.parsers.tes4_family import TranslationUnit
+    from bgs_translator.pipeline.mask import build_masked_unit
+
+    unit = TranslationUnit(
+        plugin=plugin,
+        formid=formid,
+        formid_sanitized=formid_sanitized,
+        edid=edid,
+        signature=signature,
+        field=field,
+        source=source,
+    )
+    masked = build_masked_unit(unit)
+    return masked.skip_reason if masked.skip_llm else ""
+
+
+def _signature_label(signature: str) -> str:
+    return {
+        "MESG": "菜单、提示消息、开始选项",
+        "INFO": "对话、NPC 信息",
+        "QUST": "任务名称或任务说明",
+        "BOOK": "书籍、说明文本、终端内容",
+        "CELL": "地点、区域名称",
+        "WEAP": "武器名称或说明",
+        "ARMO": "护甲、服装名称或说明",
+        "NPC_": "角色名称",
+        "FACT": "派系名称",
+        "MISC": "杂项物品",
+        "TERM": "终端菜单或终端文本",
+    }.get(signature, "其它可翻译记录类型")
 
 
 def _project_toml_data(project_root: Path) -> dict[str, Any]:
@@ -4070,15 +5030,38 @@ def _entry_rows(
         return []
     conn = _open_project_db(project)
     try:
+        derived_status_filter = entry_status if entry_status in {"locked", "untranslated", "partial", "translated"} else None
         rows = select_units_filtered(
             conn,
             sigs=[sig] if sig else None,
             fields=[field] if field else None,
-            statuses=[entry_status] if entry_status else None,
+            statuses=None if derived_status_filter else ([entry_status] if entry_status else None),
             search=search,
-            limit=limit,
+            limit=max(limit, min(limit * 5, 5000)),
         )
-        return [_sqlite_row_dict(row) for row in rows]
+        visible: list[dict[str, Any]] = []
+        for row in rows:
+            item = _sqlite_row_dict(row)
+            effective_status = _effective_unit_status(
+                status=str(item.get("status") or ""),
+                sparams=int(item.get("sparams") or 0),
+                skip_reason=_entry_row_skip_reason(row),
+                signature=str(item.get("signature") or ""),
+                field=str(item.get("field") or ""),
+            )
+            item["status"] = effective_status
+            if effective_status == "locked":
+                item["sparams"] = int(SStrParam.LOCKED_TRANS)
+            elif effective_status == "partial":
+                item["sparams"] = int(SStrParam.INCOMPLETE_TRANS)
+            elif effective_status == "translated":
+                item["sparams"] = int(SStrParam.TRANSLATED)
+            else:
+                item["sparams"] = int(item.get("sparams") or 0)
+            if derived_status_filter and effective_status != derived_status_filter:
+                continue
+            visible.append(item)
+        return visible[:limit]
     finally:
         conn.close()
 
@@ -4113,10 +5096,13 @@ def _top_status(project: str | None) -> tuple[str, str]:
     rows = _run_rows(project)
     running = [row for row in rows if str(row.get("status") or "") == "running"]
     if running:
-        return f"有 {len(running)} 个任务运行中，可能继续计费", "danger"
+        return f"有 {len(running)} 个任务运行中，已发送请求可能仍在服务商侧处理", "danger"
     orphaned = [row for row in rows if str(row.get("status") or "") == "orphaned"]
     if orphaned:
-        return f"有 {len(orphaned)} 个历史任务未正常收尾，不会按运行中计费", "warn"
+        return f"有 {len(orphaned)} 个历史任务未正常收尾，当前不会继续运行", "warn"
+    abandoned = [row for row in rows if str(row.get("status") or "") in {"abandoned", "paused"}]
+    if abandoned:
+        return "有历史任务已中断，仅供审计", "warn"
     review = [row for row in rows if str(row.get("status") or "") in {"manual_review", "failed"}]
     if review:
         return "有任务需要处理", "danger"
@@ -4132,15 +5118,22 @@ def _event_kind_label(value: str) -> str:
         "run.start": "开始翻译",
         "run.complete": "全部完成",
         "run.failed": "运行失败",
+        "run.abandoned": "已中断，仅审计",
+        "run.paused": "已中断，仅审计",
         "run.cancelled": "已取消",
         "batch.start": "批次开始",
         "batch.progress": "批次进度更新",
+        "batch.request_sent": "已发送给模型",
+        "batch.response_received": "模型已返回",
         "batch.complete": "批次完成",
         "batch.failed": "批次失败",
+        "batch.abandoned": "已中断，仅审计",
+        "batch.paused": "已中断，仅审计",
+        "batch.waiting_preview": "已中断，仅审计",
         "batch.cancelled": "批次取消",
         "prompt.preview_request": "等待你确认提示词",
         "prompt.preview_response": "已确认提示词",
-        "cost.update": "费用更新",
+        "cost.update": "用量记录",
         "manual_review": "需要人工复查",
     }
     return labels.get(value, value)
@@ -4152,20 +5145,18 @@ def _run_option_label(run: dict[str, Any], index: int) -> str:
         "running": "正在翻译",
         "queued": "排队中",
         "orphaned": "未正常收尾",
+        "abandoned": "已中断，仅审计",
+        "paused": "已中断，仅审计",
+        "waiting_preview": "已中断，仅审计",
         "complete": "已完成",
         "failed": "翻译失败",
         "cancelled": "已取消",
+        "discarded": "已抛弃",
     }.get(str(raw_status or ""), _status_label(raw_status))
     total = run.get("batches_total") or run.get("item_count")
-    cost = run.get("cost_total_usd")
     parts = [f"{status_text}：{'最近一次任务' if index == 1 else f'第 {index} 次任务'}"]
     if total:
         parts.append(f"{total} 组文本")
-    if cost not in {None, ""}:
-        try:
-            parts.append(f"${float(str(cost)):.4f}")
-        except (TypeError, ValueError):
-            pass
     return "，".join(parts)
 
 
@@ -4195,6 +5186,31 @@ def _planned_batch_label(_plan_id: str, _batch_id: str, index: int, batch: dict[
     return f"历史第 {index} 批：{count_text}"
 
 
+def _audit_plan_batch_label(
+    *,
+    project: str,
+    plugin_name: str,
+    planned_at: str,
+    index: int,
+    batch: dict[str, Any],
+) -> str:
+    count = _planned_batch_item_count(batch)
+    count_text = f"{count} 条" if count else "若干条"
+    source = plugin_name or "未记录 ESP/ESM/ESL"
+    return f"{planned_at} / {project} / {source} / 历史第 {index} 批：{count_text}"
+
+
+def _preview_select_label(preview: PreviewRequest) -> str:
+    batch_count = len(preview.items)
+    batch_text = f"{batch_count} 条" if batch_count else "若干条"
+    index = preview.batch_index or 1
+    if preview.total_batches and preview.total_items:
+        return f"当前第 {index}/{preview.total_batches} 组：本组 {batch_text}，本次任务共 {preview.total_items} 条，等待确认"
+    if preview.total_batches:
+        return f"当前第 {index}/{preview.total_batches} 组：本组 {batch_text}，等待确认"
+    return f"当前第 {index} 组文本：{batch_text}，等待确认"
+
+
 def _pending_previews(project: str | None) -> list[PreviewRequest]:
     if project is None:
         return []
@@ -4216,7 +5232,7 @@ def _annotate_run_rows(project: str | None, conn: sqlite3.Connection, rows: list
         if raw_status in {"running", "queued"} and not _run_looks_active(conn, copy, pending_run_ids, now):
             copy["raw_status"] = raw_status
             copy["status"] = "orphaned"
-            copy["status_note"] = "上次任务没有正常写入完成状态；如果没有外部 CLI 还在运行，它不会继续计费。"
+            copy["status_note"] = "上次任务没有正常写入完成状态；如果没有外部 CLI 还在运行，它不会继续执行。"
         annotated.append(copy)
     return annotated
 
@@ -4420,6 +5436,10 @@ def _planned_batches(project: str | None, *, limit: int = 80) -> list[dict[str, 
             continue
         base_prompt = str(data.get("sample_system_prompt") or "")
         plan_id = str(data.get("plan_id") or plan_path.parent.name)
+        plan_project = str(data.get("project") or project)
+        source = _project_source_details(plan_project)
+        plugin_name = str(source.get("plugin_name") or "")
+        planned_at = datetime.fromtimestamp(plan_path.stat().st_mtime).astimezone().strftime("%Y-%m-%d %H:%M")
         for index, batch in enumerate(data.get("batches") or [], start=1):
             if not isinstance(batch, dict):
                 continue
@@ -4431,6 +5451,16 @@ def _planned_batches(project: str | None, *, limit: int = 80) -> list[dict[str, 
             planned.append(
                 {
                     "label": _planned_batch_label(plan_id, batch_id, index, batch),
+                    "audit_label": _audit_plan_batch_label(
+                        project=plan_project,
+                        plugin_name=plugin_name,
+                        planned_at=planned_at,
+                        index=index,
+                        batch=batch,
+                    ),
+                    "project": plan_project,
+                    "source_plugin": plugin_name,
+                    "planned_at": planned_at,
                     "plan_id": plan_id,
                     "batch_id": batch_id,
                     "item_count": _planned_batch_item_count(batch),

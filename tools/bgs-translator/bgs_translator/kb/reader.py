@@ -19,6 +19,7 @@ class KBGlossaryReader:
         kb_root: Path | None = None,
         *,
         user_packs_root: Path | None = None,
+        candidate_source_term_limit: int = 32,
     ) -> None:
         """Discover pack DBs.
 
@@ -27,6 +28,7 @@ class KBGlossaryReader:
         """
         self.kb_root = kb_root or paths.kb_root()
         self.user_packs_root = user_packs_root or paths.kb_user_packs_root()
+        self.candidate_source_term_limit = max(1, int(candidate_source_term_limit))
         self.pack_dbs: list[tuple[str, Path]] = []
         self.user_pack_dbs: list[tuple[str, Path]] = []
         self._discover()
@@ -151,7 +153,7 @@ class KBGlossaryReader:
         DB/language/game/mod scope because large vanilla packs are reused across
         many entries while planning a run.
         """
-        source_terms = tuple(_candidate_source_terms(source_strings or [])) or None
+        source_terms = tuple(_candidate_source_terms(source_strings or [], self.candidate_source_term_limit)) or None
         deduped: dict[str, GlossaryEntry] = {}
         for root_kind, pack_id, db_path in [
             *[("canonical", pack_id, db_path) for pack_id, db_path in self.pack_dbs],
@@ -388,14 +390,14 @@ def _scope_sort_weight(scope: str) -> int:
     return {"do_not_translate": 4, "player": 3, "mod": 2, "vanilla": 1}.get(scope, 0)
 
 
-def _candidate_source_terms(source_strings: list[str]) -> list[str]:
+def _candidate_source_terms(source_strings: list[str], limit: int) -> list[str]:
     terms = [
         token.casefold()
         for source in source_strings
         for token in re.findall(r"[A-Za-z0-9]+", source)
         if len(token) >= 3 or (len(token) >= 2 and token.isupper())
     ]
-    return sorted(set(terms))[:32]
+    return sorted(set(terms))[:limit]
 
 
 __all__ = ["KBGlossaryReader"]

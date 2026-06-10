@@ -10,6 +10,7 @@ import sqlite3
 import sys
 import tomllib
 import uuid
+from collections import Counter
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, NoReturn, cast
@@ -27,7 +28,7 @@ from bgs_translator.core.event_publisher import get_publisher
 from bgs_translator.core.event_queue import GuiEvent
 from bgs_translator.core.web_ipc_client import discover_gui, request_preview_http
 from bgs_translator.kb.glossary import GlossaryComposer
-from bgs_translator.kb.models import GlossaryMatchEvidence
+from bgs_translator.kb.models import GlossaryEntry, GlossaryMatchEvidence
 from bgs_translator.kb.reader import KBGlossaryReader
 from bgs_translator.observability.cost_tracker import CostTracker
 from bgs_translator.observability.rate_tracker import RateTracker
@@ -37,7 +38,7 @@ from bgs_translator.pipeline.clients.base import LLMResponse, TokenUsage, build_
 from bgs_translator.pipeline.clients.synthetic import SyntheticLLMClient
 from bgs_translator.pipeline.extractor import collect_units_for_run
 from bgs_translator.pipeline.mask import build_masked_unit
-from bgs_translator.pipeline.runner import BatchRunner
+from bgs_translator.pipeline.runner import BatchRunner, PreviewAbandoned
 
 batch_app = typer.Typer(no_args_is_help=True)
 SIG_OPTION = typer.Option(None, "--sig")
@@ -79,8 +80,12 @@ def plan_batch(
     memory_path = project_root / "memory" / "memory.sqlite"
     if not memory_path.exists():
         _emit_failure("project_not_found", f"memory.sqlite not found for project: {project}", {})
-    queued_row_ids = _row_ids_from_queue(project_root, queue) if queue else []
+    queue_payload = _queue_payload(project_root, queue) if queue else {}
+    queued_row_ids = _row_ids_from_queue_payload(project_root, queue, queue_payload) if queue else []
     selected_row_ids = [*(row_id or []), *queued_row_ids]
+    effective_batch_size = batch_size
+    if effective_batch_size is None and isinstance(queue_payload.get("batch_size"), int):
+        effective_batch_size = int(queue_payload["batch_size"])
     conn = sqlite3.connect(memory_path)
     try:
         units = collect_units_for_run(
@@ -94,20 +99,29 @@ def plan_batch(
         if selected_row_ids and not units:
             _emit_failure("queue_empty", "Selected row ids did not match untranslated entries.", {"row_ids": selected_row_ids})
         game = _read_project_game(project_root)
+        settings = load_settings()
+        skipped_reasons = _skipped_unit_reasons(units)
         batch_plan = plan_batches(
             units,
             project=project,
             profile_name=profile,
             target_lang=target_lang,
             register=register,
-            glossary_composer=GlossaryComposer(KBGlossaryReader()),
+            glossary_composer=GlossaryComposer(
+                KBGlossaryReader(
+                    candidate_source_term_limit=settings.behavior.glossary_candidate_source_terms
+                )
+            ),
             game=game,
-            batch_size=batch_size,
+            batch_size=effective_batch_size,
             game_lore_world=game_lore_world or game,
             game_context_lore_summary=game_lore_summary,
             mod_context_name=mod_name or project,
             mod_context_theme=mod_theme,
             style_directives=style,
+            force_input_order_batches=bool(selected_row_ids and effective_batch_size),
+            glossary_max_terms=settings.behavior.glossary_max_terms,
+            glossary_max_prompt_chars=settings.behavior.glossary_max_prompt_chars,
         )
         run_id = uuid.uuid4().hex
         run_dir = project_root / "batches" / run_id
@@ -125,6 +139,14 @@ def plan_batch(
             "plan_path": str(plan_path),
             "total_items": batch_plan.total_items,
             "batch_count": len(batch_plan.batches),
+            "batch_size": effective_batch_size,
+            "selected_item_count": len(selected_row_ids) if selected_row_ids else None,
+            "candidate_item_count": len(units),
+            "skipped_item_count": max(0, len(units) - batch_plan.total_items),
+            "skipped_reasons": skipped_reasons,
+            "glossary_max_terms": settings.behavior.glossary_max_terms,
+            "glossary_max_prompt_chars": settings.behavior.glossary_max_prompt_chars,
+            "glossary_candidate_source_terms": settings.behavior.glossary_candidate_source_terms,
             "est_input_tokens": batch_plan.est_input_tokens,
             "est_output_tokens": batch_plan.est_output_tokens,
             "est_cost_usd": batch_plan.est_cost_usd,
@@ -164,9 +186,15 @@ def run_batch(
         profile = get_active_profile(cfg) if cfg.active is not None else cfg.profiles[plan.profile_name]
         client = build_client_for(profile)
     if _preview_enabled_for_session():
-        client = _PreviewingLLMClient(client, profile, project=project, run_id=run_id)
+        client = _PreviewingLLMClient(client, profile, project=project, run_id=run_id, plan=plan)
     runner = BatchRunner(plan, client, RateTracker(profile), CostTracker(profile))
     result = asyncio.run(runner.run(run_id))
+    if result.abandoned:
+        _emit_failure(
+            "preview_abandoned",
+            "prompt_preview_required=true but prompt preview was abandoned before dispatching AI requests.",
+            {"run_id": run_id, "plan_id": plan.plan_id, "summary": asdict(result)},
+        )
     _emit_success({"run_id": run_id, "plan_id": plan.plan_id, "dry_run": dry_run, "summary": asdict(result)})
 
 
@@ -227,53 +255,103 @@ def _read_project_game(project_root: Path) -> str:
     return str(game) if game else "SkyrimSE"
 
 
-def _row_ids_from_queue(project_root: Path, queue: str | None) -> list[str]:
+def _queue_payload(project_root: Path, queue: str | None) -> dict[str, Any]:
     if not queue:
-        return []
+        return {}
     queue_path = Path(queue)
     if not queue_path.exists():
         queue_path = project_root / "batches" / "selection-queue" / f"{queue}.json"
     if not queue_path.exists():
         _emit_failure("queue_not_found", f"Queue request not found: {queue}", {"queue": queue})
     data = json.loads(queue_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        _emit_failure("queue_invalid", f"Queue request is not an object: {queue_path}", {"queue": str(queue_path)})
+    return data
+
+
+def _row_ids_from_queue_payload(project_root: Path, queue: str | None, data: dict[str, Any]) -> list[str]:
+    if not queue:
+        return []
+    queue_path = Path(queue)
+    if not queue_path.exists():
+        queue_path = project_root / "batches" / "selection-queue" / f"{queue}.json"
     row_ids = data.get("row_ids") if isinstance(data, dict) else None
     if not isinstance(row_ids, list) or not all(isinstance(item, str) and item for item in row_ids):
         _emit_failure("queue_invalid", f"Queue request has no row_ids list: {queue_path}", {"queue": str(queue_path)})
     return list(dict.fromkeys(row_ids))
 
 
+def _skipped_unit_reasons(units: list[TranslationUnit]) -> dict[str, int]:
+    reasons = Counter(masked.skip_reason for unit in units if (masked := build_masked_unit(unit)).skip_llm)
+    return {reason: count for reason, count in sorted(reasons.items()) if reason}
+
+
 class _PreviewingLLMClient:
     """LLM client wrapper that performs GUI prompt approval before dispatch."""
 
-    def __init__(self, inner: Any, profile: ProviderProfile, *, project: str, run_id: str) -> None:
+    def __init__(
+        self,
+        inner: Any,
+        profile: ProviderProfile,
+        *,
+        project: str,
+        run_id: str,
+        plan: BatchPlan,
+    ) -> None:
         self._inner = inner
         self.profile = profile
         self._project = project
         self._run_id = run_id
         self._approve_all_remaining = False
+        self._preview_lock = asyncio.Lock()
+        self.stop_run_on_abandon = True
+        self._batch_indexes = {batch.batch_id: index for index, batch in enumerate(plan.batches, start=1)}
+        self._total_batches = len(plan.batches)
+        self._total_items = plan.total_items
 
-    async def translate_batch(self, batch: Batch, system_prompt: str) -> LLMResponse:
-        prompt = system_prompt
-        if not self._approve_all_remaining:
+    @property
+    def allow_parallel_batches(self) -> bool:
+        return self._approve_all_remaining
+
+    async def preview_batch(self, batch: Batch, system_prompt: str) -> dict[str, Any]:
+        """Ask the GUI for approval without dispatching the provider request."""
+
+        if self._approve_all_remaining:
+            return {"op": "approve_all", "prompt": system_prompt}
+        async with self._preview_lock:
+            if self._approve_all_remaining:
+                return {"op": "approve_all", "prompt": system_prompt}
             response = self._request_preview(batch, system_prompt)
             op = str(response.get("op", "approved"))
             if op == "approved":
-                prompt = str(response.get("prompt", system_prompt))
-            elif op == "approve_all":
-                prompt = str(response.get("prompt", system_prompt))
+                return {"op": "approved", "prompt": str(response.get("prompt", system_prompt))}
+            if op == "approve_all":
                 self._approve_all_remaining = True
-            elif op == "discarded":
-                return _discarded_response(batch)
-            elif op in {"no_gui", "timeout", "transport_unavailable"}:
+                return {"op": "approve_all", "prompt": str(response.get("prompt", system_prompt))}
+            if op == "discarded":
+                return {"op": "discarded", "response": _discarded_response(batch)}
+            if op in {"no_gui", "timeout", "transport_unavailable"}:
                 if load_settings().behavior.prompt_preview_required:
-                    raise RuntimeError(
+                    raise PreviewAbandoned(
                         f"prompt_preview_required=true but GUI is unreachable (op={op}). "
                         "Start the GUI (`xtl gui`) or set "
                         "behavior.prompt_preview_required=false."
                     )
                 log.info("Using original prompt for batch %s after preview op=%s", batch.batch_id, op)
-                prompt = system_prompt
-        return cast(LLMResponse, await self._inner.translate_batch(batch, prompt))
+                return {"op": "approved", "prompt": system_prompt}
+            return {"op": op, "prompt": str(response.get("prompt", system_prompt))}
+
+    async def translate_preapproved_batch(self, batch: Batch, system_prompt: str) -> LLMResponse:
+        """Dispatch a batch whose prompt has already passed GUI approval."""
+
+        return cast(LLMResponse, await self._inner.translate_batch(batch, system_prompt))
+
+    async def translate_batch(self, batch: Batch, system_prompt: str) -> LLMResponse:
+        decision = await self.preview_batch(batch, system_prompt)
+        response = decision.get("response")
+        if isinstance(response, LLMResponse):
+            return response
+        return await self.translate_preapproved_batch(batch, str(decision.get("prompt", system_prompt)))
 
     async def aclose(self) -> None:
         close = getattr(self._inner, "aclose", None)
@@ -292,6 +370,9 @@ class _PreviewingLLMClient:
                     "backend": backend,
                     "has_web_gui": discovered is not None,
                     "item_count": len(batch.items),
+                    "batch_index": self._batch_indexes.get(batch.batch_id),
+                    "total_batches": self._total_batches,
+                    "total_items": self._total_items,
                     "prompt_chars": len(system_prompt),
                     "prompt_preview_required": load_settings().behavior.prompt_preview_required,
                 },
@@ -307,6 +388,9 @@ class _PreviewingLLMClient:
                 glossary_subset=_dict_list(batch.glossary_subset),
                 do_not_translate=batch.do_not_translate,
                 glossary_evidence=_dict_list(batch.glossary_evidence),
+                batch_index=self._batch_indexes.get(batch.batch_id),
+                total_batches=self._total_batches,
+                total_items=self._total_items,
                 timeout=300.0,
             )
         try:
@@ -456,13 +540,18 @@ def _load_batch(data: dict[str, Any]) -> Batch:
         batch_id=str(data["batch_id"]),
         items=items,
         parent_context_summary=data.get("parent_context_summary"),
-        glossary_subset=[],
+        glossary_subset=[
+            GlossaryEntry.model_validate(item)
+            for item in data.get("glossary_subset", [])
+            if isinstance(item, dict)
+        ],
         do_not_translate=[str(item) for item in data.get("do_not_translate", [])],
         glossary_evidence=[
             GlossaryMatchEvidence.model_validate(item)
             for item in data.get("glossary_evidence", [])
             if isinstance(item, dict)
         ],
+        system_prompt=str(data["system_prompt"]) if data.get("system_prompt") else None,
     )
 
 

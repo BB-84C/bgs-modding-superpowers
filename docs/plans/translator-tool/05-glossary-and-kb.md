@@ -295,7 +295,7 @@ Format rules:
 - For `confidence = canonical`, no extra hint
 - For `confidence = preferred`, add "prefer this exact form"
 - For `confidence = candidate`, add "candidate; LLM may use judgment"
-- Maximum 50 entries per prompt (trimmed by relevance score if exceeded — see §8)
+- Maximum 500 entries per prompt (trimmed by relevance score if exceeded — see §8)
 
 For the `${do_not_translate_list}` slot:
 
@@ -328,7 +328,7 @@ Confidence weights:
 - `preferred`: 0.8
 - `candidate`: 0.5
 
-Top 50 by score are included. If more than 50 DNT entries match, all DNT entries are included (the soft cap doesn't apply to hard rules).
+Top 500 by score are included. If more than 500 DNT entries match, all DNT entries are included (the soft cap doesn't apply to hard rules).
 
 ---
 

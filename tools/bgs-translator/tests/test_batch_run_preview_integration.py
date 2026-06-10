@@ -109,9 +109,10 @@ def test_preview_no_gui_emits_warning(tmp_path: Path, monkeypatch: pytest.Monkey
 
     result = CliRunner().invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run"])
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code != 0
     assert "preview skipped" in result.stderr
     assert "GUI not reachable" in result.stderr
+    assert "prompt_preview_required=true" in result.output
 
 
 def test_preview_transport_unavailable_emits_warning(
@@ -138,9 +139,10 @@ def test_preview_transport_unavailable_emits_warning(
 
     result = CliRunner().invoke(app, ["batch", "run", "demo", "--plan", plan_id, "--dry-run"])
 
-    assert result.exit_code == 0, result.output
+    assert result.exit_code != 0
     assert "transport missing" in result.stderr
     assert "install pywin32" in result.stderr
+    assert "prompt_preview_required=true" in result.output
 
 
 def _create_preview_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:

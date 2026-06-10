@@ -18,6 +18,8 @@ __all__ = [
     "STATUS_PRIORITY",
     "SStrParam",
     "from_byte",
+    "normalize_params_for_status",
+    "params_for_status",
     "to_byte",
     "ui_color",
 ]
@@ -60,6 +62,15 @@ STATUS_PRIORITY: tuple[tuple[SStrParam, str], ...] = (
 
 DEFAULT_UI_COLOR: str = "default"
 
+_STATUS_TO_PARAMS: dict[str, SStrParam] = {
+    "untranslated": SStrParam.NONE,
+    "translated": SStrParam.TRANSLATED,
+    "partial": SStrParam.INCOMPLETE_TRANS,
+    "manual_review": SStrParam.INCOMPLETE_TRANS,
+    "failed": SStrParam.INCOMPLETE_TRANS,
+    "locked": SStrParam.LOCKED_TRANS,
+}
+
 
 def to_byte(params: SStrParam | int) -> int:
     """Serialize sParams to the 1-byte on-disk representation.
@@ -75,6 +86,26 @@ def from_byte(value: int) -> SStrParam:
     if not 0 <= value <= 0xFF:
         raise ValueError(f"sParams byte out of range: {value!r}")
     return SStrParam(value)
+
+
+def params_for_status(status: str) -> SStrParam:
+    """Return the canonical xTranslator flag for an XTL unit status."""
+
+    return _STATUS_TO_PARAMS.get(status.strip().lower(), SStrParam.NONE)
+
+
+def normalize_params_for_status(status: str, params: SStrParam | int) -> SStrParam:
+    """Make XTL's status column authoritative for xTranslator category flags.
+
+    xTranslator treats ``lockedTrans`` as exclusive before SST persistence. For
+    the other user-visible buckets, XTL stores one category flag so filters in
+    our GUI and xTranslator do not drift apart.
+    """
+
+    canonical = params_for_status(status)
+    if canonical == SStrParam.NONE:
+        return SStrParam(int(params) & 0xFF)
+    return canonical
 
 
 def ui_color(params: SStrParam | int) -> str:

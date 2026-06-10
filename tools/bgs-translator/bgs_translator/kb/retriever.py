@@ -30,6 +30,8 @@ STOP_WORDS = {
     "you",
     "your",
 }
+DEFAULT_PROMPT_GLOSSARY_MAX_TERMS = 500
+DEFAULT_PROMPT_GLOSSARY_MAX_CHARS = 80000
 
 
 @dataclass(frozen=True)
@@ -80,8 +82,8 @@ class GlossaryRetriever:
         game: str,
         *,
         mod_slug: str | None = None,
-        max_terms: int = 50,
-        max_prompt_chars: int = 8000,
+        max_terms: int = DEFAULT_PROMPT_GLOSSARY_MAX_TERMS,
+        max_prompt_chars: int = DEFAULT_PROMPT_GLOSSARY_MAX_CHARS,
     ) -> GlossaryRetrievalResult:
         """Collect candidate terms, dedupe them, and mark prompt inclusion."""
         entries = self._candidate_entries(source_strings, target_lang, game, mod_slug=mod_slug)

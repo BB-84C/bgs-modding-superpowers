@@ -231,6 +231,11 @@ records:
     byte_budget: 65520
     multi_value: true
     notes: ''
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
   - subrecord_sig: ENAM
     list_index: 0
     byte_budget: 65520
@@ -619,6 +624,11 @@ records:
     multi_value: false
     notes: ''
   GBFM:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
   - subrecord_sig: HULL
     list_index: 0
     byte_budget: 65520
