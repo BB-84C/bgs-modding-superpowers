@@ -6,13 +6,15 @@ export function resolvePluginRoot(moduleUrl: string): string {
 }
 
 export function defaultCacheRoot(): string {
-  if (process.platform === "win32" && process.env.LOCALAPPDATA) {
-    return resolve(process.env.LOCALAPPDATA, "bgs-modding-superpowers", "kb", "packs");
-  }
-  const xdg = process.env.XDG_CACHE_HOME;
-  if (xdg) return resolve(xdg, "bgs-modding-superpowers", "kb", "packs");
+  // Unified with xtl/bgs-translator and other agent-side tooling: the cache
+  // root is ~/.bgs-modding-superpowers/kb/packs on every platform. The legacy
+  // paths (%LOCALAPPDATA%\bgs-modding-superpowers\kb on Windows; $XDG_CACHE_HOME
+  // or ~/.cache on Linux/macOS) are no longer used. Users with a legacy install
+  // can move ~/.cache/bgs-modding-superpowers/kb or
+  // %LOCALAPPDATA%/bgs-modding-superpowers/kb to the new location, or expose
+  // the old roots via $env:BGS_KB_USER_PACKS as additional read-only roots.
   const home = process.env.HOME || process.env.USERPROFILE || ".";
-  return resolve(home, ".cache", "bgs-modding-superpowers", "kb", "packs");
+  return resolve(home, ".bgs-modding-superpowers", "kb", "packs");
 }
 
 export function parseUserPackRoots(envValue: string | undefined): string[] {

@@ -52,3 +52,23 @@ AGENTS.md
 /tools/bgs-translator/build/
 /tools/bgs-translator/dist/
 /tools/bgs-translator/*.egg-info/
+
+# Universal Python dev-artifact excludes — apply at any depth, including inside
+# the materialized plugins/bgs-modding-superpowers/tools/bgs-translator/ tree.
+# These caches are produced by pytest / mypy / ruff and must not ship to
+# end-user vendor clones.
+**/__pycache__/
+**/.mypy_cache/
+**/.pytest_cache/
+**/.ruff_cache/
+**/*.egg-info/
+
+# Mirror the bgs-translator source-side build artifact excludes inside the
+# materialized plugin tree, for the same reason.
+/plugins/bgs-modding-superpowers/tools/bgs-translator/build/
+/plugins/bgs-modding-superpowers/tools/bgs-translator/dist/
+
+# Allow the materialized-plugin sentinel AGENTS.md (carries the
+# "this tree is regenerated" notice for agents landing here). The blanket
+# `AGENTS.md` rule on line 28 would otherwise hide it from vendor clones.
+!/plugins/bgs-modding-superpowers/AGENTS.md

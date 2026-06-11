@@ -14,10 +14,50 @@ The browser GUI is the only GUI surface. The agent should prefer `xtl` for work
 it can do directly; use the GUI for human review, provider/key setup when the
 user wants it, prompt preview, progress monitoring, and manual cleanup.
 
+## Prerequisites — verify before any other command
+
+`xtl` is the CLI entry point. It is PyPI-distributed (`bgs-translator` package)
+and is **not** bundled with this plugin; the vendored tree only carries
+documentation and helper scripts. On a fresh machine `xtl version` will fail.
+
+**This is a long-tail install task that the agent owns**, not the user. Do not
+ask the user to install Python or pipx by hand. Run the readback first; if it
+fails, route to the setup skill which performs the install and PATH-fix.
+
+```powershell
+# Readback. Run this BEFORE any of the workflow examples below.
+xtl version
+```
+
+If `xtl version` errors with "command not found" or "not recognized", switch to
+`setting-up-bgs-modding-environment` (look at "Step 3A - Install or verify
+`xtl`" — it owns `pipx install bgs-translator==0.9.0rc1`, the pipx PATH-warning
+flow, and the post-install smoke). After install, return here and proceed.
+
+For an already-installed `xtl` that is broken, stale, or behind a recent
+release, switch to `maintaining-modding-environments` ("Translator CLI
+maintenance" section).
+
+The KB cache that `xtl` reads from is `~/.bgs-modding-superpowers/kb/packs`,
+unified with this plugin's `bgs_kb_*` MCP tools. If `bgs_kb_status` lists a pack
+but `xtl batch plan` still produces a single-entry glossary subset, suspect a
+stale legacy cache at `%LOCALAPPDATA%/bgs-modding-superpowers/kb` and surface it
+to the user instead of accepting the poor glossary silently.
+
+For RAG-quality translation against a game, the user needs the per-game pack
+AND the corresponding localization pack (e.g. `bgs-kb-starfield` and
+`bgs-l10n-starfield-zhhans` for Starfield Simplified Chinese). Setup skill
+handles both. If only one is installed, surface the gap before running real
+batches.
+
 Human manuals, read these files and explain them to users who need GUI help:
 
 - Chinese: `tools/bgs-translator/USER-GUIDE.zh-cn.md`
 - English: `tools/bgs-translator/USER-GUIDE.en.md`
+
+These files ship inside the materialized plugin tree under
+`tools/bgs-translator/` alongside `scripts/restart-web-gui.ps1`; they are
+present in a fresh vendor-clone install.
 
 ## What xtl Does Better
 

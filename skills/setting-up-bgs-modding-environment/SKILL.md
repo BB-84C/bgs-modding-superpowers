@@ -141,6 +141,18 @@ sha256 verify + cache install in two tools — do **not** download zips by hand:
    - `Fallout3` / `FalloutNV` -> `bgs-kb-fallout3-fnv`
    - `Starfield` -> `bgs-kb-starfield`
 
+   Additionally, if the user has indicated a translation/localization workflow
+   for any of these games (intent to run `xtl batch` against the game), add the
+   corresponding localization pack. Today's released localization packs:
+   - `Starfield` + Simplified Chinese -> `bgs-l10n-starfield-zhhans`
+     (151k Bethesda-official terminology entries; RAG retrieval inside `xtl`
+     depends on this pack — see `using-bgs-translator`.)
+
+   These follow the same install path (`bgs_kb_check_updates` ->
+   `bgs_kb_install_pack`) and the same on-disk cache layout as the per-game
+   packs. Do not assume a localization pack is present just because the
+   per-game pack is installed; check `bgs_kb_status` after install.
+
 2. List what is available from the live release manifest:
    ```
    bgs_kb_check_updates({})
@@ -151,7 +163,9 @@ sha256 verify + cache install in two tools — do **not** download zips by hand:
    anything else.
 
 3. Get **explicit** user consent before installing each pack ("yes, install
-   `bgs-kb-skyrim`"). Pack install mutates `%LOCALAPPDATA%/bgs-modding-superpowers/kb/packs/<packId>/<version>/`.
+   `bgs-kb-skyrim`"). Pack install mutates `~/.bgs-modding-superpowers/kb/packs/<packId>/<version>/`
+   (legacy `%LOCALAPPDATA%/bgs-modding-superpowers/kb/packs` is no longer used; the cache
+   root is unified with `xtl`).
 
 4. For each consented pack:
    ```
