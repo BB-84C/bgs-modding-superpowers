@@ -1,0 +1,1736 @@
+game: Starfield
+form_version_range:
+- 552
+- 576
+parser_version: 1.0.0
+schema_version: starfield-1.0.0
+records:
+  AACT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AAMD:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AAPD:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ACTI:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ADDN:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ALCH:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AMBS:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AMDL:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AMMO:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: ONAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ANIO:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AOPF:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AOPS:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AORU:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ARMA:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ARMO:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ARTO:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ASPC:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ASTP:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ATMO:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AVIF:
+  - subrecord_sig: ANAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AVMD:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  BIOM:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  BMMO:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  BMOD:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  BNDS:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  BOOK:
+  - subrecord_sig: CNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: ENAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  BPTD:
+  - subrecord_sig: BPTN
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CAMS:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CELL:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CHAL:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CLAS:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CLDF:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CLFM:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CLMT:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CNDF:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  COBJ:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  COLL:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CONT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CPTH:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CUR3:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CURV:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  DEBR:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  DFOB:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  DIAL:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  DMGT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  DOOR:
+  - subrecord_sig: CNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: ONAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  DUAL:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  EFSH:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  EFSQ:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ENCH:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  EQUP:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  EXPL:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  EYES:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FACT:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: MNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FFKW:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FLOR:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FLST:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FOGV:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FORC:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FSTP:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FSTS:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FURN:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FXPD:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  GBFM:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  GBFT:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  GCVR:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  GLOB:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  GMST:
+  - subrecord_sig: NAME
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  GPOF:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  GRAS:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  HAZD:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  HDPT:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  IDLE:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  IDLM:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  INFO:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: NAM1
+    list_index: 2
+    byte_budget: 65520
+    multi_value: true
+    notes: voice-linked
+  - subrecord_sig: RNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  INGR:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  INNR:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: WNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  IPCT:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  IPDS:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  IRES:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: NNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  KEYM:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: NNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  KYWD:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LAYR:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LCRT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LCTN:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LENS:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LGDI:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LGTM:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LIGH:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LMSW:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LSCR:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LTEX:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LVLB:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LVLI:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: ONAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LVLN:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: ONAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LVLP:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LVSC:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LVSP:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MAAM:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MATT:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MESG:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: ITXT
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: NNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  MGEF:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MISC:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: NNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  MRPH:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MSTT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MTPT:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MUSC:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MUST:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  NAVM:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  NOTE:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  NPC_:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: LNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: SHRT
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  OMOD:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  OSWP:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  OTFT:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PACK:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PCBN:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PCCN:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PCMT:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PDCL:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PERK:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: EPF2
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PKIN:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PMFT:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PNDT:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PROJ:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  QUST:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: CNAM
+    list_index: 1
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: NNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: QMDP
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: QMDS
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: QMDT
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: QMSU
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  RACE:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FDSL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: SNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  RELA:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  REVB:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  RFGP:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  RSGD:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  RSPJ:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SCEN:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SCOL:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SCRL:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SDLT:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SECH:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SFBK:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SFPT:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SFTR:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SMBN:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SMEN:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SMQN:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SOUN:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SPCH:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SPEL:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SPGD:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  STAG:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  STAT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  STBH:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  STDT:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  STMP:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  STND:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  TACT:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  TERM:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  TES4:
+  - subrecord_sig: CNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: SNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  TMLM:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: BTXT
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: INAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: ISTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: ITXT
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: UNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  TODD:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  TRAV:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  TRNS:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  TXST:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  VOLI:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  VTYP:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  WATR:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  WBAR:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  WEAP:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: WABB
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  WRLD:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  WTHS:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  WWED:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ZOOM:
+  - subrecord_sig: HULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''

@@ -103,11 +103,20 @@ the environment maintenance log that the helper should be added or backported.
 
 ## Cache hygiene
 
-Cache root on Windows:
+Cache root (all platforms — unified with `xtl` / `bgs-translator`):
 
 ```text
-%LOCALAPPDATA%/bgs-modding-superpowers/kb/packs/<packId>/<version>/
+~/.bgs-modding-superpowers/kb/packs/<packId>/<version>/
 ```
+
+The legacy Windows-only cache at `%LOCALAPPDATA%/bgs-modding-superpowers/kb/packs/`
+is **no longer used**. If `bgs_kb_status` surfaces packs that are not visible to
+`xtl batch plan`, suspect a legacy cache and either:
+
+- move the directory tree from `%LOCALAPPDATA%/bgs-modding-superpowers/kb/` to
+  `~/.bgs-modding-superpowers/kb/`, or
+- export the legacy root via `$env:BGS_KB_USER_PACKS` so the MCP keeps reading
+  it as an additional read-only root while the user finishes migrating.
 
 Each version directory contains `manifest.json`, `records/`, and `kb.sqlite`. Current policy: retain the current version and the immediately previous version as rollback/fallback. Prune versions older than that only after confirming the pack is not pinned by the user or referenced by a current modpack workflow.
 

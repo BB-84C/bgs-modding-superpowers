@@ -1,0 +1,311 @@
+game: Oblivion
+form_version_range:
+- 0
+- 0
+parser_version: 1.0.0
+schema_version: oblivion-1.0.0
+records:
+  ACTI:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ALCH:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AMMO:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  APPA:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ARMO:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  BOOK:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  BSGN:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CELL:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CLAS:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CLOT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CONT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CREA:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  DIAL:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  DOOR:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ENCH:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  EYES:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FACT:
+  - subrecord_sig: FNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: MNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FLOR:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FURN:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  GMST:
+  - subrecord_sig: NAME
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  HAIR:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  INFO:
+  - subrecord_sig: NAM1
+    list_index: 2
+    byte_budget: 65520
+    multi_value: true
+    notes: voice-linked
+  - subrecord_sig: NAM2
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  INGR:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  KEYM:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LIGH:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LSCR:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MGEF:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MISC:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  NPC_:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  QUST:
+  - subrecord_sig: CNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  RACE:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  REGN:
+  - subrecord_sig: RDMP
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SGST:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SKIL:
+  - subrecord_sig: ANAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: ENAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: JNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: MNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SLGM:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SPEL:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  TES4:
+  - subrecord_sig: CNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: SNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  WEAP:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  WRLD:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''

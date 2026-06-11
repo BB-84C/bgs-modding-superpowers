@@ -1,0 +1,16 @@
+.theme-amber {
+  --xtl-bg: #070400;
+  --xtl-bg-2: #160d00;
+  --xtl-panel: #211300;
+  --xtl-panel-2: #2d1a00;
+  --xtl-line: #8a5600;
+  --xtl-line-soft: #4b2e00;
+  --xtl-text: #ffb000;
+  --xtl-strong: #ff9700;
+  --xtl-muted: #a97500;
+  --xtl-dim: #735000;
+  --xtl-good: #b8e36d;
+  --xtl-info: #79d7d9;
+  --xtl-danger: #ff7a52;
+  --xtl-ink: #1a0e00;
+}

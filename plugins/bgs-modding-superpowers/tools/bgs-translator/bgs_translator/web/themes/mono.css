@@ -1,0 +1,16 @@
+.theme-mono {
+  --xtl-bg: #050607;
+  --xtl-bg-2: #101214;
+  --xtl-panel: #171a1d;
+  --xtl-panel-2: #20242a;
+  --xtl-line: #8f9ba8;
+  --xtl-line-soft: #4d5660;
+  --xtl-text: #e3e8ed;
+  --xtl-strong: #ffffff;
+  --xtl-muted: #a7b0ba;
+  --xtl-dim: #6f7882;
+  --xtl-good: #d8f2b2;
+  --xtl-info: #b4e4f0;
+  --xtl-danger: #ff9b89;
+  --xtl-ink: #050607;
+}

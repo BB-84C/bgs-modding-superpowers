@@ -1,0 +1,546 @@
+game: Fallout4
+form_version_range:
+- 131
+- 131
+parser_version: 1.0.0
+schema_version: fo4-1.0.0
+records:
+  AACT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ACTI:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ALCH:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AMMO:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: ONAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ARMO:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  AVIF:
+  - subrecord_sig: ANAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  BOOK:
+  - subrecord_sig: CNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  BPTD:
+  - subrecord_sig: BPTN
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CELL:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CLAS:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CLFM:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CMPO:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  COBJ:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  COLL:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  CONT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  DIAL:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  DOOR:
+  - subrecord_sig: CNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: ONAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  ENCH:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  EXPL:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  EYES:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FACT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: MNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FLOR:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: RNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FLST:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  FURN:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  GMST:
+  - subrecord_sig: NAME
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  HAZD:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  HDPT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: NAM1
+    list_index: 2
+    byte_budget: 65520
+    multi_value: true
+    notes: voice-linked
+  INFO:
+  - subrecord_sig: NAM1
+    list_index: 2
+    byte_budget: 65520
+    multi_value: true
+    notes: voice-linked
+  - subrecord_sig: RNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  INGR:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  INNR:
+  - subrecord_sig: WNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  KEYM:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  KYWD:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LCTN:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LIGH:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LSCR:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  LVLI:
+  - subrecord_sig: ONAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MESG:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: ITXT
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: NNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  MGEF:
+  - subrecord_sig: DNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MISC:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  MSTT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  NOTE:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  NPC_:
+  - subrecord_sig: ATTX
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: SHRT
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  OMOD:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PERK:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: EPF2
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  PROJ:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  QUST:
+  - subrecord_sig: CNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: NNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  RACE:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  REGN:
+  - subrecord_sig: RDMP
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SCOL:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SNCT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  SPEL:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  STAT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  TACT:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  TERM:
+  - subrecord_sig: BTXT
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: ITXT
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: RNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: UNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  TES4:
+  - subrecord_sig: CNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: true
+    notes: ''
+  - subrecord_sig: SNAM
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  TREE:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  WATR:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  WEAP:
+  - subrecord_sig: DESC
+    list_index: 1
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
+  WRLD:
+  - subrecord_sig: FULL
+    list_index: 0
+    byte_budget: 65520
+    multi_value: false
+    notes: ''
