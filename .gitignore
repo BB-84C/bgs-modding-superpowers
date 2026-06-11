@@ -67,8 +67,3 @@ AGENTS.md
 # materialized plugin tree, for the same reason.
 /plugins/bgs-modding-superpowers/tools/bgs-translator/build/
 /plugins/bgs-modding-superpowers/tools/bgs-translator/dist/
-
-# Allow the materialized-plugin sentinel AGENTS.md (carries the
-# "this tree is regenerated" notice for agents landing here). The blanket
-# `AGENTS.md` rule on line 28 would otherwise hide it from vendor clones.
-!/plugins/bgs-modding-superpowers/AGENTS.md
