@@ -204,6 +204,149 @@ Use this flow when the user wants the agent to run the translation process.
     Tell the user which SST/XML files were emitted and that xTranslator/ESP-ESM
     Translator owns the final "Finalize" step.
 
+## xTranslator Batch Processor Handoff
+
+Use this when the user wants the agent to prepare xTranslator finalization but
+accepts that a human must click through xTranslator. The human's job is only:
+launch xTranslator through MO2 when needed, open `Wizards -> Batch Processor`,
+paste the script provided by the agent, run it, then copy the bottom `Log` tab
+back to the agent. The agent must inspect the log for every `StartRule`:
+
+- `Loading Esp/esm/esl file...` succeeds for the intended file.
+- `Applying sstRessources...` and `importing/applying vocabfile` run.
+- `Saving Esp/Esm/Esl files...` or `Saving Strings files...` appears.
+- No `BatchProcessor: Error` line appears.
+- Saved paths point at the intended `- SC` output, not the source mod unless a
+  deliberate loose-strings staging fallback was used.
+
+xTranslator's command line cannot run this workflow headlessly. It can load one
+file, but SST import/finalize is driven by Batch Processor text.
+
+Before generating any Batch Processor script, create or verify the corresponding
+MO2 output mod folder under `...\MO2\mods\` using the source mod's name plus
+` - SC`, for example `D:\Starfield MO2\mods\Some Mod - SC`. This folder is the
+only intended landing place for finalized translation files. Do not let
+xTranslator save final deliverables into the source mod unless using the
+temporary loose-strings staging fallback described below.
+
+```powershell
+# Create the sibling MO2 mod that will receive finalized Chinese output.
+New-Item -ItemType Directory -Force -Path "D:\Starfield MO2\mods\Some Mod - SC" | Out-Null
+```
+
+### Batch Processor language
+
+Generate one `StartRule` block per plugin. Use full Windows paths. Keep path
+arguments unquoted inside the Batch Processor block; xTranslator reads the rest
+of the line after the command prefix, so spaces are valid there.
+
+Important commands:
+
+- `LangSource=en` and `LangDest=zhhans` select the language pair.
+- `UseDataDir=false` tells xTranslator to use the explicit file path instead of
+  the game Data folder.
+- `Command=LoadFile:<plugin>` loads one `.esm/.esp/.esl`.
+- `Command=ImportSst:<applyOn>:<mode>:<sst>` imports an SST dictionary.
+- `Command=Finalize` writes the final output for the loaded file.
+- `Command=CloseFile` closes it before the next rule.
+
+Useful `ImportSst` parameters:
+
+- `applyOn=0`: apply to everything.
+- `applyOn=1`: apply only to not-translated items.
+- `mode=1`: strict FormID + original string matching.
+- `mode=3`: strings-only matching.
+
+Preferred pattern: run strict first, then optionally use strings-only only for
+still-untranslated items:
+
+```text
+Command=ImportSst:0:1:C:\path\to\project\exports\mod_english_chinese.sst
+Command=ImportSst:1:3:C:\path\to\project\exports\mod_english_chinese.sst
+```
+
+If the user is debugging record identity, omit the strings-only fallback so
+unmatched records remain visible.
+
+### Case A - plugin-finalized output
+
+Use this for mods where xTranslator saves the plugin itself, such as a compact
+ESM/ESP/ESL workflow. Do not load the source plugin. First copy the source
+plugin to the sibling MO2 overlay directory named `Original Mod Name - SC`, then
+load that copied file in Batch Processor.
+
+```powershell
+# Prepare the sibling MO2 overlay so xTranslator finalizes a copy, not the source plugin.
+New-Item -ItemType Directory -Force -Path "D:\path\to\Mod Name - SC" | Out-Null
+Copy-Item -LiteralPath "D:\path\to\Mod Name\mod.esm" -Destination "D:\path\to\Mod Name - SC\mod.esm" -Force
+```
+
+Then provide the human this Batch Processor block:
+
+```text
+StartRule
+LangSource=en
+LangDest=zhhans
+UseDataDir=false
+Command=LoadFile:D:\path\to\Mod Name - SC\mod.esm
+Command=ImportSst:0:1:C:\path\to\project\exports\mod_english_chinese.sst
+Command=ImportSst:1:3:C:\path\to\project\exports\mod_english_chinese.sst
+Command=Finalize
+Command=CloseFile
+EndRule
+```
+
+Expected success log contains `Saving Esp/Esm/Esl files...` and a saved path
+under `Mod Name - SC`.
+
+### Case B - loose Strings output
+
+Use this for string-backed Starfield plugins where xTranslator finalizes
+`strings\*_zhhans.strings`, `*.dlstrings`, and `*.ilstrings` instead of changing
+the BA2. Preferred: copy the plugin and text BA2 to `- SC`, load the copied
+plugin there, and let xTranslator write loose strings directly under `- SC`.
+
+```powershell
+# Prepare a sibling overlay with the plugin and the BA2 that contains source strings.
+New-Item -ItemType Directory -Force -Path "D:\path\to\Mod Name - SC" | Out-Null
+Copy-Item -LiteralPath "D:\path\to\Mod Name\mod.esm" -Destination "D:\path\to\Mod Name - SC\mod.esm" -Force
+Copy-Item -LiteralPath "D:\path\to\Mod Name\mod - main.ba2" -Destination "D:\path\to\Mod Name - SC\mod - main.ba2" -Force
+```
+
+Batch Processor block:
+
+```text
+StartRule
+LangSource=en
+LangDest=zhhans
+UseDataDir=false
+Command=LoadFile:D:\path\to\Mod Name - SC\mod.esm
+Command=ImportSst:0:1:C:\path\to\project\exports\mod_english_chinese.sst
+Command=ImportSst:1:3:C:\path\to\project\exports\mod_english_chinese.sst
+Command=Finalize
+Command=CloseFile
+EndRule
+```
+
+Expected success log contains `Saving Strings files...` and saved files under
+`Mod Name - SC\strings\`.
+
+If the BA2 is too large to copy and the user accepts a staging step, load the
+source plugin and let xTranslator write loose target-language strings into the
+source mod's `strings` folder. Immediately move only the generated target
+language files to `- SC\strings`:
+
+```powershell
+# Move the loose target-language strings produced by xTranslator into the sibling overlay.
+New-Item -ItemType Directory -Force -Path "D:\path\to\Mod Name - SC\strings" | Out-Null
+Move-Item -LiteralPath "D:\path\to\Mod Name\strings\mod_zhhans.strings" -Destination "D:\path\to\Mod Name - SC\strings\mod_zhhans.strings" -Force
+Move-Item -LiteralPath "D:\path\to\Mod Name\strings\mod_zhhans.dlstrings" -Destination "D:\path\to\Mod Name - SC\strings\mod_zhhans.dlstrings" -Force
+Move-Item -LiteralPath "D:\path\to\Mod Name\strings\mod_zhhans.ilstrings" -Destination "D:\path\to\Mod Name - SC\strings\mod_zhhans.ilstrings" -Force
+```
+
+Only use this fallback when the user explicitly accepts temporary writes to the
+source mod directory. Never write into the game Stock/Data directory.
+
 ## Browser GUI Flow
 
 Use the GUI when a human needs to configure, inspect, approve, or manually fix:
