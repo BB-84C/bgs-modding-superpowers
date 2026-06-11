@@ -331,6 +331,19 @@ EndRule
 Expected success log contains `Saving Strings files...` and saved files under
 `Mod Name - SC\strings\`.
 
+After verifying the target-language loose files exist under `Mod Name -
+SC\strings\`, delete the temporary copied plugin/archive files from `Mod Name -
+SC`. For string-localized mods, the delivered MO2 overlay only needs the loose
+`strings\*_zhhans.strings`, `*.dlstrings`, and `*.ilstrings` files; keeping the
+copied `.esm/.esp/.esl`, `.ba2`, or `.bsa` in `- SC` can shadow the source mod
+unnecessarily.
+
+```powershell
+# After successful string finalization, keep only the loose translated strings.
+Remove-Item -LiteralPath "D:\path\to\Mod Name - SC\mod.esm" -Force
+Remove-Item -LiteralPath "D:\path\to\Mod Name - SC\mod - main.ba2" -Force
+```
+
 If the BA2 is too large to copy and the user accepts a staging step, load the
 source plugin and let xTranslator write loose target-language strings into the
 source mod's `strings` folder. Immediately move only the generated target
