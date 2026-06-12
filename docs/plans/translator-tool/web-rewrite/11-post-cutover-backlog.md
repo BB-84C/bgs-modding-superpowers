@@ -17,7 +17,7 @@ Scope: these are follow-up design and feature items raised during manual user te
 
 ### 1. Import Translation Project From Plugin File
 
-Status 2026-06-09: implemented for loose `.esp/.esm/.esl` files that the parser can read directly.
+Status 2026-06-11: implemented end-to-end for `.esp/.esm/.esl` plus BA2-backed localized STRINGS.
 
 Add a GUI flow to import a new translation project from `.esp`, `.esl`, or `.esm`.
 
@@ -30,7 +30,7 @@ Expected behavior:
 
 Open design questions:
 
-- Creation Club Starfield plugins with localized text packed inside `.ba2` archives still need BA2 Strings extraction support. Current GUI correctly blocks and explains missing loose `STRINGS/DLSTRINGS/ILSTRINGS`.
+- BA2 STRINGS extraction is implemented in `bgs_translator/parsers/strings_io.py` (`BA2Archive` reads BTDX/GNRL containers; `_ARCHIVE_PATTERNS_BY_GAME` covers Fallout4 / Fallout76 / Starfield naming conventions). Creation Club Starfield plugins with localized text packed inside `.ba2` now resolve directly, matching xTranslator's logic.
 - Game detection now prefers root master hints such as `Starfield.esm`, then falls back to TES4 header form-version ranges.
 - Whether imports should copy the plugin into the project or reference the original path.
 - How to handle MO2/VFS paths versus ordinary filesystem paths.
@@ -52,7 +52,7 @@ Needed design:
 - Show why a term was included: exact source hit, alias hit, player global preference, DNT global rule, or RAG-like source match.
 - Player and DNT scopes now use the same evidence/dedupe path as vanilla/mod terminology.
 - Retrieval is bounded by term and prompt character budgets; excluded terms are marked with an evidence reason instead of silently overflowing prompt panels.
-- Remaining UX work: make the explanation friendlier in long historical batches without exposing internal match labels.
+- Player-facing labels implemented in `web/app.py` (server-side render at lines 2125-2136, client-side mirror at lines 3123-3129): internal match kinds (`player_rule`, `dnt_rule`, `alias_exact`, `normalized`, `rag`) are mapped to Chinese sentences such as 「因为待译文本命中了别名「X」」 instead of raw label tokens.
 
 ### 3. RAG-Style Vanilla Lore/Terminology Retrieval
 
