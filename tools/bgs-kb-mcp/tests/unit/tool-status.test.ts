@@ -41,6 +41,7 @@ function pack(packId: string, recordCount: number, root: PackRoot = "bundled", o
 
 function discovery(args: { packs?: LoadedPack[]; skipped?: SkipReason[]; collisions?: CollisionReport[] } = {}): DiscoveryResult {
   return {
+    candidates: args.packs ?? [],
     packs: args.packs ?? [],
     skipped: args.skipped ?? [],
     collisions: args.collisions ?? [],
@@ -174,6 +175,34 @@ test("status maps pack collisions to HIGH warnings listing all paths", async () 
       code: "pack_id_collision",
       severity: "HIGH",
       message: "Pack id collision: same-pack present at 2 roots; all refused. Remove duplicates: bundled:D:/bundled/same, cache:D:/cache/same",
+    },
+  ]);
+});
+
+test("status surfaces pack_id_overridden warnings as informational precedence results", async () => {
+  const env = await status(
+    discovery({
+      packs: [pack("same-pack", 1, "cache")],
+      collisions: [
+        {
+          code: "pack_id_overridden",
+          severity: "MEDIUM",
+          packId: "same-pack",
+          winner: { root: "cache", packRoot: "D:/cache/same", builtAt: "2026-06-03T00:00:00.000Z" },
+          loser: { root: "bundled", packRoot: "D:/bundled/same", builtAt: "2026-06-02T00:00:00.000Z" },
+          message: "Pack id same-pack: cache:D:/cache/same wins (builtAt 2026-06-03T00:00:00.000Z); overridden: bundled:D:/bundled/same (builtAt 2026-06-02T00:00:00.000Z)",
+        },
+      ],
+    }),
+  );
+
+  expect(env.ok).toBe(true);
+  if (!env.ok) throw new Error("expected ok envelope");
+  expect(env.warnings).toEqual([
+    {
+      code: "pack_id_overridden",
+      severity: "MEDIUM",
+      message: "Pack id same-pack: cache:D:/cache/same wins (builtAt 2026-06-03T00:00:00.000Z); overridden: bundled:D:/bundled/same (builtAt 2026-06-02T00:00:00.000Z)",
     },
   ]);
 });

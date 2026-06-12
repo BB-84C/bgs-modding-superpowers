@@ -3,6 +3,11 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { defaultCacheRoot, parseUserPackRoots, resolvePluginRoot } from "./resolve-roots.js";
 import { sha256File } from "./sha256.js";
+const ROOT_PRECEDENCE = {
+    bundled: 3,
+    cache: 2,
+    user: 1,
+};
 function parseSemver(version) {
     if (!version)
         return [0, 0, 0];
@@ -119,7 +124,62 @@ async function scanCandidate(args) {
         },
     };
 }
-function removeCollisions(candidates) {
+function builtAt(pack) {
+    const value = pack.manifest.builtAt;
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+function builtAtTime(pack) {
+    const value = builtAt(pack);
+    if (!value)
+        return undefined;
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+}
+function compareCandidatesByPrecedence(a, b) {
+    const aTime = builtAtTime(a);
+    const bTime = builtAtTime(b);
+    if (aTime !== undefined && bTime !== undefined && aTime !== bTime)
+        return bTime - aTime;
+    if (aTime !== undefined && bTime === undefined)
+        return -1;
+    if (aTime === undefined && bTime !== undefined)
+        return 1;
+    const rootDelta = ROOT_PRECEDENCE[b.root] - ROOT_PRECEDENCE[a.root];
+    if (rootDelta !== 0)
+        return rootDelta;
+    return a.packRoot.localeCompare(b.packRoot);
+}
+export function selectWinner(candidates) {
+    if (candidates.length === 0)
+        throw new Error("selectWinner requires at least one candidate");
+    const ordered = [...candidates].sort(compareCandidatesByPrecedence);
+    return { winner: ordered[0], losers: ordered.slice(1) };
+}
+function packRef(pack) {
+    return { root: pack.root, packRoot: pack.packRoot, builtAt: builtAt(pack) };
+}
+function builtAtLabel(pack) {
+    return builtAt(pack) ?? "<missing>";
+}
+function overrideWarning(packId, winner, loser) {
+    return {
+        code: "pack_id_overridden",
+        severity: "MEDIUM",
+        packId,
+        winner: packRef(winner),
+        loser: packRef(loser),
+        message: `Pack id ${packId}: ${winner.root}:${winner.packRoot} wins (builtAt ${builtAtLabel(winner)}); overridden: ${loser.root}:${loser.packRoot} (builtAt ${builtAtLabel(loser)})`,
+    };
+}
+function legacyCollision(packId, group) {
+    return {
+        code: "pack_id_collision",
+        packId,
+        paths: group.map((pack) => packRef(pack)),
+        hint: "Precedence sorter could not pick a deterministic winner; remove or rename duplicate packs so each packId is unique across discovery roots.",
+    };
+}
+export function applyPrecedence(candidates) {
     const groups = new Map();
     for (const candidate of candidates) {
         const group = groups.get(candidate.packId) ?? [];
@@ -133,12 +193,15 @@ function removeCollisions(candidates) {
             packs.push(group[0]);
             continue;
         }
-        collisions.push({
-            code: "pack_id_collision",
-            packId,
-            paths: group.map((pack) => ({ root: pack.root, packRoot: pack.packRoot })),
-            hint: "Remove or rename duplicate packs so each packId is unique across discovery roots.",
-        });
+        try {
+            const { winner, losers } = selectWinner(group);
+            packs.push(winner);
+            for (const loser of losers)
+                collisions.push(overrideWarning(packId, winner, loser));
+        }
+        catch {
+            collisions.push(legacyCollision(packId, group));
+        }
     }
     return { packs, collisions };
 }
@@ -182,8 +245,9 @@ export async function discoverPacks(opts = {}) {
                 candidates.push(result.pack);
         }
     }
-    const { packs, collisions } = removeCollisions(candidates);
+    const { packs, collisions } = applyPrecedence(candidates);
     return {
+        candidates,
         packs,
         skipped,
         collisions,

@@ -17,6 +17,7 @@ import { formatValidationError } from "./build/validate.js";
 import { validateRecords } from "./build/validate.js";
 import { formatPruneCacheResult, pruneCache } from "./cache/prune-cache.js";
 import { defaultCacheRoot } from "./discovery/resolve-roots.js";
+import { runDevStatus } from "./dev-status.js";
 import { formatInfo } from "./info/format.js";
 import { gatherInfo } from "./info/index.js";
 import { resolve } from "node:path";
@@ -32,6 +33,8 @@ Usage:
   bgs-kb-mcp info <pack-root>        Print pack summary                             (KB-1f)
   bgs-kb-mcp prune-cache [--dry-run] Keep current + previous cached pack versions   (KB-6d)
   bgs-kb-mcp render <pack-root>      Render legacy markdown handbook from records   (KB-5)
+  bgs-kb-mcp dev-status [--json] [--pack <packId>] [--include-userpacks]
+                                      Preview pack discovery precedence             (dev)
 
 Currently implemented: build, validate, info. Other subcommands return exit 2
 with a pointer to the relevant phase.
@@ -135,6 +138,45 @@ if (sub === "prune-cache") {
   try {
     const result = await pruneCache(defaultCacheRoot(), { dryRun: args.includes("--dry-run") });
     process.stdout.write(formatPruneCacheResult(result));
+    process.exit(0);
+  } catch (error) {
+    console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(2);
+  }
+}
+
+if (sub === "dev-status") {
+  const rest = args.slice(1);
+  let json = false;
+  let pack: string | undefined;
+  let includeUserpacks = true;
+
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i];
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+    if (arg === "--include-userpacks") {
+      includeUserpacks = true;
+      continue;
+    }
+    if (arg === "--pack") {
+      const value = rest[i + 1];
+      if (!value || value.startsWith("--")) {
+        console.error("bgs-kb-mcp dev-status: --pack requires a <packId>");
+        process.exit(2);
+      }
+      pack = value;
+      i += 1;
+      continue;
+    }
+    console.error(`bgs-kb-mcp dev-status: unsupported argument: ${arg}`);
+    process.exit(2);
+  }
+
+  try {
+    process.stdout.write(await runDevStatus({ json, pack, includeUserpacks }));
     process.exit(0);
   } catch (error) {
     console.error(`ERROR: ${error instanceof Error ? error.message : String(error)}`);

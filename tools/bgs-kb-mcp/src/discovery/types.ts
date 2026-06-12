@@ -18,6 +18,8 @@ export interface LoadedPack {
   loadedAt: string;
 }
 
+export type PackCandidate = LoadedPack;
+
 export type SkipReason =
   | { code: "missing_manifest"; path: string; hint: string }
   | { code: "invalid_manifest_json"; path: string; hint: string }
@@ -26,14 +28,25 @@ export type SkipReason =
   | { code: "pack_integrity_failed"; path: string; packId?: string; expectedSha256: string; actualSha256: string }
   | { code: "missing_kb_sqlite"; path: string; packId?: string };
 
-export type CollisionReport = {
-  code: "pack_id_collision";
-  packId: string;
-  paths: { root: PackRoot; packRoot: string }[];
-  hint: string;
-};
+export type CollisionReport =
+  | {
+      code: "pack_id_collision";
+      packId: string;
+      paths: { root: PackRoot; packRoot: string; builtAt?: string }[];
+      hint: string;
+    }
+  | {
+      code: "pack_id_overridden";
+      severity: "MEDIUM";
+      packId: string;
+      winner: { root: PackRoot; packRoot: string; builtAt?: string };
+      loser: { root: PackRoot; packRoot: string; builtAt?: string };
+      message: string;
+    };
 
 export interface DiscoveryResult {
+  /** All valid candidates seen before packId precedence is applied. */
+  candidates: PackCandidate[];
   packs: LoadedPack[];
   skipped: SkipReason[];
   collisions: CollisionReport[];

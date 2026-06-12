@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import type { PackManifest } from "../build/types.js";
 import { defaultCacheRoot, parseUserPackRoots, resolvePluginRoot } from "./resolve-roots.js";
 import { sha256File } from "./sha256.js";
-import type { CollisionReport, DiscoveryOptions, DiscoveryResult, LoadedPack, PackRoot, SkipReason } from "./types.js";
+import type { CollisionReport, DiscoveryOptions, DiscoveryResult, LoadedPack, PackCandidate, PackRoot, SkipReason } from "./types.js";
 
 interface CandidateRoot {
   root: PackRoot;
@@ -13,6 +13,12 @@ interface CandidateRoot {
 }
 
 interface LoadedCandidate extends LoadedPack {}
+
+const ROOT_PRECEDENCE: Record<PackRoot, number> = {
+  bundled: 3,
+  cache: 2,
+  user: 1,
+};
 
 function parseSemver(version: string | undefined): [number, number, number] {
   if (!version) return [0, 0, 0];
@@ -143,7 +149,66 @@ async function scanCandidate(args: {
   };
 }
 
-function removeCollisions(candidates: LoadedCandidate[]): { packs: LoadedPack[]; collisions: CollisionReport[] } {
+function builtAt(pack: PackCandidate): string | undefined {
+  const value = pack.manifest.builtAt;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function builtAtTime(pack: PackCandidate): number | undefined {
+  const value = builtAt(pack);
+  if (!value) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function compareCandidatesByPrecedence(a: PackCandidate, b: PackCandidate): number {
+  const aTime = builtAtTime(a);
+  const bTime = builtAtTime(b);
+  if (aTime !== undefined && bTime !== undefined && aTime !== bTime) return bTime - aTime;
+  if (aTime !== undefined && bTime === undefined) return -1;
+  if (aTime === undefined && bTime !== undefined) return 1;
+
+  const rootDelta = ROOT_PRECEDENCE[b.root] - ROOT_PRECEDENCE[a.root];
+  if (rootDelta !== 0) return rootDelta;
+
+  return a.packRoot.localeCompare(b.packRoot);
+}
+
+export function selectWinner(candidates: PackCandidate[]): { winner: PackCandidate; losers: PackCandidate[] } {
+  if (candidates.length === 0) throw new Error("selectWinner requires at least one candidate");
+  const ordered = [...candidates].sort(compareCandidatesByPrecedence);
+  return { winner: ordered[0], losers: ordered.slice(1) };
+}
+
+function packRef(pack: PackCandidate): { root: PackRoot; packRoot: string; builtAt?: string } {
+  return { root: pack.root, packRoot: pack.packRoot, builtAt: builtAt(pack) };
+}
+
+function builtAtLabel(pack: PackCandidate): string {
+  return builtAt(pack) ?? "<missing>";
+}
+
+function overrideWarning(packId: string, winner: PackCandidate, loser: PackCandidate): CollisionReport {
+  return {
+    code: "pack_id_overridden",
+    severity: "MEDIUM",
+    packId,
+    winner: packRef(winner),
+    loser: packRef(loser),
+    message: `Pack id ${packId}: ${winner.root}:${winner.packRoot} wins (builtAt ${builtAtLabel(winner)}); overridden: ${loser.root}:${loser.packRoot} (builtAt ${builtAtLabel(loser)})`,
+  };
+}
+
+function legacyCollision(packId: string, group: PackCandidate[]): CollisionReport {
+  return {
+    code: "pack_id_collision",
+    packId,
+    paths: group.map((pack) => packRef(pack)),
+    hint: "Precedence sorter could not pick a deterministic winner; remove or rename duplicate packs so each packId is unique across discovery roots.",
+  };
+}
+
+export function applyPrecedence(candidates: LoadedCandidate[]): { packs: LoadedPack[]; collisions: CollisionReport[] } {
   const groups = new Map<string, LoadedCandidate[]>();
   for (const candidate of candidates) {
     const group = groups.get(candidate.packId) ?? [];
@@ -158,12 +223,13 @@ function removeCollisions(candidates: LoadedCandidate[]): { packs: LoadedPack[];
       packs.push(group[0]);
       continue;
     }
-    collisions.push({
-      code: "pack_id_collision",
-      packId,
-      paths: group.map((pack) => ({ root: pack.root, packRoot: pack.packRoot })),
-      hint: "Remove or rename duplicate packs so each packId is unique across discovery roots.",
-    });
+    try {
+      const { winner, losers } = selectWinner(group);
+      packs.push(winner);
+      for (const loser of losers) collisions.push(overrideWarning(packId, winner, loser));
+    } catch {
+      collisions.push(legacyCollision(packId, group));
+    }
   }
   return { packs, collisions };
 }
@@ -210,8 +276,9 @@ export async function discoverPacks(opts: DiscoveryOptions = {}): Promise<Discov
     }
   }
 
-  const { packs, collisions } = removeCollisions(candidates);
+  const { packs, collisions } = applyPrecedence(candidates);
   return {
+    candidates,
     packs,
     skipped,
     collisions,

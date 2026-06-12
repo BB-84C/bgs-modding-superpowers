@@ -266,8 +266,11 @@ Copy-FileOnly -From ".mcp.json"      -To ".mcp.json"
 Copy-Tree -From ".opencode/plugins"  -To ".opencode/plugins"
 
 # ---- 2. Hooks + Scripts -----------------------------------------------------
+# `dev-*.ps1` scripts (e.g. dev-kb-author.ps1) are repo-internal — they require
+# the source tree under `knowledge/bgs-kb/packs/` which end-users do not have.
+# Exclude them from the published plugin tree so the user-facing seam stays clean.
 Copy-Tree -From "hooks"   -To "hooks"
-Copy-Tree -From "scripts" -To "scripts"
+Copy-Tree -From "scripts" -To "scripts" -ExcludeNames "dev-*"
 
 # ---- 3. Skills (entire shipped surface) ------------------------------------
 Copy-Tree -From "skills" -To "skills"

@@ -123,7 +123,7 @@ test("refuses integrity-failed packs", async () => {
   expect(result.skipped).toEqual([{ code: "pack_integrity_failed", path: join(bundledRoot, "bad-integrity"), packId: "bad-integrity", expectedSha256: "0".repeat(64), actualSha256: sha256(sqlite) }]);
 });
 
-test("reports collision across bundled and cache roots and refuses both packs", async () => {
+test("bundled and cache with same builtAt selects bundled and warns cache overridden", async () => {
   const bundledRoot = await tempRoot("kb-discovery-collide-bundled-");
   const cacheRoot = await tempRoot("kb-discovery-collide-cache-");
   const bundledPack = await writePack(bundledRoot, "bundled-copy", { packId: "same-pack" });
@@ -131,17 +131,77 @@ test("reports collision across bundled and cache roots and refuses both packs", 
 
   const result = await discoverPacks({ bundledRoot, cacheRoot, userPackRoots: [], now });
 
-  expect(result.packs).toEqual([]);
+  expect(result.packs).toHaveLength(1);
+  expect(result.packs[0]).toMatchObject({ packId: "same-pack", root: "bundled", packRoot: bundledPack });
   expect(result.collisions).toEqual([
     {
-      code: "pack_id_collision",
+      code: "pack_id_overridden",
+      severity: "MEDIUM",
       packId: "same-pack",
-      paths: [
-        { root: "bundled", packRoot: bundledPack },
-        { root: "cache", packRoot: cachePack },
-      ],
-      hint: "Remove or rename duplicate packs so each packId is unique across discovery roots.",
+      winner: { root: "bundled", packRoot: bundledPack, builtAt: loadedAt },
+      loser: { root: "cache", packRoot: cachePack, builtAt: loadedAt },
+      message: `Pack id same-pack: bundled:${bundledPack} wins (builtAt ${loadedAt}); overridden: cache:${cachePack} (builtAt ${loadedAt})`,
     },
+  ]);
+});
+
+test("cache builtAt newer than bundled wins", async () => {
+  const bundledRoot = await tempRoot("kb-discovery-newer-cache-bundled-");
+  const cacheRoot = await tempRoot("kb-discovery-newer-cache-cache-");
+  const bundledPack = await writePack(bundledRoot, "bundled-copy", { packId: "same-pack", manifest: { builtAt: "2026-06-02T00:00:00.000Z" } });
+  const cachePack = await writePack(cacheRoot, "cache-copy", { packId: "same-pack", manifest: { builtAt: "2026-06-03T00:00:00.000Z" } });
+
+  const result = await discoverPacks({ bundledRoot, cacheRoot, userPackRoots: [], now });
+
+  expect(result.packs).toHaveLength(1);
+  expect(result.packs[0]).toMatchObject({ packId: "same-pack", root: "cache", packRoot: cachePack });
+  expect(result.collisions).toHaveLength(1);
+  expect(result.collisions[0]).toMatchObject({
+    code: "pack_id_overridden",
+    severity: "MEDIUM",
+    winner: { root: "cache", packRoot: cachePack, builtAt: "2026-06-03T00:00:00.000Z" },
+    loser: { root: "bundled", packRoot: bundledPack, builtAt: "2026-06-02T00:00:00.000Z" },
+  });
+});
+
+test("three-root collision selects highest builtAt and warns once per loser", async () => {
+  const bundledRoot = await tempRoot("kb-discovery-three-bundled-");
+  const cacheRoot = await tempRoot("kb-discovery-three-cache-");
+  const userRoot = await tempRoot("kb-discovery-three-user-");
+  const bundledPack = await writePack(bundledRoot, "bundled-copy", { packId: "same-pack", manifest: { builtAt: "2026-06-02T00:00:00.000Z" } });
+  const cachePack = await writePack(cacheRoot, "cache-copy", { packId: "same-pack", manifest: { builtAt: "2026-06-03T00:00:00.000Z" } });
+  const userPack = await writePack(userRoot, "user-copy", { packId: "same-pack", manifest: { builtAt: "2026-06-04T00:00:00.000Z" } });
+
+  const result = await discoverPacks({ bundledRoot, cacheRoot, userPackRoots: [userRoot], now });
+
+  expect(result.packs).toHaveLength(1);
+  expect(result.packs[0]).toMatchObject({ packId: "same-pack", root: "user", packRoot: userPack });
+  expect(result.collisions).toHaveLength(2);
+  expect(result.collisions.map((warning) => warning.code)).toEqual(["pack_id_overridden", "pack_id_overridden"]);
+  expect(result.collisions).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ loser: { root: "bundled", packRoot: bundledPack, builtAt: "2026-06-02T00:00:00.000Z" } }),
+      expect.objectContaining({ loser: { root: "cache", packRoot: cachePack, builtAt: "2026-06-03T00:00:00.000Z" } }),
+    ]),
+  );
+});
+
+test("missing builtAt on both candidates falls back to root precedence", async () => {
+  const bundledRoot = await tempRoot("kb-discovery-missing-builtat-bundled-");
+  const cacheRoot = await tempRoot("kb-discovery-missing-builtat-cache-");
+  const bundledPack = await writePack(bundledRoot, "bundled-copy", { packId: "same-pack", manifest: { builtAt: undefined } });
+  const cachePack = await writePack(cacheRoot, "cache-copy", { packId: "same-pack", manifest: { builtAt: undefined } });
+
+  const result = await discoverPacks({ bundledRoot, cacheRoot, userPackRoots: [], now });
+
+  expect(result.packs).toHaveLength(1);
+  expect(result.packs[0]).toMatchObject({ packId: "same-pack", root: "bundled", packRoot: bundledPack });
+  expect(result.collisions).toEqual([
+    expect.objectContaining({
+      code: "pack_id_overridden",
+      winner: { root: "bundled", packRoot: bundledPack, builtAt: undefined },
+      loser: { root: "cache", packRoot: cachePack, builtAt: undefined },
+    }),
   ]);
 });
 

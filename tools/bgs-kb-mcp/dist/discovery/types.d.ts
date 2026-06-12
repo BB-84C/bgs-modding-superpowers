@@ -15,6 +15,7 @@ export interface LoadedPack {
     integrityOk: boolean;
     loadedAt: string;
 }
+export type PackCandidate = LoadedPack;
 export type SkipReason = {
     code: "missing_manifest";
     path: string;
@@ -52,10 +53,28 @@ export type CollisionReport = {
     paths: {
         root: PackRoot;
         packRoot: string;
+        builtAt?: string;
     }[];
     hint: string;
+} | {
+    code: "pack_id_overridden";
+    severity: "MEDIUM";
+    packId: string;
+    winner: {
+        root: PackRoot;
+        packRoot: string;
+        builtAt?: string;
+    };
+    loser: {
+        root: PackRoot;
+        packRoot: string;
+        builtAt?: string;
+    };
+    message: string;
 };
 export interface DiscoveryResult {
+    /** All valid candidates seen before packId precedence is applied. */
+    candidates: PackCandidate[];
     packs: LoadedPack[];
     skipped: SkipReason[];
     collisions: CollisionReport[];

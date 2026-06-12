@@ -67,6 +67,10 @@ function warningFromSkip(skip: SkipReason): Warning {
 }
 
 function warningFromCollision(collision: CollisionReport): Warning {
+  if (collision.code === "pack_id_overridden") {
+    return { code: collision.code, severity: collision.severity, message: collision.message };
+  }
+
   const paths = collision.paths.map((path) => `${path.root}:${path.packRoot}`).join(", ");
   return {
     code: collision.code,
