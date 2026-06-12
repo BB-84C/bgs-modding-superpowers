@@ -201,6 +201,51 @@ Do not set it to `C:\my-kb-roots\my-custom-pack`; that points at the pack itself
 
 After registration, restart/reconnect the MCP so pack discovery runs, then call `bgs_kb_status({})` and verify the custom pack appears with the intended `packId`.
 
+## Pack discovery + collision recovery
+
+`bgs_kb_status({})` may report two warning codes when discovery sees the same `packId` at multiple roots:
+
+| Code | Meaning |
+|---|---|
+| `pack_id_overridden` (MEDIUM, informational) | Multiple sources for the same `packId`; precedence picked a winner automatically and listed the loser(s). All packs still load. |
+| `pack_id_collision` (HIGH, fail-closed fallback) | Precedence could not choose a winner — should be rare; all colliding copies are refused. |
+
+**Discovery precedence (apply in order):**
+1. Sort candidates with the same `packId` by `builtAt` timestamp DESC — newest manifest wins.
+2. Tie-break by root class: `bundled > cache > user`.
+
+**Common cause: `install-pack` over an already-bundled `packId`.** Plugin distributions ship per-game packs (e.g. `bgs-kb-fallout4`) in the bundled tree. If a user runs `bgs_kb_install_pack({ packId: "bgs-kb-fallout4", ... })` to fetch a Release-channel update, the new version lands in the cache root `~/.bgs-modding-superpowers/kb/packs/bgs-kb-fallout4/<version>/`. On the next MCP restart:
+
+- If the cache copy has a newer `builtAt` (the normal update case) → cache wins, bundled loser warning. No action needed.
+- If the bundled copy is somehow newer (e.g. you pulled a plugin update that shipped a newer KB) → bundled wins, cache becomes the loser. To make the cache copy authoritative, install a newer Release or remove the stale cache copy.
+
+**Other causes:**
+
+- Two `$BGS_KB_USER_PACKS` parent directories contain pack folders with the same `packId` → warning per loser.
+- Manual file copy of a pack between roots without removing the original.
+
+**Preview before restarting MCP:** the bgs-kb-mcp CLI exposes a read-only `dev-status` subcommand that shows the same discovery decision the MCP would make, without requiring a server restart:
+
+```powershell
+# Preview every discovered packId, every candidate source, and which one would win.
+node <plugin>\tools\bgs-kb-mcp\dist\cli.js dev-status
+
+# Filter to one pack id (useful before install-pack or before editing user packs).
+node <plugin>\tools\bgs-kb-mcp\dist\cli.js dev-status --pack bgs-kb-fallout4
+
+# Machine-readable output for scripting.
+node <plugin>\tools\bgs-kb-mcp\dist\cli.js dev-status --json
+```
+
+**Recovery patterns:**
+
+- **Want the cache copy to win**: ensure its `builtAt` is newer than the bundled copy's (run `bgs_kb_install_pack` for a fresh Release version), restart MCP, verify.
+- **Want the bundled copy to win**: remove or rename the cache pack directory, restart MCP.
+- **Two user roots collide**: drop one parent from `$BGS_KB_USER_PACKS`, or rename the colliding pack folder to a unique `packId` (after also updating its `bgs-kb-meta.yml`), restart MCP.
+- **Pre-flight before authoring or installing**: always run `dev-status --pack <packId>` first — it surfaces collisions before the next MCP restart turns them into status warnings.
+
+Do not delete cache copies aggressively as a first-line fix; the precedence rule selects automatically, so warnings are usually informational, not blocking.
+
 ## Localization and translator KBs
 
 Localization glossary packs are KB packs whose SQLite store includes
