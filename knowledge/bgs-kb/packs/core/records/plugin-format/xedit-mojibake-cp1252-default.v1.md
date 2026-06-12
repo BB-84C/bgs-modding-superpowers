@@ -6,7 +6,7 @@ domains: [plugin-format, debugging]
 appliesTo:
   games: [SkyrimLE, SkyrimSE, SkyrimAE, SkyrimVR, Fallout4, Fallout4VR, Fallout3, FalloutNV, Starfield]
 canonical:
-  answer: "xEdit's global string-encoding default is Windows-1252 for inline plugin fields. Community translations (CN/JP/RU/KR) typically ship FULL/DESC bytes as UTF-8 in non-localized ESMs, and xEdit decodes those bytes as CP-1252 — producing mojibake in BOTH the xEdit GUI and the automation daemon JSON. The automation daemon faithfully transmits whatever xEdit reads, so the bug surfaces identically in the MCP envelope. Until the upstream xEdit fork patches the default, the per-plugin workaround is a `<plugin>.cpoverride` sidecar file containing `utf-8` next to the offending ESM."
+  answer: "xEdit historically decoded inline `FULL`/`DESC` bytes as Windows-1252, mangling UTF-8 community translations (CN/JP/RU/KR) into mojibake in both GUI and automation JSON. **Fixed in xEdit 4.1.6r5+** (commit `9ff67861` on the BB-84C `automation-4.1.6` branch, pushed and released 2026-06-12): translatable inline strings now run through a strict RFC 3629 UTF-8 autodetect before falling back to CP-1252, and `system.capabilities.supports.stringDecoding.translatableInlineUtf8Autodetect: true` is the runtime probe. For agents still running an older xEdit, the per-plugin workaround is a `<plugin>.cpoverride` sidecar containing `utf-8`."
   confidence: verified-project-doc
 queryKeys: [encoding, mojibake, UTF-8, Windows-1252, CP-1252, Chinese, Japanese, Russian, Korean, localization, translation, fullName, EDID, FULL field, "è\"é‚¦", wbEncoding, wbEncodingTrans, cpoverride]
 severity: high
@@ -17,7 +17,7 @@ sources:
   - kind: project-internal-doc
     ref: .opencode/artifacts/xedit-mcp/acceptance/batch2/manual-parity/fo4-WRLD-0000003C/mcp-envelope-read.json
     sectionPath: winningOverride.object.fullName_mojibake
-lastReviewed: "2026-06-11"
+lastReviewed: "2026-06-12"
 schemaVersion: 1
 ---
 
@@ -46,22 +46,47 @@ Bethesda's own localized FO4 STRINGS files go through a different path (`wbLocal
 - Confirm by dumping the raw bytes from the plugin (any hex viewer) and checking whether they form a valid UTF-8 sequence. UTF-8 multi-byte starts must be `C0`-`FD` followed by `80`-`BF` continuation bytes.
 - The mojibake renders identically in `xedit_inspect_conflicts` / `xedit_read_record` envelopes and in xEdit's own GUI conflict view —— if both agree, the bug is upstream of automation.
 
-## Workarounds (per-plugin, until upstream fix lands)
+## Upstream fix status (RESOLVED 2026-06-12)
+
+**Fixed in xEdit 4.1.6r5+**, on the BB-84C `automation-4.1.6` branch:
+
+- `9ff67861` — `feat(core): UTF-8 inline autodetect for translatable subrecords (r5)`
+- `14e4d62a` — `feat(automation): supports.stringDecoding capability + r5 What's New`
+- `e151fabe` — `docs: Phase 14 r5 UTF-8 inline-decode closeout in ROADMAP`
+
+The fix adds a strict RFC 3629 UTF-8 validator at `Core/wbInterface.pas:16522` for elements flagged `dfTranslatable`. Seven defense layers ensure CP-1252 strings are not misread as UTF-8: RFC 3629 strict, overlong tightening, surrogate rejection, noncharacter rejection (BMP + supplementary plane), C1 control rejection, ASCII bypass, leading-BOM strip. Explicit per-file overrides (`.cpoverride` sidecar, SNAM `<cp:XXXX>` marker, per-def encoding override) still suppress autodetect via a latched `flHasExplicitEncodingOverride` boolean.
+
+The fix also bumps `contractVersion` to `0.12` and adds a `supports.stringDecoding` block to `system.capabilities` for runtime probing.
+
+### Runtime probe for downstream tooling
+
+```text
+xedit_call({ command: "system.capabilities", args: {} })
+
+→ data.contractVersion === "0.12"
+→ data.supports.stringDecoding.translatableInlineUtf8Autodetect === true
+→ data.supports.stringDecoding.defenseLayers includes "rfc3629-strict"
+→ data.supports.stringDecoding.activeFallbackEncoding (typically "1252 (ANSI - Latin I)")
+→ data.supports.stringDecoding.readWriteAsymmetry === "read-autodetects-write-uses-bsdGetEncoding"
+```
+
+The write path was intentionally NOT changed (writes still use `bsdGetEncoding`), so do not assume round-trip preservation of newly-typed UTF-8 strings without explicit testing. The capability surface discloses this asymmetry.
+
+### CLI flags shipped with the fix
+
+- `-cp:<encoding>` / `-cp-trans:<encoding>` — sets the translatable-string fallback encoding at startup (defaults to CP-1252).
+- `-cp-general:<encoding>` — sets the non-translatable fallback (EditorID etc.).
+- Accepted values include `utf-8` / `utf8` / `65001` / `1252` / `936` / `932` / `1251` / any Windows codepage number. Note: `cp1252`-style prefixes are NOT accepted by `wbMBCSEncoding`; use the bare codepage number.
+
+## Workarounds for older xEdit (pre-r5)
+
+For agents and operators still on xEdit 4.1.6r4 or earlier (no autodetect; CP-1252 default still applies):
 
 Either:
 - Drop a sidecar `<plugin>.cpoverride` next to the offending ESM with the single line `utf-8` (or `65001`). xEdit's `TwbFile` reads the sidecar at load time and sets `flEncodingTrans` to UTF-8 for just that file.
 - Or edit the file's SNAM description in xEdit to include `<cp:utf-8>` somewhere in the text. Same effect, but mutates the plugin.
 
-The sidecar approach is preferred because it does not modify the plugin and survives mod-manager re-deployments.
-
-## Where the proper fix belongs
-
-Upstream patch to xEdit fork at `D:\TES5Edit-contrib` on the `automation-4.1.6` branch. Two layers:
-
-- Medium: autodetect UTF-8 at the string-read boundary (`Core/wbInterface.pas:16522-16525`) for `cpTranslate`-flagged elements before falling back to the configured CP encoding.
-- Long: expose an automation command `system.set_default_encoding` so the daemon can declare the session default without recompiling.
-
-Both are documented in the encoding-mojibake PRD authored 2026-06-11.
+The sidecar approach is preferred because it does not modify the plugin and survives mod-manager re-deployments. After r5 these per-file overrides keep working (latched `flHasExplicitEncodingOverride` suppresses the autodetect) but are usually unnecessary — UTF-8 is detected automatically.
 
 ## What NOT to do
 
