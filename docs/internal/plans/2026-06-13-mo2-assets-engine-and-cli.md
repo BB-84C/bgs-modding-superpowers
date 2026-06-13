@@ -6,7 +6,7 @@
 
 **Architecture:** A new shared Python package `tools/mo2-assets-engine/` exposes a stable API (mods + files + conflicts + archive inventory) consumed by both this plan's CLI and Plan B's MO2 IPluginTool GUI. The engine is offline-first (reads profile state directly from disk, no MO2 process required). BA2 reader is generalized from `tools/bgs-translator/bgs_translator/parsers/strings_io.py:179-244`'s existing GNRL implementation and extended with DX10 (texture) directory parsing. BSA reader v104/v105 is greenfield (no third-party dependency; only filename enumeration, no decompression). The CLI is a `typer`-based entry point exposing 4 subcommands matching the future MO2 MCP shape: `summary`, `mod-conflicts`, `resolve-file`, `archive-inventory`.
 
-**Tech Stack:** Python 3.12+, setuptools build, `typer` CLI framework, `pytest` for tests, `ruff`+`mypy` for lint/type. No third-party BA2/BSA parsers (greenfield, matching `bgs-translator`'s minimal-deps stance). Reference format docs: UESP BSA File Format (`https://en.uesp.net/wiki/Skyrim_Mod:Archive_File_Format`), UESP Fallout 4 BA2 (`https://en.uesp.net/wiki/Fallout_4_Mod:Archive_File_Format`), Starfield Wiki BA2 (`https://starfieldwiki.net/wiki/Modding:Archive_File_Format`).
+**Tech Stack:** Python 3.11+, setuptools build, `typer` CLI framework, `pytest` for tests, `ruff`+`mypy` for lint/type. No third-party BA2/BSA parsers (greenfield, matching `bgs-translator`'s minimal-deps stance). No PEP 695 generic syntax or other 3.12-only features used; pin chosen to work with the anaconda 3.11 base the dev machine runs by default. Reference format docs: UESP BSA File Format (`https://en.uesp.net/wiki/Skyrim_Mod:Archive_File_Format`), UESP Fallout 4 BA2 (`https://en.uesp.net/wiki/Fallout_4_Mod:Archive_File_Format`), Starfield Wiki BA2 (`https://starfieldwiki.net/wiki/Modding:Archive_File_Format`).
 
 **Coverage in Phase 1 (Plan A):**
 - FO4 vanilla BA2 v1 (GNRL + DX10/textures, filename enumeration only)
@@ -93,7 +93,7 @@ description = "Offline analyzer for MO2 profile state, loose files, and BA2/BSA 
 authors = [{ name = "BB-84C" }]
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
   "typer>=0.15",
   "pydantic>=2.10",
@@ -115,13 +115,13 @@ include = ["mo2_assets_engine*"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py311"
 
 [tool.ruff.lint]
 extend-select = ["I", "UP", "B", "C4", "PERF", "RUF"]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 strict = true
 
 [tool.pytest.ini_options]
