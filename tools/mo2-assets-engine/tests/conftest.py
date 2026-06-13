@@ -161,3 +161,85 @@ def synthetic_ba2_dx10(tmp_path: Path) -> Path:
 
     archive_path.write_bytes(bytes(out))
     return archive_path
+
+
+@pytest.fixture()
+def synthetic_bsa_v105(tmp_path: Path) -> Path:
+    """Build a minimal valid BSA v105 archive with 2 folders + 4 files.
+
+    No real payload bytes — file offsets/sizes are placeholders because the
+    reader only walks the directory structure for filename enumeration.
+
+    Per the UESP spec, v105 file-record `offset` is stored as
+    `folder_offset + total_file_name_length`; the reader subtracts
+    `total_file_name_length` to recover the position of the per-folder
+    name+records block.
+    """
+    archive_path = tmp_path / "TestPack.bsa"
+    folders = [
+        ("textures/test", ["foo.dds", "bar.dds"]),
+        ("meshes/test", ["foo.nif", "bar.nif"]),
+    ]
+
+    archive_flags = 0b11  # folder names + file names included
+    folder_record_size = 24  # v105
+
+    folder_count = len(folders)
+    file_count = sum(len(files) for _, files in folders)
+    total_folder_name_length = sum(len(name) + 1 for name, _ in folders)  # incl null
+    total_file_name_length = sum(
+        len(fname) + 1 for _, fnames in folders for fname in fnames
+    )
+
+    out = bytearray()
+    # Header (36 bytes).
+    out += struct.pack(
+        "<4sIIIIIIII",
+        b"BSA\x00",
+        105,
+        36,                          # folder_offset (= header size)
+        archive_flags,
+        folder_count,
+        file_count,
+        total_folder_name_length,
+        total_file_name_length,
+        0,                           # file_flags (unused for enumeration)
+    )
+
+    folder_records_block_size = folder_record_size * folder_count
+    cursor = 36 + folder_records_block_size
+    folder_offsets: list[int] = []
+    for folder_name, fnames in folders:
+        folder_offsets.append(cursor)
+        # 1 byte length + folder_name + null + file_count * 16
+        cursor += 1 + len(folder_name) + 1 + len(fnames) * 16
+
+    # Folder records (24 bytes each).
+    for (_folder_name, fnames), folder_offset in zip(folders, folder_offsets, strict=True):
+        out += struct.pack(
+            "<QIIQ",
+            0,                # name_hash (unused)
+            len(fnames),      # file_count
+            0,                # v105 padding
+            folder_offset + total_file_name_length,
+        )
+
+    # Per-folder name block + file records.
+    for folder_name, fnames in folders:
+        out += bytes([len(folder_name) + 1])
+        out += folder_name.encode("ascii") + b"\x00"
+        for fname in fnames:
+            out += struct.pack(
+                "<QII",
+                0,            # name_hash
+                len(fname),   # size_and_flags
+                0,            # offset
+            )
+
+    # File names block: null-terminated names, in file-record order across folders.
+    for _folder, fnames in folders:
+        for fname in fnames:
+            out += fname.encode("ascii") + b"\x00"
+
+    archive_path.write_bytes(bytes(out))
+    return archive_path
