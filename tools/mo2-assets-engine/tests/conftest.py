@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import struct
 from pathlib import Path
 
 import pytest
@@ -41,3 +42,122 @@ def sample_profile_dir(tmp_path: Path) -> Path:
         (mods_root / name).mkdir(parents=True)
 
     return profile
+
+
+def _ba2_pad_name(name: str) -> bytes:
+    encoded = name.encode("utf-8")
+    return struct.pack("<H", len(encoded)) + encoded
+
+
+@pytest.fixture()
+def synthetic_ba2_gnrl(tmp_path: Path) -> Path:
+    """Build a minimal valid BA2 v1 GNRL archive with 3 known members.
+
+    Layout: header (24 bytes) + 3 x (36-byte entry record) + 3 file payloads
+    (uncompressed) + name table. Member names match what a real FO4 BA2
+    would contain.
+    """
+    archive_path = tmp_path / "TestPack - Main.ba2"
+    members = [
+        ("materials/test/foo.bgsm", b"FOO-BGSM-PAYLOAD"),
+        ("scripts/source/user/test.psc", b"PAYLOAD-2"),
+        ("strings/test_en.strings", b"PAYLOAD-3"),
+    ]
+    file_count = len(members)
+    header_size = 24
+    entry_size = 36
+
+    name_offsets_start = header_size + entry_size * file_count
+    payloads_offset = name_offsets_start
+    file_records = []
+    cursor = payloads_offset
+    for _name, payload in members:
+        file_records.append((cursor, len(payload)))
+        cursor += len(payload)
+    name_table_offset = cursor
+
+    out = bytearray()
+    # Header: magic "BTDX", version 1, type "GNRL", file_count, name_table_offset
+    out += struct.pack("<4sI4sIQ", b"BTDX", 1, b"GNRL", file_count, name_table_offset)
+    # Entry records (36 bytes each).
+    for (_name, _payload), (offset, size) in zip(members, file_records, strict=True):
+        out += struct.pack(
+            "<IIIIQIII",
+            0,            # name_hash
+            0,            # ext
+            0,            # dir_hash
+            0,            # unknown
+            offset,
+            0,            # packed_size = 0 -> uncompressed
+            size,
+            0xBAADF00D,   # sentinel
+        )
+    for _name, payload in members:
+        out += payload
+    for name, _payload in members:
+        out += _ba2_pad_name(name)
+
+    archive_path.write_bytes(bytes(out))
+    return archive_path
+
+
+@pytest.fixture()
+def synthetic_ba2_dx10(tmp_path: Path) -> Path:
+    """Build a minimal valid BA2 v1 DX10 archive with 2 known texture members.
+
+    Layout: header (24 bytes) + per-file (texture header 24 bytes +
+    1 chunk header 24 bytes) + payloads + name table.
+    """
+    archive_path = tmp_path / "TestTextures - Textures.ba2"
+    members = [
+        ("textures/test/foo.dds", b"DDS-PAYLOAD-1"),
+        ("textures/test/bar.dds", b"DDS-PAYLOAD-2"),
+    ]
+    file_count = len(members)
+    header_size = 24
+    per_file_record_size = 24 + 24 * 1  # tex header + 1 chunk header
+    name_offsets_start = header_size + per_file_record_size * file_count
+    payloads_offset = name_offsets_start
+    file_records = []
+    cursor = payloads_offset
+    for _name, payload in members:
+        file_records.append((cursor, len(payload)))
+        cursor += len(payload)
+    name_table_offset = cursor
+
+    out = bytearray()
+    out += struct.pack("<4sI4sIQ", b"BTDX", 1, b"DX10", file_count, name_table_offset)
+    for (_name, _payload), (offset, size) in zip(members, file_records, strict=True):
+        # Texture header (24 bytes).
+        out += struct.pack(
+            "<IIIBBHHHBBBB",
+            0,      # name_hash
+            0,      # ext
+            0,      # dir_hash
+            0,      # unk8
+            1,      # num_chunks
+            24,     # chunk_header_size
+            1024,   # height
+            1024,   # width
+            1,      # num_mips
+            87,     # format (BC7_UNORM)
+            0,      # is_cubemap
+            8,      # tile_mode
+        )
+        # Chunk header (24 bytes).
+        out += struct.pack(
+            "<QIIHHI",
+            offset,
+            0,                # packed_size = 0 -> uncompressed
+            size,
+            0,                # start_mip
+            0,                # end_mip
+            0xBAADF00D,
+        )
+    for _name, payload in members:
+        out += payload
+    for name, _payload in members:
+        out += _ba2_pad_name(name)
+
+    archive_path.write_bytes(bytes(out))
+    return archive_path
