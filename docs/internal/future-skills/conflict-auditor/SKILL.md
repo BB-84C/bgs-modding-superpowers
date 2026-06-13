@@ -1,5 +1,11 @@
 # Skill: Conflict Auditor
 
+> **SUPERSEDED 2026-06-12.** This scaffold has been replaced by the shipped skill
+> `skills/xedit-conflict-audit/` backed by the bundled xEdit MCP
+> (`tools/xedit-mcp/`). Kept here as a historical design note; do not author new
+> work against this stub. See `docs/internal/roadmap.md` "Capability Map"
+> (`conflict auditor` row) for the shipped surface.
+
 ## Purpose
 
 Separate file conflicts from plugin/data conflicts and guide the next inspection step.

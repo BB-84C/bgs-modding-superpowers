@@ -49,7 +49,7 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 | MCP integrations beyond xEdit | Specified only | Specs live at `docs/internal/mcp-specs/` (`nexus-metadata`, `loot-metadata`, `translation-memory`). |
 | safety hooks | Foundation in place | Runtime hook code lives in `hooks/`; hook specs moved to `docs/internal/hook-specs/`. |
 | save-safety automation | Explicitly deferred | The design calls for it later, but no real save-safety automation should ship until a real curator loop exists. |
-| agentic cross-game BGS knowledge base | Planned (architecture chosen 2026-06-02) | Sibling `tools/bgs-kb-mcp/` + hybrid records under `knowledge/bgs-kb/` + SQLite3+FTS5+BM25 prebuilt index. Pack format = `<packId>/{manifest.json, records/, kb.sqlite}` zipped per release. Bundled core + per-game Release artifacts + end-user packs via `$BGS_KB_USER_PACKS` discovery. See 2026-06-02 entry for full architecture + KB-4 fan-out plan. Scale: ~2500-3000 items across Skyrim / FO3 / FNV / FO4 / Starfield, de-duplicated via per-game variant overlays. |
+| agentic cross-game BGS knowledge base | Shipped (KB-1..KB-6 complete 2026-06-02; Starfield zh-Hans glossary pack added 2026-06-09) | Sibling `tools/bgs-kb-mcp/` + hybrid records under `knowledge/bgs-kb/` + SQLite3+FTS5+BM25 prebuilt index. 6 packs loaded at runtime: `bgs-kb-core` (114) + `bgs-kb-skyrim` (33) + `bgs-kb-fallout4` (34) + `bgs-kb-fallout3-fnv` (28) + `bgs-kb-starfield` (20) + `bgs-l10n-starfield-zhhans` (151k glossary entries) = ~151,655 total records. MCP surface: `bgs_kb_status`, `bgs_kb_query`, `bgs_kb_get`, `bgs_kb_check_updates`, `bgs_kb_install_pack`. Distribution: bundled core + per-game GitHub Release artifacts (`kb-2026.06.02` tag) + end-user packs via `$BGS_KB_USER_PACKS` discovery. Authoring workflow lives in `scripts/dev-kb-author.ps1` (see repo `AGENTS.md` "KB Authoring Workflow"). Known follow-up bugs: `records_fts` UNION on glossary-shape packs (scope queries with `packIds`); FTS5 hyphen-digit token parse error (drop the digit suffix or quote). |
 
 ## Phase Ladder
 
@@ -64,16 +64,18 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 9. Phase 8 controlled higher-risk automation: add carefully gated automation only after the read-only and operator-guided loops are proven.
 10. Phase 9 packaging and publishable plugin surface: finalize packaging metadata, command surfaces, and publishable OpenCode plugin structure.
 
-### Cross-cutting track: Agentic Knowledge Base (KB-1 through KB-6)
+### Cross-cutting track: Agentic Knowledge Base (KB-1 through KB-6) — SHIPPED
 
-Runs in parallel with the phase ladder above, not as a single inserted phase, because it touches multiple workflows (conflict audit, install planning, diagnostics, setup). Phases live in the 2026-06-02 architecture entry below.
+All six phases shipped on `main` in a single autonomous loop on 2026-06-02; carry-forwards cleared 2026-06-03; Starfield zh-Hans glossary pack added 2026-06-09. Full closeout entries below preserve the architecture decisions and per-phase deliverables.
 
-- KB-1 — schema + seed records extracted from existing `xedit-knowledgebase.md` and `writing-bgs-load-order/SKILL.md`.
-- KB-2 — `tools/bgs-kb-mcp/` with `bgs_kb_status` / `bgs_kb_query` / `bgs_kb_get`; loads bundled core pack only.
-- KB-3 — `setting-up-bgs-modding-environment` skill gains pack-acquisition + cache-hygiene steps.
-- KB-4 — per-game packs (FO4, SkyrimSE, FO3, FNV, Starfield) published as GitHub Release artifacts.
-- KB-5 — dual-write lessons; legacy `xedit-knowledgebase.md` becomes generated-from-records or retired.
-- KB-6 — optional `bgs_kb_check_updates` + opt-in refresh; eval harness for retrieval quality.
+- KB-1 — schema + 46 seed records + pack-build CLI (build/validate/info). **Shipped.**
+- KB-2 — `tools/bgs-kb-mcp/` MCP server + 3 read-side tools + portable-plugin integration + bootstrap skill update. **Shipped.**
+- KB-3 — `maintaining-modding-environments` skill + first-run KB acquisition steps. **Shipped.**
+- KB-4 — 5 per-game packs (Skyrim, FO4, FO3+FNV, Starfield) + core expansion = 228 records across 5 packs (151k more after Starfield zh-Hans glossary pack). **Shipped.**
+- KB-5 — `xedit-knowledgebase.md` retired to redirect; lessons now author KB records; schema gained `kind` enum + `rule-candidate` markings. **Shipped.**
+- KB-6 — `bgs_kb_check_updates` + `bgs_kb_install_pack` + `cli prune-cache` + 20-query eval gold set (retrieval@3 = 0.800). **Shipped.**
+
+Future expansion (additional records, additional games, community-contributed packs via `$BGS_KB_USER_PACKS`) is unblocked and not tracked as roadmap phases. Internal KB-pack authoring is documented in repo `AGENTS.md` ("KB Authoring Workflow — Internal Dev").
 
 ## Dependency / Blocker Map
 
@@ -118,7 +120,7 @@ Runs in parallel with the phase ladder above, not as a single inserted phase, be
 
 The reshape to a Superpowers-shaped multi-harness plugin is complete in the local repo (`main`). Immediate next targets:
 
-1. **Agentic cross-game knowledge base (KB track)** — architecture chosen 2026-06-02; see entry below. Next concrete step is KB-1: schema + seed records under `knowledge/bgs-kb/` extracted from the existing `xedit-knowledgebase.md` and `writing-bgs-load-order` skill. Long-term shape: sibling `tools/bgs-kb-mcp/` server + hybrid records with per-game variant overlays + bundled core / per-game Release-artifact distribution. This is the next major workstream.
+1. **Archive / loose-file reasoning helpers** — next workstream. Substrate in the KB (`archive-precedence` domain across `bgs-kb-core` and per-game packs) is rich on the "art" side (loose-wins-archive, BSA-vs-BA2-by-game, FO4 next-gen BA2 version bump, FO4 precombine/previs minefield, MO2 Overwrite participation, plugin-order-is-not-asset-order). The bottleneck is the "技" side — the plugin currently has no agent-facing tools for inspecting BA2/BSA contents, computing asset winners across the deployed VFS, or detecting runtime/archive-version mismatches. Design pending; user has explicit thinking to share before any scaffolding.
 2. **Portable publishability** — `scripts/build-portable-plugin.ps1` materializes `plugins/bgs-modding-superpowers/` directly onto `main` as part of the two-commit dev cycle (source commit + materialized commit; see AGENTS.md 2026-06-03). End-users consume the plugin tree by cloning or pulling the repo (vendor-pull pattern for the OpenCode harness, marketplace-pointed clone for Codex / Claude Code). A separate "release branch / release artifact" channel was once considered for the plugin tree but is unnecessary — Codex / OpenCode / Claude Code all consume `git clone`-shaped state. The release-artifact channel is reserved for KB packs (large binary blobs that do not belong in the main tree; current cadence: `kb-YYYY.MM.DD` tags). The KB track must respect this — only the core pack ships inline in the plugin tree, per-game packs are GitHub Release assets.
 3. **Read-only xEdit completion** — Batch 2 carry-forwards #2 / #4 / #5 / #6 are closed (see STATUS file). 2026-06-11 update: CF #7 closed-with-finding (PowerShell adapter ~3.5 s/call floor → Batch 3 must use direct Node named-pipe client; see `.opencode/artifacts/xedit-mcp/acceptance/batch2/cf7-latency/SUMMARY.md`); CF #3 agent half done (MCP envelopes for `Fallout4.esm` WRLD `0x0000003C` saved under `.opencode/artifacts/xedit-mcp/acceptance/batch2/manual-parity/fo4-WRLD-0000003C/`; human-side `xedit-gui.png` screenshot still pending); CF #1 (representative W2 matrix `breaking` fixture) deferred indefinitely until a real-world bug report justifies the fixture-hunt cost.
 

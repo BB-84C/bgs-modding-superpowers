@@ -1,5 +1,10 @@
 # Skill: Write Dev Log
 
+> **SUPERSEDED 2026-06-12.** This scaffold has been replaced by the shipped skill
+> `skills/writing-modpack-devlog/`. Kept here as a historical design note; do
+> not author new work against this stub. See `docs/internal/roadmap.md`
+> "Capability Map" (`modpack dev log workflow` row) for the shipped surface.
+
 ## Purpose
 
 Maintain a strategic development log inside a user's modpack project.
