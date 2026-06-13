@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mo2-assets-engine"
+version = "0.1.0-dev0"
+description = "Offline analyzer for MO2 profile state, loose files, and BA2/BSA archives. Computes loose-vs-archive conflict winners."
+authors = [{ name = "BB-84C" }]
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+  "typer>=0.15",
+  "pydantic>=2.10",
+]
+
+[project.scripts]
+mo2-assets = "mo2_assets_engine.cli.app:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "mypy>=1.13",
+  "ruff>=0.8",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mo2_assets_engine*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+extend-select = ["I", "UP", "B", "C4", "PERF", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
