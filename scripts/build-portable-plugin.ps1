@@ -329,6 +329,34 @@ if ($LASTEXITCODE -gt 7) {
 # Reset $LASTEXITCODE so downstream cmdlets see a clean state.
 $global:LASTEXITCODE = 0
 
+# ---- 6c. tools/mo2-assets-engine (offline archive/loose-file engine) --------
+# Bundled so Plan A's Python engine + `mo2-assets` CLI are available from the
+# materialized plugin tree. Use robocopy with /XD for the same reason as
+# bgs-translator: Python dev caches can appear at any depth after local test
+# runs and must not ship to vendor clones.
+$mo2AssetsEngineSrc = Join-Path $RepoRoot "tools/mo2-assets-engine"
+$mo2AssetsEngineDst = Join-Path $PluginRoot "tools/mo2-assets-engine"
+if (-not (Test-Path -LiteralPath $mo2AssetsEngineSrc)) {
+  throw "Source not found: tools/mo2-assets-engine"
+}
+New-Item -ItemType Directory -Path $mo2AssetsEngineDst -Force | Out-Null
+$robocopyArgs = @(
+  $mo2AssetsEngineSrc,
+  $mo2AssetsEngineDst,
+  "/E",
+  "/XD", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+  "/XD", "*.egg-info", "build", "dist",
+  "/XD", ".venv",
+  "/NFL", "/NDL", "/NJH", "/NJS", "/NP"
+)
+& robocopy @robocopyArgs | Out-Null
+# robocopy exit codes 0-7 are success variants; 8+ are real errors.
+if ($LASTEXITCODE -gt 7) {
+  throw "robocopy failed copying tools/mo2-assets-engine (exit $LASTEXITCODE)"
+}
+# Reset $LASTEXITCODE so downstream cmdlets see a clean state.
+$global:LASTEXITCODE = 0
+
 # ---- 7. Bundled knowledge-base core pack -----------------------------------
 # Large per-game and localization packs ship as KB Release artifacts. Keep the
 # portable plugin small and deterministic; first-run/maintenance can install
