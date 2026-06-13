@@ -1,0 +1,11 @@
+# Python build / install artifacts
+*.egg-info/
+__pycache__/
+*.pyc
+build/
+dist/
+
+# Test + lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
