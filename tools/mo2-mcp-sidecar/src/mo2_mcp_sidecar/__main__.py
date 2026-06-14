@@ -8,6 +8,7 @@ from pathlib import Path
 from .envelope import register_method, run_stdio_loop
 from .world import WorldCache
 from . import assets as _assets
+from . import fomod as _fomod
 
 
 def _echo_handler(params: dict) -> dict:
@@ -30,8 +31,9 @@ def main() -> int:
     register_method("system.echo", _echo_handler)
     _assets.init_assets(cache)
     _assets.register()
+    _fomod.register()
 
-    # Later tasks (27-28 fomod, 29 atomic helpers, P-B6 archive/install) register here
+    # Later tasks (28 atomic helpers, P-B6 archive/install) register here
 
     run_stdio_loop(sys.stdin, sys.stdout, sys.stderr)
     return 0
