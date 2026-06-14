@@ -57,6 +57,8 @@ import "./tools/mo2-run-tool.js"; // side-effect: register mo2_run_tool
 import "./tools/mo2-switch-profile.js"; // side-effect: register mo2_switch_profile
 import "./tools/mo2-configure-executable.js"; // side-effect: register mo2_configure_executable
 import "./tools/mo2-create-mod.js"; // side-effect: register mo2_create_mod
+import "./tools/mo2-create-separator.js"; // side-effect: register mo2_create_separator
+import "./tools/mo2-rename-mod.js"; // side-effect: register mo2_rename_mod
 import type { ToolContext } from "./types.js";
 
 const GAME_MAP: Record<string, SidecarGame> = {
