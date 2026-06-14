@@ -396,3 +396,126 @@ def test_mods_remove_failure_from_modlist(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "internal_error"
+
+
+def test_mods_create_basic(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    new_mod = MagicMock()
+    new_mod.name.return_value = "NewMod"
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = None
+    mod_list.priority.return_value = 5
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    organizer.createMod.return_value = new_mod
+
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+    monkeypatch.setattr(bridge, "GuessedString", lambda name: name, raising=False)
+
+    result = bridge._handle_mods_create(organizer, pump, {"name": "NewMod"})
+
+    assert result["ok"] is True
+    readback = result["result"]
+    assert readback["name"] == "NewMod"
+    assert readback["created"] is True
+    assert readback["priority"] == 5
+
+
+def test_mods_create_with_target_priority(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    new_mod = MagicMock()
+    new_mod.name.return_value = "NewMod"
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = None
+    state = {"current": 0}
+
+    def _set(_name, priority):
+        state["current"] = priority
+
+    mod_list.setPriority.side_effect = _set
+    mod_list.priority.side_effect = lambda _name: state["current"]
+
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    organizer.createMod.return_value = new_mod
+
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+    monkeypatch.setattr(bridge, "GuessedString", lambda name: name, raising=False)
+
+    result = bridge._handle_mods_create(organizer, pump, {"name": "NewMod", "priority": 3})
+
+    assert result["ok"] is True
+    assert result["result"]["priority"] == 3
+    assert result["result"]["requested_priority"] == 3
+    organizer.modDataChanged.assert_called_once_with(new_mod)
+
+
+def test_mods_create_name_collision(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = MagicMock()
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+    monkeypatch.setattr(bridge, "GuessedString", lambda name: name, raising=False)
+
+    result = bridge._handle_mods_create(organizer, pump, {"name": "ExistingMod"})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_params"
+    assert "exists" in result["error"]["message"].lower()
+
+
+def test_mods_create_sanitizes_name(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    captured = {}
+    new_mod = MagicMock()
+    new_mod.name.return_value = "BadName"
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = None
+    mod_list.priority.return_value = 0
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+
+    def _create(guessed_string):
+        captured["name"] = guessed_string
+        return new_mod
+
+    organizer.createMod.side_effect = _create
+
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+    monkeypatch.setattr(bridge, "GuessedString", lambda name: name, raising=False)
+
+    result = bridge._handle_mods_create(organizer, pump, {"name": "Bad<>Name"})
+
+    assert result["ok"] is True
+    assert captured["name"] == "BadName"
+
+
+def test_mods_create_returns_internal_error_on_none(monkeypatch):
+    """createMod returned None (e.g., MO2 internal failure)."""
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = None
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    organizer.createMod.return_value = None
+
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+    monkeypatch.setattr(bridge, "GuessedString", lambda name: name, raising=False)
+
+    result = bridge._handle_mods_create(organizer, pump, {"name": "Whatever"})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "internal_error"

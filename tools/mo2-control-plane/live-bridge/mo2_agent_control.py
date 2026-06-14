@@ -38,6 +38,12 @@ except (ImportError, AttributeError):
     # Fallback when running under unit tests without mobase loaded.
     _ACTIVE_FLAG = 2  # ModState::Active = 2 per MO2 source.
 
+try:
+    from mobase import GuessedString
+except ImportError:
+    # Unit tests patch this symbol; runtime should provide mobase.GuessedString.
+    GuessedString = None
+
 
 # Canonical error codes (match broker-schema.json#/definitions/errorCode)
 class ErrorCode:
@@ -310,6 +316,7 @@ MODS_SET_ACTIVE_METHOD = "mods.set_active"
 MODS_SET_PRIORITY_METHOD = "mods.set_priority"
 MODS_RENAME_METHOD = "mods.rename"
 MODS_REMOVE_METHOD = "mods.remove"
+MODS_CREATE_METHOD = "mods.create"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1116,6 +1123,83 @@ def _handle_mods_remove(organizer, pump, payload):
     return {"ok": True, "result": outcome[1], "error": None}
 
 
+def _handle_mods_create(organizer, pump, payload):
+    """Create an empty mod via createMod + optional setPriority + notification.
+
+    Per oracle §A1, MO2 GUI creates at default priority then reorders. This
+    broker primitive composes those steps and emits the resulting priority.
+    """
+
+    name = payload.get("name")
+    target_priority = payload.get("priority")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+    if target_priority is not None and (not isinstance(target_priority, int) or isinstance(target_priority, bool)):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "priority: int"},
+        }
+
+    sanitized_name = _sanitize_dir_name(name)
+    if not sanitized_name:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {
+                "code": ErrorCode.INVALID_PARAMS,
+                "message": f"name '{name}' empty after sanitize",
+            },
+        }
+
+    def _on_main_thread():
+        mod_list = organizer.modList()
+        if mod_list.getMod(sanitized_name) is not None:
+            return ("error", ErrorCode.INVALID_PARAMS, f"name '{sanitized_name}' already exists")
+        if GuessedString is None:
+            return ("error", ErrorCode.INTERNAL_ERROR, "mobase.GuessedString unavailable")
+
+        new_mod = organizer.createMod(GuessedString(sanitized_name))
+        if new_mod is None:
+            return ("error", ErrorCode.INTERNAL_ERROR, "createMod returned None")
+
+        actual_name = new_mod.name()
+        result = {
+            "name": actual_name,
+            "created": True,
+            "priority": mod_list.priority(actual_name),
+        }
+        if target_priority is not None:
+            mod_list.setPriority(actual_name, target_priority)
+            result["priority"] = mod_list.priority(actual_name)
+            result["requested_priority"] = target_priority
+
+        organizer.modDataChanged(new_mod)
+        return ("ok", result)
+
+    try:
+        outcome = pump.invoke_blocking(_on_main_thread, timeout_s=15)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -1757,6 +1841,11 @@ def build_command_handlers(
         request.get("payload", {}),
     )
     handlers[MODS_REMOVE_METHOD] = lambda request: _handle_mods_remove(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[MODS_CREATE_METHOD] = lambda request: _handle_mods_create(
         organizer,
         main_thread_pump,
         request.get("payload", {}),
