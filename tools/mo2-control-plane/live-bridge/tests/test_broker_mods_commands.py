@@ -241,3 +241,103 @@ def test_mods_set_priority_out_of_range(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "priority_out_of_range"
+
+
+def test_mods_rename_success(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    old_mod = MagicMock()
+    mod_list.getMod.side_effect = lambda name: old_mod if name == "OldName" else None
+    refreshed = MagicMock()
+    refreshed.name.return_value = "NewName"
+    mod_list.renameMod.return_value = refreshed
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+
+    result = bridge._handle_mods_rename(organizer, pump, {"old_name": "OldName", "new_name": "NewName"})
+
+    assert result["ok"] is True
+    readback = result["result"]
+    assert readback["old_name"] == "OldName"
+    assert readback["new_name"] == "NewName"
+    assert readback["name_was_sanitized"] is False
+
+
+def test_mods_rename_sanitizes_illegal_chars(monkeypatch):
+    """Bad path chars get stripped before calling MO2 (avoids Qt dialog)."""
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    old_mod = MagicMock()
+
+    def _get(name):
+        if name == "OldName":
+            return old_mod
+        if name == "BadName":
+            return None
+        return None
+
+    mod_list.getMod.side_effect = _get
+    refreshed = MagicMock()
+    refreshed.name.return_value = "BadName"
+    mod_list.renameMod.return_value = refreshed
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+
+    result = bridge._handle_mods_rename(organizer, pump, {"old_name": "OldName", "new_name": "Bad<>Name"})
+
+    assert result["ok"] is True
+    assert result["result"]["new_name"] == "BadName"
+    assert result["result"]["name_was_sanitized"] is True
+    mod_list.renameMod.assert_called_once_with(old_mod, "BadName")
+
+
+def test_mods_rename_not_found_returns_error(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = None
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+
+    result = bridge._handle_mods_rename(organizer, pump, {"old_name": "NoSuch", "new_name": "Whatever"})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "mod_not_found"
+
+
+def test_mods_rename_collision_returns_error(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = MagicMock()
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+
+    result = bridge._handle_mods_rename(organizer, pump, {"old_name": "OldName", "new_name": "AlsoExists"})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_params"
+    assert "exists" in result["error"]["message"].lower()
+
+
+def test_mods_rename_empty_after_sanitize_returns_error(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    organizer = MagicMock()
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+
+    result = bridge._handle_mods_rename(organizer, pump, {"old_name": "OldName", "new_name": "<>:?*"})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_params"

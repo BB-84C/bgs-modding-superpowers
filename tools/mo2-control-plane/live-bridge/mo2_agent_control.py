@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import queue
+import re as _re
 import subprocess
 import threading
 import uuid
@@ -307,6 +308,9 @@ SYSTEM_SHUTDOWN_METHOD = "system.shutdown"
 MODS_LIST_METHOD = "mods.list"
 MODS_SET_ACTIVE_METHOD = "mods.set_active"
 MODS_SET_PRIORITY_METHOD = "mods.set_priority"
+MODS_RENAME_METHOD = "mods.rename"
+
+_INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 LAUNCH_START_METHOD = "launch.start"
 LAUNCH_STATUS_METHOD = "launch.status"
@@ -993,6 +997,78 @@ def _handle_mods_set_priority(organizer, pump, payload):
     return {"ok": True, "result": outcome[1], "error": None}
 
 
+def _sanitize_dir_name(name: str) -> str:
+    """Strip illegal path chars before MO2 can raise a blocking Qt dialog.
+
+    This mirrors MO2's fixDirectoryName behavior closely enough for the broker:
+    remove path-invalid characters, trim leading/trailing whitespace, then remove
+    trailing dots before calling renameMod (oracle §A4).
+    """
+
+    return _INVALID_PATH_CHARS.sub("", name).strip().rstrip(".")
+
+
+def _handle_mods_rename(organizer, pump, payload):
+    """Rename a mod via main-thread renameMod, pre-sanitized + collision-checked."""
+
+    old_name = payload.get("old_name")
+    new_name = payload.get("new_name")
+    if not isinstance(old_name, str) or not isinstance(new_name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "old_name + new_name: str"},
+        }
+
+    sanitized_name = _sanitize_dir_name(new_name)
+    if not sanitized_name:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {
+                "code": ErrorCode.INVALID_PARAMS,
+                "message": f"new_name '{new_name}' empty after sanitize",
+            },
+        }
+
+    def _on_main_thread():
+        mod_list = organizer.modList()
+        mod = mod_list.getMod(old_name)
+        if mod is None:
+            return ("error", ErrorCode.MOD_NOT_FOUND, f"mod '{old_name}' not found")
+
+        if sanitized_name != old_name and mod_list.getMod(sanitized_name) is not None:
+            return ("error", ErrorCode.INVALID_PARAMS, f"name '{sanitized_name}' already exists")
+
+        refreshed = mod_list.renameMod(mod, sanitized_name)
+        return (
+            "ok",
+            {
+                "old_name": old_name,
+                "new_name": refreshed.name() if refreshed is not None else sanitized_name,
+                "name_was_sanitized": sanitized_name != new_name,
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_on_main_thread, timeout_s=15)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -1624,6 +1700,11 @@ def build_command_handlers(
         request.get("payload", {}),
     )
     handlers[MODS_SET_PRIORITY_METHOD] = lambda request: _handle_mods_set_priority(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[MODS_RENAME_METHOD] = lambda request: _handle_mods_rename(
         organizer,
         main_thread_pump,
         request.get("payload", {}),
