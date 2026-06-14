@@ -329,6 +329,7 @@ PLUGINS_SET_PRIORITY_METHOD = "plugins.set_priority"
 PLUGINS_SET_LOAD_ORDER_METHOD = "plugins.set_load_order"
 PROFILE_LIST_METHOD = "profile.list"
 PROFILE_ACTIVE_METHOD = "profile.active"
+PROFILE_INITIALIZE_METHOD = "profile.initialize"
 ORGANIZER_REFRESH_METHOD = "organizer.refresh"
 ORGANIZER_RESOLVE_PATH_METHOD = "organizer.resolve_path"
 ORGANIZER_GET_FILE_ORIGINS_METHOD = "organizer.get_file_origins"
@@ -1574,6 +1575,69 @@ def _handle_profile_active(organizer, payload):
     }
 
 
+def _handle_profile_initialize(organizer, pump, payload):
+    """Initialize a profile directory with game-specific INI templates."""
+
+    profile_dir = payload.get("profile_dir")
+    settings_list = payload.get("settings", ["MODS", "CONFIGURATION"])
+    if not isinstance(profile_dir, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "profile_dir: str"},
+        }
+    if not isinstance(settings_list, list) or not all(isinstance(setting, str) for setting in settings_list):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "settings: list[str]"},
+        }
+
+    def _main():
+        try:
+            from mobase import ProfileSetting
+        except ImportError:
+            return ("error", ErrorCode.INTERNAL_ERROR, "mobase.ProfileSetting unavailable")
+
+        plugin_game = organizer.managedGame()
+        if plugin_game is None:
+            return ("error", ErrorCode.INTERNAL_ERROR, "no managed game plugin")
+
+        flags = 0
+        applied = []
+        for setting in settings_list:
+            attr = getattr(ProfileSetting, setting, None)
+            if attr is None:
+                return ("error", ErrorCode.INVALID_PARAMS, f"unknown ProfileSetting: {setting}")
+            flags |= int(attr)
+            applied.append(setting)
+
+        try:
+            from PyQt6.QtCore import QDir
+
+            plugin_game.initializeProfile(QDir(profile_dir), flags)
+        except ImportError:
+            plugin_game.initializeProfile(profile_dir, flags)
+        return ("ok", {"profile_dir": profile_dir, "settings_applied": applied})
+
+    try:
+        outcome = pump.invoke_blocking(_main, timeout_s=30)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
 def _handle_organizer_refresh(organizer, pump, payload):
     """Refresh MO2 internal state on the main thread."""
 
@@ -2489,6 +2553,11 @@ def build_command_handlers(
     )
     handlers[PROFILE_ACTIVE_METHOD] = lambda request: _handle_profile_active(
         organizer,
+        request.get("payload", {}),
+    )
+    handlers[PROFILE_INITIALIZE_METHOD] = lambda request: _handle_profile_initialize(
+        organizer,
+        main_thread_pump,
         request.get("payload", {}),
     )
     handlers[ORGANIZER_REFRESH_METHOD] = lambda request: _handle_organizer_refresh(

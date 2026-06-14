@@ -5,7 +5,7 @@ import importlib
 import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 LIVE_BRIDGE_DIR = Path(__file__).resolve().parents[1]
@@ -93,3 +93,81 @@ def test_profile_active_returns_name_and_path(monkeypatch):
     assert result["ok"] is True
     assert result["result"]["name"] == "Default"
     assert result["result"]["path"] == "/path/to/profiles/Default"
+
+
+def test_profile_initialize_success(monkeypatch, tmp_path):
+    bridge = _load_bridge(monkeypatch)
+
+    new_profile_dir = tmp_path / "NewProfile"
+    new_profile_dir.mkdir()
+
+    plugin_game = MagicMock()
+    organizer = MagicMock()
+    organizer.managedGame.return_value = plugin_game
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=30: fn()
+
+    fake_enum = MagicMock()
+    fake_enum.MODS = 1
+    fake_enum.CONFIGURATION = 2
+    fake_enum.SAVEGAMES = 4
+    fake_enum.PREFER_DEFAULTS = 8
+
+    fake_qt_core = MagicMock(QDir=lambda path: path)
+    with patch.dict(
+        "sys.modules",
+        {"mobase": MagicMock(ProfileSetting=fake_enum), "PyQt6": MagicMock(), "PyQt6.QtCore": fake_qt_core},
+    ):
+        result = bridge._handle_profile_initialize(
+            organizer,
+            pump,
+            {
+                "profile_dir": str(new_profile_dir),
+                "settings": ["MODS", "CONFIGURATION"],
+            },
+        )
+
+    assert result["ok"] is True
+    assert result["result"]["profile_dir"] == str(new_profile_dir)
+    assert result["result"]["settings_applied"] == ["MODS", "CONFIGURATION"]
+
+
+def test_profile_initialize_default_settings(monkeypatch, tmp_path):
+    """Default settings = MODS | CONFIGURATION when omitted."""
+
+    bridge = _load_bridge(monkeypatch)
+
+    new_profile_dir = tmp_path / "Default2"
+    new_profile_dir.mkdir()
+
+    plugin_game = MagicMock()
+    organizer = MagicMock()
+    organizer.managedGame.return_value = plugin_game
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=30: fn()
+
+    fake_enum = MagicMock()
+    fake_enum.MODS = 1
+    fake_enum.CONFIGURATION = 2
+    fake_enum.SAVEGAMES = 4
+    fake_enum.PREFER_DEFAULTS = 8
+
+    fake_qt_core = MagicMock(QDir=lambda path: path)
+    with patch.dict(
+        "sys.modules",
+        {"mobase": MagicMock(ProfileSetting=fake_enum), "PyQt6": MagicMock(), "PyQt6.QtCore": fake_qt_core},
+    ):
+        result = bridge._handle_profile_initialize(organizer, pump, {"profile_dir": str(new_profile_dir)})
+
+    assert result["ok"] is True
+    assert "MODS" in result["result"]["settings_applied"]
+    assert "CONFIGURATION" in result["result"]["settings_applied"]
+
+
+def test_profile_initialize_invalid_params(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    result = bridge._handle_profile_initialize(MagicMock(), MagicMock(), {"profile_dir": 42})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_params"
