@@ -26,6 +26,18 @@ import mobase
 log = logging.getLogger(__name__)
 
 
+try:
+    from mobase import ModState as _ModState
+
+    try:
+        _ACTIVE_FLAG = int(_ModState.active)
+    except AttributeError:
+        _ACTIVE_FLAG = int(_ModState.ACTIVE)
+except (ImportError, AttributeError):
+    # Fallback when running under unit tests without mobase loaded.
+    _ACTIVE_FLAG = 2  # ModState::Active = 2 per MO2 source.
+
+
 # Canonical error codes (match broker-schema.json#/definitions/errorCode)
 class ErrorCode:
     INVALID_REQUEST = "invalid_request"
@@ -287,6 +299,7 @@ RUNTIME_FILE_NAMES = (
 SYSTEM_PING_METHOD = "system.ping"
 SYSTEM_CAPABILITIES_METHOD = "system.capabilities"
 SYSTEM_SHUTDOWN_METHOD = "system.shutdown"
+MODS_LIST_METHOD = "mods.list"
 
 LAUNCH_START_METHOD = "launch.start"
 LAUNCH_STATUS_METHOD = "launch.status"
@@ -793,6 +806,36 @@ def _handle_system_shutdown(organizer, payload):
 
     register_post_response_hook(enqueue_quit)
     return {"ok": True, "result": {"shutting_down": True}, "error": None}
+
+
+def _handle_mods_list(organizer, payload):
+    """Background-safe snapshot of all mods with priority + enabled + separator flag.
+
+    P-F4: uses mobase ModState.active when available, falls back to 2.
+    P-F5: separator detection prefers IModInterface.isSeparator(), falling back
+    to the conventional *_separator suffix only when the live API is unavailable.
+    """
+
+    mod_list = organizer.modList()
+    mods = []
+    for name in mod_list.allMods():
+        state = mod_list.state(name)
+        try:
+            mod = mod_list.getMod(name)
+            is_separator = bool(mod.isSeparator()) if mod is not None else name.endswith("_separator")
+        except Exception:
+            is_separator = name.endswith("_separator")
+
+        mods.append(
+            {
+                "name": name,
+                "priority": mod_list.priority(name),
+                "enabled": bool(state & _ACTIVE_FLAG),
+                "is_separator": is_separator,
+            }
+        )
+
+    return {"ok": True, "result": {"mods": mods}, "error": None}
 
 
 def utc_now_timestamp() -> str:
@@ -1413,6 +1456,10 @@ def build_command_handlers(
 
     handlers[SYSTEM_CAPABILITIES_METHOD] = handle_system_capabilities
     handlers[SYSTEM_SHUTDOWN_METHOD] = lambda request: _handle_system_shutdown(
+        organizer,
+        request.get("payload", {}),
+    )["result"]
+    handlers[MODS_LIST_METHOD] = lambda request: _handle_mods_list(
         organizer,
         request.get("payload", {}),
     )["result"]
