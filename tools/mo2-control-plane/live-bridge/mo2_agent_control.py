@@ -306,6 +306,7 @@ SYSTEM_CAPABILITIES_METHOD = "system.capabilities"
 SYSTEM_SHUTDOWN_METHOD = "system.shutdown"
 MODS_LIST_METHOD = "mods.list"
 MODS_SET_ACTIVE_METHOD = "mods.set_active"
+MODS_SET_PRIORITY_METHOD = "mods.set_priority"
 
 LAUNCH_START_METHOD = "launch.start"
 LAUNCH_STATUS_METHOD = "launch.status"
@@ -921,6 +922,75 @@ def _handle_mods_set_active(organizer, pump, payload):
         }
 
     return {"ok": True, "result": result, "error": None}
+
+
+def _handle_mods_set_priority(organizer, pump, payload):
+    """Reorder a mod via main-thread setPriority + readback.
+
+    oracle §2.1: setPriority can silently no-op when master/non-master
+    inversion would be required. Readback exposes this via noop=true.
+    """
+
+    name = payload.get("name")
+    priority = payload.get("priority")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+    if not isinstance(priority, int) or isinstance(priority, bool):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "priority: int"},
+        }
+
+    def _on_main_thread():
+        mod_list = organizer.modList()
+        if mod_list.getMod(name) is None:
+            return ("error", ErrorCode.MOD_NOT_FOUND, f"mod '{name}' not found")
+
+        all_mods = list(mod_list.allMods())
+        non_separator_mods = [mod_name for mod_name in all_mods if not mod_name.endswith("_separator")]
+        max_priority = max(0, len(non_separator_mods))
+        if priority < 0 or priority > max_priority:
+            return (
+                "error",
+                ErrorCode.PRIORITY_OUT_OF_RANGE,
+                f"priority {priority} out of [0..{max_priority}]",
+            )
+
+        before = mod_list.priority(name)
+        mod_list.setPriority(name, priority)
+        actual = mod_list.priority(name)
+        return (
+            "ok",
+            {
+                "name": name,
+                "requested_priority": priority,
+                "actual_priority": actual,
+                "noop": (actual == before) and (before != priority),
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_on_main_thread, timeout_s=10)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+
+    return {"ok": True, "result": outcome[1], "error": None}
 
 
 def utc_now_timestamp() -> str:
@@ -1549,6 +1619,11 @@ def build_command_handlers(
         request.get("payload", {}),
     )
     handlers[MODS_SET_ACTIVE_METHOD] = lambda request: _handle_mods_set_active(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[MODS_SET_PRIORITY_METHOD] = lambda request: _handle_mods_set_priority(
         organizer,
         main_thread_pump,
         request.get("payload", {}),

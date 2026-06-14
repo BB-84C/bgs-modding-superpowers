@@ -156,3 +156,88 @@ def test_mods_set_active_invalid_params_returns_error(monkeypatch):
     assert response["ok"] is False
     assert response["result"] is None
     assert response["error"]["code"] == "invalid_params"
+
+
+def test_mods_set_priority_success(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    actual = {"current": 0}
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = MagicMock()
+    mod_list.allMods.return_value = ["ModA", "ModB", "ModC"]
+
+    def _set(_name, priority):
+        actual["current"] = priority
+
+    mod_list.setPriority.side_effect = _set
+    mod_list.priority.side_effect = lambda _name: actual["current"]
+
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=10: fn()
+
+    result = bridge._handle_mods_set_priority(organizer, pump, {"name": "ModA", "priority": 1})
+
+    assert result["ok"] is True
+    readback = result["result"]
+    assert readback["name"] == "ModA"
+    assert readback["requested_priority"] == 1
+    assert readback["actual_priority"] == 1
+    assert readback["noop"] is False
+
+
+def test_mods_set_priority_silent_noop_detected(monkeypatch):
+    """oracle §2.1: setPriority returns true even when no-op on master/non-master inversion."""
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = MagicMock()
+    mod_list.allMods.return_value = ["ModA", "ModB", "ModC"]
+    mod_list.setPriority = MagicMock()
+    mod_list.priority.return_value = 0
+
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=10: fn()
+
+    result = bridge._handle_mods_set_priority(organizer, pump, {"name": "ModA", "priority": 2})
+
+    assert result["ok"] is True
+    readback = result["result"]
+    assert readback["actual_priority"] == 0
+    assert readback["noop"] is True
+
+
+def test_mods_set_priority_mod_not_found(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = None
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=10: fn()
+
+    result = bridge._handle_mods_set_priority(organizer, pump, {"name": "NoSuch", "priority": 0})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "mod_not_found"
+
+
+def test_mods_set_priority_out_of_range(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = MagicMock()
+    mod_list.allMods.return_value = ["ModA", "ModB"]
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=10: fn()
+
+    result = bridge._handle_mods_set_priority(organizer, pump, {"name": "ModA", "priority": -1})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "priority_out_of_range"
