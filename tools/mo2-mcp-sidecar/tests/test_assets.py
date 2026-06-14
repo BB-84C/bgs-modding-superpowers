@@ -1,5 +1,4 @@
 """Unit tests for asset JSON-RPC methods. Uses fake WorldCache, no real engine."""
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .envelope import register_method, run_stdio_loop
 from .world import WorldCache
+from . import archive as _archive
 from . import assets as _assets
 from . import fomod as _fomod
 
@@ -32,8 +33,9 @@ def main() -> int:
     _assets.init_assets(cache)
     _assets.register()
     _fomod.register()
+    _archive.register()
 
-    # Later tasks (28 atomic helpers, P-B6 archive/install) register here
+    # Later tasks (P-B6 install.conflict_preview, install.stage_fomod) register here
 
     run_stdio_loop(sys.stdin, sys.stdout, sys.stderr)
     return 0
