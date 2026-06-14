@@ -1,4 +1,4 @@
-"""MO2 MCP sidecar entry point. Args + register methods + run stdio loop."""
+"""MO2 MCP sidecar entry point."""
 from __future__ import annotations
 
 import argparse
@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 
 from .envelope import register_method, run_stdio_loop
+from .world import WorldCache
+from . import assets as _assets
 
 
 def _echo_handler(params: dict) -> dict:
@@ -21,8 +23,15 @@ def main() -> int:
                                  "STARFIELD", "OBLIVION", "FALLOUT_NV"])
     args = parser.parse_args()
 
-    # Later tasks (S1b 25-29) register their methods here (assets/world/fomod/archive/install)
+    # Build the shared WorldCache (P-B7: game in, P-F10: lock inside cache)
+    cache = WorldCache(mods_root=args.mods_root, game=args.game)
+
+    # Wire methods
     register_method("system.echo", _echo_handler)
+    _assets.init_assets(cache)
+    _assets.register()
+
+    # Later tasks (27-28 fomod, 29 atomic helpers, P-B6 archive/install) register here
 
     run_stdio_loop(sys.stdin, sys.stdout, sys.stderr)
     return 0
