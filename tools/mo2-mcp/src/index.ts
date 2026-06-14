@@ -40,6 +40,7 @@ import "./tools/mo2-status.js"; // side-effect: register mo2_status
 import "./tools/mo2-machine-contract.js"; // side-effect: register mo2_machine_contract
 import "./tools/mo2-modlist.js"; // side-effect: register mo2_modlist
 import "./tools/mo2-pluginlist.js"; // side-effect: register mo2_pluginlist
+import "./tools/mo2-mod-info.js"; // side-effect: register mo2_mod_info
 import type { ToolContext } from "./types.js";
 
 const GAME_MAP: Record<string, SidecarGame> = {

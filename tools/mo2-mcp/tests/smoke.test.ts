@@ -93,6 +93,7 @@ describe("mo2-mcp smoke", () => {
         "mo2_machine_contract",
         "mo2_modlist",
         "mo2_pluginlist",
+        "mo2_mod_info",
       ]);
     } finally {
       void ready;
