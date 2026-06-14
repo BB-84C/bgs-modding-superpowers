@@ -1,0 +1,55 @@
+/**
+ * mo2_modlist — T1 native TS read of modlist.txt.
+ *
+ * Returns mods with name + priority + enabled + is_separator (offline-fast).
+ * Optional enrich=true: when broker pipe is live, adds live_priority from
+ * mobase IModList for cross-check.
+ */
+import { z } from "zod";
+import { join } from "node:path";
+import { registerTool } from "../tool-registry.js";
+import { readProfile } from "../profile-reader.js";
+
+const inputSchema = z.object({
+  profile: z.string().default("Default"),
+  enrich: z.boolean().default(false),
+});
+
+registerTool({
+  name: "mo2_modlist",
+  tier: "T1",
+  description:
+    "Read modlist.txt. Returns mods with name/priority/enabled/is_separator. Native TS read (offline-fast). If enrich=true and MO2 is live, adds live_priority via broker.",
+  inputSchema,
+  handler: async (args, ctx) => {
+    const profile = (args.profile as string) ?? "Default";
+    const profileDir = join(ctx.config.mo2Root, "profiles", profile);
+    const p = await readProfile(profileDir);
+    let mods: Array<Record<string, unknown>> = p.mods.map((m) => ({
+      name: m.name,
+      priority: m.priority,
+      enabled: m.enabled,
+      is_separator: m.isSeparator,
+    }));
+    if (args.enrich && ctx.pipeClient) {
+      try {
+        const resp = await ctx.pipeClient.call("mods.list", {});
+        if (resp.ok && resp.result && typeof resp.result === "object") {
+          const liveMods = (resp.result as { mods?: Array<{ name: string; priority: number }> }).mods ?? [];
+          const liveMap = new Map(liveMods.map((m) => [m.name, m]));
+          mods = mods.map((m) => ({
+            ...m,
+            live_priority: liveMap.get(m.name as string)?.priority ?? null,
+          }));
+        }
+      } catch {
+        // Pipe failure → skip enrich silently
+      }
+    }
+    return {
+      ok: true,
+      result: { profile, mods, mod_count: mods.length },
+      error: null,
+    };
+  },
+});

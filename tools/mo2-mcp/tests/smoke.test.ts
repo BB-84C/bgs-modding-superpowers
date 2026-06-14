@@ -91,6 +91,7 @@ describe("mo2-mcp smoke", () => {
       expect(parsed.result.tools.map((tool: { name: string }) => tool.name)).toEqual([
         "mo2_status",
         "mo2_machine_contract",
+        "mo2_modlist",
       ]);
     } finally {
       void ready;
