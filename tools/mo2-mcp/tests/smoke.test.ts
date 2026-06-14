@@ -19,7 +19,7 @@ async function _fixtureMo2Root(): Promise<string> {
 }
 
 describe("mo2-mcp smoke", () => {
-  it("server starts, tools/list returns empty array, clean shutdown", async () => {
+  it("server starts, tools/list returns registered S3A tools, clean shutdown", async () => {
     const mo2Root = await _fixtureMo2Root();
     const env = { ...process.env, BGS_MO2_ROOT: mo2Root };
 
@@ -88,7 +88,9 @@ describe("mo2-mcp smoke", () => {
       const parsed = JSON.parse(toolsListLine!);
       expect(parsed.id).toBe(2);
       expect(parsed.result).toBeDefined();
-      expect(parsed.result.tools).toEqual([]);
+      expect(parsed.result.tools.map((tool: { name: string }) => tool.name)).toEqual([
+        "mo2_status",
+      ]);
     } finally {
       void ready;
       proc.stdin.end();
