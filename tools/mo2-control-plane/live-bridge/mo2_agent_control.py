@@ -21,6 +21,23 @@ from pathlib import Path
 
 import mobase
 
+
+# Canonical error codes (match broker-schema.json#/definitions/errorCode)
+class ErrorCode:
+    INVALID_REQUEST = "invalid_request"
+    METHOD_NOT_FOUND = "method_not_found"
+    INVALID_PARAMS = "invalid_params"
+    TRANSPORT_ERROR = "transport_error"
+    NOT_IMPLEMENTED = "not_implemented"
+    INTERNAL_ERROR = "internal_error"
+    MOD_NOT_FOUND = "mod_not_found"
+    PRIORITY_OUT_OF_RANGE = "priority_out_of_range"
+    PLUGIN_NOT_FOUND = "plugin_not_found"
+    REFRESH_TIMEOUT = "refresh_timeout"
+    MAIN_THREAD_UNAVAILABLE = "main_thread_unavailable"
+    MO2_SHUTTING_DOWN = "mo2_shutting_down"
+
+
 PLUGIN_NAME = "Mo2AgentControl"
 PLUGIN_SOURCE_SUBTREE = "tools/mo2-control-plane/live-bridge/"
 # Deployment targets are relative to the user's MO2 root, supplied by the
@@ -420,7 +437,7 @@ def build_invalid_request_response(exc: json.JSONDecodeError) -> dict[str, objec
         {},
         ok=False,
         error={
-            "code": "invalid_request",
+            "code": ErrorCode.INVALID_REQUEST,
             "message": str(exc),
         },
     )
@@ -1341,7 +1358,7 @@ def dispatch_transport_request(request: dict[str, object], handlers) -> dict[str
             request,
             ok=False,
             error={
-                "code": "method_not_found",
+                "code": ErrorCode.METHOD_NOT_FOUND,
                 "message": f"Unsupported method: {method}",
             },
         )
@@ -1353,7 +1370,7 @@ def dispatch_transport_request(request: dict[str, object], handlers) -> dict[str
             request,
             ok=False,
             error={
-                "code": "invalid_params",
+                "code": ErrorCode.INVALID_PARAMS,
                 "message": str(exc),
             },
         )
@@ -1362,7 +1379,7 @@ def dispatch_transport_request(request: dict[str, object], handlers) -> dict[str
             request,
             ok=False,
             error={
-                "code": "transport_error",
+                "code": ErrorCode.TRANSPORT_ERROR,
                 "message": str(exc),
             },
         )
@@ -1371,7 +1388,7 @@ def dispatch_transport_request(request: dict[str, object], handlers) -> dict[str
             request,
             ok=False,
             error={
-                "code": "not_implemented",
+                "code": ErrorCode.NOT_IMPLEMENTED,
                 "message": str(exc),
             },
         )
@@ -1380,7 +1397,7 @@ def dispatch_transport_request(request: dict[str, object], handlers) -> dict[str
             request,
             ok=False,
             error={
-                "code": "internal_error",
+                "code": ErrorCode.INTERNAL_ERROR,
                 "message": str(exc),
             },
         )
