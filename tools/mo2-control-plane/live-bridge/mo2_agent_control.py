@@ -309,6 +309,7 @@ MODS_LIST_METHOD = "mods.list"
 MODS_SET_ACTIVE_METHOD = "mods.set_active"
 MODS_SET_PRIORITY_METHOD = "mods.set_priority"
 MODS_RENAME_METHOD = "mods.rename"
+MODS_REMOVE_METHOD = "mods.remove"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1069,6 +1070,52 @@ def _handle_mods_rename(organizer, pump, payload):
     return {"ok": True, "result": outcome[1], "error": None}
 
 
+def _handle_mods_remove(organizer, pump, payload):
+    """Remove a mod via main-thread IModList.removeMod.
+
+    Destructive primitive: removeMod can physically delete files. Per oracle §A6,
+    callers should pair this command with backup orchestration at the MCP layer.
+    """
+
+    name = payload.get("name")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+
+    def _on_main_thread():
+        mod_list = organizer.modList()
+        mod = mod_list.getMod(name)
+        if mod is None:
+            return ("error", ErrorCode.MOD_NOT_FOUND, f"mod '{name}' not found")
+
+        removed = mod_list.removeMod(mod)
+        if not removed:
+            return ("error", ErrorCode.INTERNAL_ERROR, "removeMod returned False")
+
+        return ("ok", {"name": name, "removed": True})
+
+    try:
+        outcome = pump.invoke_blocking(_on_main_thread, timeout_s=30)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -1705,6 +1752,11 @@ def build_command_handlers(
         request.get("payload", {}),
     )
     handlers[MODS_RENAME_METHOD] = lambda request: _handle_mods_rename(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[MODS_REMOVE_METHOD] = lambda request: _handle_mods_remove(
         organizer,
         main_thread_pump,
         request.get("payload", {}),

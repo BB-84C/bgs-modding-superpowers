@@ -341,3 +341,58 @@ def test_mods_rename_empty_after_sanitize_returns_error(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "invalid_params"
+
+
+def test_mods_remove_success(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    mod = MagicMock()
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = mod
+    mod_list.removeMod.return_value = True
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=30: fn()
+
+    result = bridge._handle_mods_remove(organizer, pump, {"name": "ModA"})
+
+    assert result["ok"] is True
+    assert result["result"]["name"] == "ModA"
+    assert result["result"]["removed"] is True
+    mod_list.removeMod.assert_called_once_with(mod)
+
+
+def test_mods_remove_not_found(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = None
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=30: fn()
+
+    result = bridge._handle_mods_remove(organizer, pump, {"name": "NoSuch"})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "mod_not_found"
+    mod_list.removeMod.assert_not_called()
+
+
+def test_mods_remove_failure_from_modlist(monkeypatch):
+    """MO2 returned False from removeMod (e.g., locked file)."""
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = MagicMock()
+    mod_list.removeMod.return_value = False
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=30: fn()
+
+    result = bridge._handle_mods_remove(organizer, pump, {"name": "ModA"})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "internal_error"
