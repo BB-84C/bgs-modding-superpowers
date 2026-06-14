@@ -44,6 +44,7 @@ import "./tools/mo2-mod-info.js"; // side-effect: register mo2_mod_info
 import "./tools/mo2-profile-ini-get.js"; // side-effect: register mo2_profile_ini_get
 import "./tools/mo2-set-mod-notes.js"; // side-effect: register mo2_set_mod_notes
 import "./tools/mo2-edit-meta.js"; // side-effect: register mo2_edit_meta
+import "./tools/mo2-profile-ini-set.js"; // side-effect: register mo2_profile_ini_set
 import type { ToolContext } from "./types.js";
 
 const GAME_MAP: Record<string, SidecarGame> = {
