@@ -331,6 +331,7 @@ PROFILE_LIST_METHOD = "profile.list"
 PROFILE_ACTIVE_METHOD = "profile.active"
 PROFILE_INITIALIZE_METHOD = "profile.initialize"
 EXECUTABLES_LIST_METHOD = "executables.list"
+INSTALLATION_INSTALL_LOCAL_ARCHIVE_METHOD = "installation.install_local_archive"
 ORGANIZER_REFRESH_METHOD = "organizer.refresh"
 ORGANIZER_RESOLVE_PATH_METHOD = "organizer.resolve_path"
 ORGANIZER_GET_FILE_ORIGINS_METHOD = "organizer.get_file_origins"
@@ -1672,6 +1673,69 @@ def _handle_executables_list(organizer, payload):
     }
 
 
+def _handle_installation_install_local_archive(organizer, pump, payload):
+    """Install mod from local archive via IOrganizer.installMod.
+
+    FOMOD-blind primitive: FOMOD wizard runs inside MO2 when archive contains
+    info.xml. The MCP layer (S5a mo2_install) orchestrates FOMOD non-interactive
+    via sidecar Pattern A; this is the raw mobase call.
+    """
+
+    archive_path = payload.get("archive_path")
+    name_suggestion = payload.get("name_suggestion", "")
+    if not isinstance(archive_path, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "archive_path: str"},
+        }
+    if not Path(archive_path).exists():
+        return {
+            "ok": False,
+            "result": None,
+            "error": {
+                "code": ErrorCode.INVALID_PARAMS,
+                "message": f"archive_path not found: {archive_path}",
+            },
+        }
+    if not isinstance(name_suggestion, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name_suggestion: str"},
+        }
+
+    def _on_main_thread():
+        mod = organizer.installMod(archive_path, name_suggestion)
+        if mod is None:
+            return ("error", ErrorCode.INTERNAL_ERROR, "installMod returned None (canceled or failed)")
+        return (
+            "ok",
+            {
+                "name": mod.name(),
+                "absolute_path": mod.absolutePath(),
+                "installation_file": archive_path,
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_on_main_thread, timeout_s=120)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
 def _handle_organizer_refresh(organizer, pump, payload):
     """Refresh MO2 internal state on the main thread."""
 
@@ -2596,6 +2660,11 @@ def build_command_handlers(
     )
     handlers[EXECUTABLES_LIST_METHOD] = lambda request: _handle_executables_list(
         organizer,
+        request.get("payload", {}),
+    )
+    handlers[INSTALLATION_INSTALL_LOCAL_ARCHIVE_METHOD] = lambda request: _handle_installation_install_local_archive(
+        organizer,
+        main_thread_pump,
         request.get("payload", {}),
     )
     handlers[ORGANIZER_REFRESH_METHOD] = lambda request: _handle_organizer_refresh(
