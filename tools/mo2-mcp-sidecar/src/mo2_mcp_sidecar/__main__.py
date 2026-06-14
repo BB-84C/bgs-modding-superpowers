@@ -10,6 +10,7 @@ from .world import WorldCache
 from . import archive as _archive
 from . import assets as _assets
 from . import fomod as _fomod
+from . import install as _install
 
 
 def _echo_handler(params: dict) -> dict:
@@ -34,8 +35,10 @@ def main() -> int:
     _assets.register()
     _fomod.register()
     _archive.register()
+    _install.init_install(cache)
+    _install.register()
 
-    # Later tasks (P-B6 install.conflict_preview, install.stage_fomod) register here
+    # Later tasks (P-B6 install.stage_fomod) register here
 
     run_stdio_loop(sys.stdin, sys.stdout, sys.stderr)
     return 0
