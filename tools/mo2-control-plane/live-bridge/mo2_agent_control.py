@@ -326,6 +326,8 @@ PLUGINS_LIST_METHOD = "plugins.list"
 PLUGINS_SET_STATE_METHOD = "plugins.set_state"
 PLUGINS_SET_PRIORITY_METHOD = "plugins.set_priority"
 PLUGINS_SET_LOAD_ORDER_METHOD = "plugins.set_load_order"
+PROFILE_LIST_METHOD = "profile.list"
+PROFILE_ACTIVE_METHOD = "profile.active"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1532,6 +1534,38 @@ def _handle_plugins_set_load_order(organizer, pump, payload):
     return {"ok": True, "result": outcome[1], "error": None}
 
 
+def _handle_profile_list(organizer, payload):
+    """Background-safe: enumerate profile dirs containing modlist.txt."""
+
+    base_path = Path(organizer.basePath())
+    profiles_root = base_path / "profiles"
+    profiles = []
+    if profiles_root.exists():
+        for child in sorted(profiles_root.iterdir(), key=lambda path: path.name):
+            if not child.is_dir():
+                continue
+            if not (child / "modlist.txt").exists():
+                continue
+            profiles.append(
+                {
+                    "name": child.name,
+                    "path": str(child),
+                    "has_local_inis": (child / "settings.txt").exists(),
+                }
+            )
+    return {"ok": True, "result": {"profiles": profiles}, "error": None}
+
+
+def _handle_profile_active(organizer, payload):
+    """Background-safe snapshot of current profile name + path."""
+
+    return {
+        "ok": True,
+        "result": {"name": organizer.profileName(), "path": organizer.profilePath()},
+        "error": None,
+    }
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -2208,6 +2242,14 @@ def build_command_handlers(
     handlers[PLUGINS_SET_LOAD_ORDER_METHOD] = lambda request: _handle_plugins_set_load_order(
         organizer,
         main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[PROFILE_LIST_METHOD] = lambda request: _handle_profile_list(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[PROFILE_ACTIVE_METHOD] = lambda request: _handle_profile_active(
+        organizer,
         request.get("payload", {}),
     )
     return handlers
