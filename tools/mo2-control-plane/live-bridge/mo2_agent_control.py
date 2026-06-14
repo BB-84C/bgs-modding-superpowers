@@ -334,6 +334,7 @@ ORGANIZER_RESOLVE_PATH_METHOD = "organizer.resolve_path"
 ORGANIZER_GET_FILE_ORIGINS_METHOD = "organizer.get_file_origins"
 ORGANIZER_FIND_FILES_METHOD = "organizer.find_files"
 ORGANIZER_VIRTUAL_FILE_TREE_METHOD = "organizer.virtual_file_tree"
+ORGANIZER_START_APPLICATION_METHOD = "organizer.startApplication"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1707,6 +1708,64 @@ def _handle_organizer_virtual_file_tree(organizer, payload):
     }
 
 
+def _handle_organizer_startApplication(organizer, pump, payload):
+    """Launch an executable through MO2 VFS via IOrganizer.startApplication."""
+
+    name_or_path = payload.get("executable")
+    args_list = payload.get("args", [])
+    cwd = payload.get("cwd", "")
+    profile = payload.get("profile", "")
+    forced_overwrite = payload.get("forcedCustomOverwrite", "")
+    ignore_overwrite = payload.get("ignoreCustomOverwrite", False)
+
+    if not isinstance(name_or_path, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "executable: str"},
+        }
+    if not isinstance(args_list, list) or not all(isinstance(arg, str) for arg in args_list):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "args: list[str]"},
+        }
+
+    def _main():
+        handle = organizer.startApplication(
+            name_or_path,
+            args_list,
+            cwd,
+            profile,
+            forced_overwrite,
+            ignore_overwrite,
+        )
+        if handle == 0:
+            return (
+                "error",
+                ErrorCode.INTERNAL_ERROR,
+                f"startApplication returned 0 (launch failed for '{name_or_path}')",
+            )
+        return ("ok", {"handle": int(handle), "executable": name_or_path})
+
+    try:
+        outcome = pump.invoke_blocking(_main, timeout_s=15)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -2412,6 +2471,11 @@ def build_command_handlers(
     )
     handlers[ORGANIZER_VIRTUAL_FILE_TREE_METHOD] = lambda request: _handle_organizer_virtual_file_tree(
         organizer,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_START_APPLICATION_METHOD] = lambda request: _handle_organizer_startApplication(
+        organizer,
+        main_thread_pump,
         request.get("payload", {}),
     )
     return handlers

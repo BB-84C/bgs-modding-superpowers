@@ -148,3 +148,57 @@ def test_organizer_virtual_file_tree_returns_shallow(monkeypatch):
 
     assert result["ok"] is True
     assert "entries" in result["result"]
+
+
+def test_organizer_startApplication_success(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    organizer = MagicMock()
+    organizer.startApplication.return_value = 42
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+
+    result = bridge._handle_organizer_startApplication(
+        organizer,
+        pump,
+        {
+            "executable": "xEdit",
+            "args": ["-fo4"],
+            "cwd": "",
+            "profile": "",
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["result"]["handle"] == 42
+    assert result["result"]["executable"] == "xEdit"
+
+
+def test_organizer_startApplication_returns_zero_handle_is_error(monkeypatch):
+    """startApplication returns 0 on launch failure."""
+
+    bridge = _load_bridge(monkeypatch)
+
+    organizer = MagicMock()
+    organizer.startApplication.return_value = 0
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+
+    result = bridge._handle_organizer_startApplication(organizer, pump, {"executable": "BadTool"})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "internal_error"
+    assert "0" in result["error"]["message"] or "failed" in result["error"]["message"].lower()
+
+
+def test_organizer_startApplication_invalid_params(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    result = bridge._handle_organizer_startApplication(
+        MagicMock(),
+        MagicMock(),
+        {"executable": 42},
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_params"
