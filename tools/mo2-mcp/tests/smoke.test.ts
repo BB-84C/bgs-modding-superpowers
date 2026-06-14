@@ -95,6 +95,16 @@ describe("mo2-mcp smoke", () => {
         "mo2_pluginlist",
         "mo2_mod_info",
         "mo2_profile_ini_get",
+        "mo2_set_mod_notes",
+        "mo2_edit_meta",
+        "mo2_profile_ini_set",
+        "mo2_backup_mod",
+        "mo2_backup_profile",
+        "mo2_toggle_mod",
+        "mo2_toggle_plugin",
+        "mo2_send_mod_to",
+        "mo2_rollback",
+        "mo2_restore_profile",
       ]);
     } finally {
       void ready;

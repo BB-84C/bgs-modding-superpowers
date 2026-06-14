@@ -42,6 +42,16 @@ import "./tools/mo2-modlist.js"; // side-effect: register mo2_modlist
 import "./tools/mo2-pluginlist.js"; // side-effect: register mo2_pluginlist
 import "./tools/mo2-mod-info.js"; // side-effect: register mo2_mod_info
 import "./tools/mo2-profile-ini-get.js"; // side-effect: register mo2_profile_ini_get
+import "./tools/mo2-set-mod-notes.js"; // side-effect: register mo2_set_mod_notes
+import "./tools/mo2-edit-meta.js"; // side-effect: register mo2_edit_meta
+import "./tools/mo2-profile-ini-set.js"; // side-effect: register mo2_profile_ini_set
+import "./tools/mo2-backup-mod.js"; // side-effect: register mo2_backup_mod
+import "./tools/mo2-backup-profile.js"; // side-effect: register mo2_backup_profile
+import "./tools/mo2-toggle-mod.js"; // side-effect: register mo2_toggle_mod
+import "./tools/mo2-toggle-plugin.js"; // side-effect: register mo2_toggle_plugin
+import "./tools/mo2-send-mod-to.js"; // side-effect: register mo2_send_mod_to
+import "./tools/mo2-rollback.js"; // side-effect: register mo2_rollback
+import "./tools/mo2-restore-profile.js"; // side-effect: register mo2_restore_profile
 import type { ToolContext } from "./types.js";
 
 const GAME_MAP: Record<string, SidecarGame> = {
