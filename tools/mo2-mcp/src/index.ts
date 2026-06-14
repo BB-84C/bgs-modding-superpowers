@@ -51,6 +51,7 @@ import "./tools/mo2-toggle-mod.js"; // side-effect: register mo2_toggle_mod
 import "./tools/mo2-toggle-plugin.js"; // side-effect: register mo2_toggle_plugin
 import "./tools/mo2-send-mod-to.js"; // side-effect: register mo2_send_mod_to
 import "./tools/mo2-rollback.js"; // side-effect: register mo2_rollback
+import "./tools/mo2-restore-profile.js"; // side-effect: register mo2_restore_profile
 import type { ToolContext } from "./types.js";
 
 const GAME_MAP: Record<string, SidecarGame> = {
