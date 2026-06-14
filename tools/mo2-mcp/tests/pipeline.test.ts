@@ -3,6 +3,9 @@ import { _clearRulesForTests, registerRule, getAllRules } from "../src/pipeline/
 import { runRules, hasBlocking } from "../src/pipeline/rules.js";
 import { stockGameDenyRule } from "../src/pipeline/rules/STOCK001-stock-game-deny.js";
 import type { Rule, ToolContext } from "../src/types.js";
+import { PlanCache } from "../src/plan-apply.js";
+import { SnapshotManager } from "../src/snapshot.js";
+import { AuditLogger } from "../src/audit.js";
 
 const stubCtx = {
   config: {
@@ -14,6 +17,9 @@ const stubCtx = {
     auditRoot: "/tmp/.mo2-mcp/audit",
   },
   sessionId: "test-session",
+  plans: new PlanCache(),
+  snapshots: new SnapshotManager("/tmp/.mo2-mcp/snapshots", "test-session"),
+  audit: new AuditLogger("/tmp/.mo2-mcp/audit", "test-session"),
 } satisfies ToolContext;
 
 describe("rule registry", () => {
