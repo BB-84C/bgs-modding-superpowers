@@ -322,6 +322,7 @@ MODS_REMOVE_METHOD = "mods.remove"
 MODS_CREATE_METHOD = "mods.create"
 MODS_META_READ_METHOD = "mods.meta_read"
 MODS_META_WRITE_METHOD = "mods.meta_write"
+PLUGINS_LIST_METHOD = "plugins.list"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1352,6 +1353,32 @@ def _handle_mods_meta_write(organizer, pump, payload):
     }
 
 
+def _handle_plugins_list(organizer, payload):
+    """Background-safe snapshot of plugins via IPluginList."""
+
+    plugin_list = organizer.pluginList()
+    plugins = []
+    for name in plugin_list.pluginNames():
+        state = plugin_list.state(name)
+        state_int = int(state)
+        plugins.append(
+            {
+                "name": name,
+                "state": state_int,
+                "enabled": bool(state_int & _ACTIVE_FLAG),
+                "priority": plugin_list.priority(name),
+                "load_order": plugin_list.loadOrder(name),
+                "origin": plugin_list.origin(name),
+                "is_master": bool(plugin_list.isMasterFlagged(name)),
+                "is_light": bool(plugin_list.isLightFlagged(name)),
+                "has_master_ext": bool(plugin_list.hasMasterExtension(name)),
+                "has_light_ext": bool(plugin_list.hasLightExtension(name)),
+            }
+        )
+
+    return {"ok": True, "result": {"plugins": plugins}, "error": None}
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -2009,6 +2036,10 @@ def build_command_handlers(
     handlers[MODS_META_WRITE_METHOD] = lambda request: _handle_mods_meta_write(
         organizer,
         main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[PLUGINS_LIST_METHOD] = lambda request: _handle_plugins_list(
+        organizer,
         request.get("payload", {}),
     )
     return handlers
