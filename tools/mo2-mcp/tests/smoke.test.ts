@@ -103,6 +103,7 @@ describe("mo2-mcp smoke", () => {
         "mo2_toggle_mod",
         "mo2_toggle_plugin",
         "mo2_send_mod_to",
+        "mo2_rollback",
       ]);
     } finally {
       void ready;
