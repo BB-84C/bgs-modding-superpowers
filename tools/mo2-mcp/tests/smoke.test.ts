@@ -95,6 +95,7 @@ describe("mo2-mcp smoke", () => {
         "mo2_pluginlist",
         "mo2_mod_info",
         "mo2_profile_ini_get",
+        "mo2_set_mod_notes",
       ]);
     } finally {
       void ready;
