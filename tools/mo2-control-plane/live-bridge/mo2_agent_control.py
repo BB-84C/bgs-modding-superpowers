@@ -324,6 +324,7 @@ MODS_META_READ_METHOD = "mods.meta_read"
 MODS_META_WRITE_METHOD = "mods.meta_write"
 PLUGINS_LIST_METHOD = "plugins.list"
 PLUGINS_SET_STATE_METHOD = "plugins.set_state"
+PLUGINS_SET_PRIORITY_METHOD = "plugins.set_priority"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1430,6 +1431,59 @@ def _handle_plugins_set_state(organizer, pump, payload):
     return {"ok": True, "result": outcome[1], "error": None}
 
 
+def _handle_plugins_set_priority(organizer, pump, payload):
+    """Set plugin priority via main-thread setPriority + silent-noop readback."""
+
+    name = payload.get("name")
+    priority = payload.get("priority")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+    if not isinstance(priority, int):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "priority: int"},
+        }
+
+    def _main():
+        plugin_list = organizer.pluginList()
+        if name not in plugin_list.pluginNames():
+            return ("error", ErrorCode.PLUGIN_NOT_FOUND, name)
+        before = plugin_list.priority(name)
+        plugin_list.setPriority(name, priority)
+        after = plugin_list.priority(name)
+        return (
+            "ok",
+            {
+                "name": name,
+                "requested_priority": priority,
+                "actual_priority": after,
+                "noop": after == before and before != priority,
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_main, timeout_s=10)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -2094,6 +2148,11 @@ def build_command_handlers(
         request.get("payload", {}),
     )
     handlers[PLUGINS_SET_STATE_METHOD] = lambda request: _handle_plugins_set_state(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[PLUGINS_SET_PRIORITY_METHOD] = lambda request: _handle_plugins_set_priority(
         organizer,
         main_thread_pump,
         request.get("payload", {}),
