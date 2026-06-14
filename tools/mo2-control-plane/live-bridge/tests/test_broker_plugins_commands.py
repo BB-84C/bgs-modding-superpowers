@@ -114,3 +114,59 @@ def test_plugins_list_handles_origin_overwrite(monkeypatch):
     result = bridge._handle_plugins_list(organizer, {})
 
     assert result["result"]["plugins"][0]["origin"] == "overwrite"
+
+
+def test_plugins_set_state_success(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    state_map = {"ModA.esp": 0}
+    plugin_list = MagicMock()
+    plugin_list.pluginNames.return_value = ["Fallout4.esm", "ModA.esp"]
+
+    def _set_state(name, state):
+        state_map[name] = state
+
+    plugin_list.setState.side_effect = _set_state
+    plugin_list.state.side_effect = lambda name: state_map.get(name, 0)
+
+    organizer = MagicMock()
+    organizer.pluginList.return_value = plugin_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=10: fn()
+
+    result = bridge._handle_plugins_set_state(organizer, pump, {"name": "ModA.esp", "state": 2})
+
+    assert result["ok"] is True
+    readback = result["result"]
+    assert readback["name"] == "ModA.esp"
+    assert readback["requested_state"] == 2
+    assert readback["actual_state"] == 2
+
+
+def test_plugins_set_state_plugin_not_found(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    plugin_list = MagicMock()
+    plugin_list.pluginNames.return_value = ["A.esp", "B.esp"]
+    organizer = MagicMock()
+    organizer.pluginList.return_value = plugin_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=10: fn()
+
+    result = bridge._handle_plugins_set_state(organizer, pump, {"name": "NoSuch.esp", "state": 2})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "plugin_not_found"
+
+
+def test_plugins_set_state_invalid_params(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    result = bridge._handle_plugins_set_state(
+        MagicMock(),
+        MagicMock(),
+        {"name": "A.esp", "state": "not int"},
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_params"

@@ -323,6 +323,7 @@ MODS_CREATE_METHOD = "mods.create"
 MODS_META_READ_METHOD = "mods.meta_read"
 MODS_META_WRITE_METHOD = "mods.meta_write"
 PLUGINS_LIST_METHOD = "plugins.list"
+PLUGINS_SET_STATE_METHOD = "plugins.set_state"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1379,6 +1380,56 @@ def _handle_plugins_list(organizer, payload):
     return {"ok": True, "result": {"plugins": plugins}, "error": None}
 
 
+def _handle_plugins_set_state(organizer, pump, payload):
+    """Set plugin active/inactive via main-thread setState + readback."""
+
+    name = payload.get("name")
+    state = payload.get("state")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+    if not isinstance(state, int):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "state: int"},
+        }
+
+    def _main():
+        plugin_list = organizer.pluginList()
+        if name not in plugin_list.pluginNames():
+            return ("error", ErrorCode.PLUGIN_NOT_FOUND, name)
+        plugin_list.setState(name, state)
+        return (
+            "ok",
+            {
+                "name": name,
+                "requested_state": state,
+                "actual_state": int(plugin_list.state(name)),
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_main, timeout_s=10)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -2040,6 +2091,11 @@ def build_command_handlers(
     )
     handlers[PLUGINS_LIST_METHOD] = lambda request: _handle_plugins_list(
         organizer,
+        request.get("payload", {}),
+    )
+    handlers[PLUGINS_SET_STATE_METHOD] = lambda request: _handle_plugins_set_state(
+        organizer,
+        main_thread_pump,
         request.get("payload", {}),
     )
     return handlers
