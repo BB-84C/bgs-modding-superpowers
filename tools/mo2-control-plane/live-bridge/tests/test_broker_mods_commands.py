@@ -519,3 +519,65 @@ def test_mods_create_returns_internal_error_on_none(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "internal_error"
+
+
+def test_mods_meta_read_existing(monkeypatch, tmp_path):
+    bridge = _load_bridge(monkeypatch)
+
+    mod_dir = tmp_path / "ModA"
+    mod_dir.mkdir()
+    meta = mod_dir / "meta.ini"
+    meta.write_text(
+        '[General]\nversion=1.2.3\nnotes="hello"\n[Nexus]\nnexusID=12345\n',
+        encoding="utf-8",
+    )
+
+    mod = MagicMock()
+    mod.absolutePath.return_value = str(mod_dir)
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = mod
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+
+    result = bridge._handle_mods_meta_read(organizer, {"name": "ModA"})
+
+    assert result["ok"] is True
+    readback = result["result"]
+    assert readback["name"] == "ModA"
+    assert readback["exists"] is True
+    assert readback["meta"]["General"]["version"] == "1.2.3"
+    assert readback["meta"]["Nexus"]["nexusID"] == "12345"
+
+
+def test_mods_meta_read_no_meta_ini(monkeypatch, tmp_path):
+    bridge = _load_bridge(monkeypatch)
+
+    mod_dir = tmp_path / "ModB"
+    mod_dir.mkdir()
+
+    mod = MagicMock()
+    mod.absolutePath.return_value = str(mod_dir)
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = mod
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+
+    result = bridge._handle_mods_meta_read(organizer, {"name": "ModB"})
+
+    assert result["ok"] is True
+    assert result["result"]["exists"] is False
+    assert result["result"]["meta"] == {}
+
+
+def test_mods_meta_read_not_found(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = None
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+
+    result = bridge._handle_mods_meta_read(organizer, {"name": "NoSuch"})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "mod_not_found"

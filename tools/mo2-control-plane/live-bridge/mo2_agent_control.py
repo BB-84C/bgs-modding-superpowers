@@ -10,6 +10,7 @@ File-bootstrap is retained only as discovery and liveness, not as the command tr
 from __future__ import annotations
 
 import ctypes
+import configparser as _configparser
 import json
 import logging
 import os
@@ -317,6 +318,7 @@ MODS_SET_PRIORITY_METHOD = "mods.set_priority"
 MODS_RENAME_METHOD = "mods.rename"
 MODS_REMOVE_METHOD = "mods.remove"
 MODS_CREATE_METHOD = "mods.create"
+MODS_META_READ_METHOD = "mods.meta_read"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1200,6 +1202,53 @@ def _handle_mods_create(organizer, pump, payload):
     return {"ok": True, "result": outcome[1], "error": None}
 
 
+def _handle_mods_meta_read(organizer, payload):
+    """Read a mod's meta.ini fields. Background-safe pure file read."""
+
+    name = payload.get("name")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+
+    mod_list = organizer.modList()
+    mod = mod_list.getMod(name)
+    if mod is None:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MOD_NOT_FOUND, "message": name},
+        }
+
+    meta_path = Path(mod.absolutePath()) / "meta.ini"
+    if not meta_path.exists():
+        return {
+            "ok": True,
+            "result": {"name": name, "meta": {}, "exists": False},
+            "error": None,
+        }
+
+    parser = _configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    try:
+        parser.read(meta_path, encoding="utf-8")
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INTERNAL_ERROR, "message": f"meta.ini parse failed: {exc}"},
+        }
+
+    meta = {section: dict(parser[section]) for section in parser.sections()}
+    return {
+        "ok": True,
+        "result": {"name": name, "meta": meta, "exists": True},
+        "error": None,
+    }
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -1848,6 +1897,10 @@ def build_command_handlers(
     handlers[MODS_CREATE_METHOD] = lambda request: _handle_mods_create(
         organizer,
         main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[MODS_META_READ_METHOD] = lambda request: _handle_mods_meta_read(
+        organizer,
         request.get("payload", {}),
     )
     return handlers
