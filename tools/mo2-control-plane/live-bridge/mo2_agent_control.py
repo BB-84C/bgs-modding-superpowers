@@ -330,6 +330,10 @@ PLUGINS_SET_LOAD_ORDER_METHOD = "plugins.set_load_order"
 PROFILE_LIST_METHOD = "profile.list"
 PROFILE_ACTIVE_METHOD = "profile.active"
 ORGANIZER_REFRESH_METHOD = "organizer.refresh"
+ORGANIZER_RESOLVE_PATH_METHOD = "organizer.resolve_path"
+ORGANIZER_GET_FILE_ORIGINS_METHOD = "organizer.get_file_origins"
+ORGANIZER_FIND_FILES_METHOD = "organizer.find_files"
+ORGANIZER_VIRTUAL_FILE_TREE_METHOD = "organizer.virtual_file_tree"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1599,6 +1603,110 @@ def _handle_organizer_refresh(organizer, pump, payload):
     return {"ok": True, "result": result, "error": None}
 
 
+def _handle_organizer_resolve_path(organizer, payload):
+    """Background-safe: resolve a virtual path to a real on-disk path."""
+
+    filename = payload.get("filename")
+    if not isinstance(filename, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "filename: str"},
+        }
+
+    resolved = organizer.resolvePath(filename)
+    return {
+        "ok": True,
+        "result": {"filename": filename, "resolved": resolved or None},
+        "error": None,
+    }
+
+
+def _handle_organizer_get_file_origins(organizer, payload):
+    """Background-safe: return mods providing a virtual file."""
+
+    filename = payload.get("filename")
+    if not isinstance(filename, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "filename: str"},
+        }
+
+    origins = list(organizer.getFileOrigins(filename) or [])
+    return {
+        "ok": True,
+        "result": {"filename": filename, "origins": origins},
+        "error": None,
+    }
+
+
+def _handle_organizer_find_files(organizer, payload):
+    """Background-safe: find files matching glob patterns under a virtual path."""
+
+    path = payload.get("path", "")
+    patterns = payload.get("patterns", ["*"])
+    if not isinstance(path, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "path: str"},
+        }
+    if not isinstance(patterns, list) or not all(isinstance(pattern, str) for pattern in patterns):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "patterns: list[str]"},
+        }
+
+    found = list(organizer.findFiles(path, patterns) or [])
+    return {
+        "ok": True,
+        "result": {"path": path, "patterns": patterns, "files": found},
+        "error": None,
+    }
+
+
+def _handle_organizer_virtual_file_tree(organizer, payload):
+    """Background-safe: confirm virtual file tree liveness with a bounded response."""
+
+    path = payload.get("path", "")
+    max_depth = payload.get("max_depth", 3)
+    if not isinstance(path, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "path: str"},
+        }
+    if not isinstance(max_depth, int):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "max_depth: int"},
+        }
+
+    try:
+        organizer.virtualFileTree()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INTERNAL_ERROR, "message": str(exc)},
+        }
+
+    return {
+        "ok": True,
+        "result": {
+            "path": path,
+            "max_depth": max_depth,
+            "entries": [],
+            "truncated": False,
+            "note": "Use organizer.find_files for content; this method confirms VFS liveness",
+        },
+        "error": None,
+    }
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -2288,6 +2396,22 @@ def build_command_handlers(
     handlers[ORGANIZER_REFRESH_METHOD] = lambda request: _handle_organizer_refresh(
         organizer,
         main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_RESOLVE_PATH_METHOD] = lambda request: _handle_organizer_resolve_path(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_GET_FILE_ORIGINS_METHOD] = lambda request: _handle_organizer_get_file_origins(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_FIND_FILES_METHOD] = lambda request: _handle_organizer_find_files(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_VIRTUAL_FILE_TREE_METHOD] = lambda request: _handle_organizer_virtual_file_tree(
+        organizer,
         request.get("payload", {}),
     )
     return handlers

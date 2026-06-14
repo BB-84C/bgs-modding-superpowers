@@ -76,3 +76,75 @@ def test_organizer_refresh_timeout_returns_error(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "main_thread_unavailable"
+
+
+def test_organizer_resolve_path_success(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    organizer = MagicMock()
+    organizer.resolvePath.return_value = "C:/mods/ModA/Data/textures/foo.dds"
+
+    result = bridge._handle_organizer_resolve_path(organizer, {"filename": "Data/textures/foo.dds"})
+
+    assert result["ok"] is True
+    assert result["result"]["resolved"] == "C:/mods/ModA/Data/textures/foo.dds"
+
+
+def test_organizer_resolve_path_not_found(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    organizer = MagicMock()
+    organizer.resolvePath.return_value = ""
+
+    result = bridge._handle_organizer_resolve_path(organizer, {"filename": "missing.dds"})
+
+    assert result["ok"] is True
+    assert result["result"]["resolved"] is None
+
+
+def test_organizer_get_file_origins_returns_list(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    organizer = MagicMock()
+    organizer.getFileOrigins.return_value = ["ModA", "ModB"]
+
+    result = bridge._handle_organizer_get_file_origins(organizer, {"filename": "Data/foo.dds"})
+
+    assert result["ok"] is True
+    assert result["result"]["origins"] == ["ModA", "ModB"]
+
+
+def test_organizer_find_files_returns_matches(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    organizer = MagicMock()
+    organizer.findFiles.return_value = ["Data/a.esp", "Data/b.esp"]
+
+    result = bridge._handle_organizer_find_files(organizer, {"path": "Data", "patterns": ["*.esp"]})
+
+    assert result["ok"] is True
+    assert result["result"]["files"] == ["Data/a.esp", "Data/b.esp"]
+
+
+def test_organizer_find_files_invalid_patterns(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    organizer = MagicMock()
+
+    result = bridge._handle_organizer_find_files(organizer, {"path": "Data", "patterns": "not a list"})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_params"
+
+
+def test_organizer_virtual_file_tree_returns_shallow(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    organizer = MagicMock()
+    tree = MagicMock()
+    organizer.virtualFileTree.return_value = tree
+
+    result = bridge._handle_organizer_virtual_file_tree(organizer, {"path": "Data", "max_depth": 1})
+
+    assert result["ok"] is True
+    assert "entries" in result["result"]
