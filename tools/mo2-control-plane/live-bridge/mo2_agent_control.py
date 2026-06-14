@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ctypes
 import json
+import logging
 import os
 import queue
 import subprocess
@@ -20,6 +21,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import mobase
+
+
+log = logging.getLogger(__name__)
 
 
 # Canonical error codes (match broker-schema.json#/definitions/errorCode)
@@ -36,6 +40,25 @@ class ErrorCode:
     REFRESH_TIMEOUT = "refresh_timeout"
     MAIN_THREAD_UNAVAILABLE = "main_thread_unavailable"
     MO2_SHUTTING_DOWN = "mo2_shutting_down"
+
+
+# Post-response hook registry (FIFO; fires after pipe response is written + flushed,
+# before DisconnectNamedPipe). Used by system.shutdown to enqueue QCoreApplication.quit()
+# only AFTER the success ack reaches the client.
+_post_response_hooks: list = []
+
+
+def register_post_response_hook(callable_):
+    _post_response_hooks.append(callable_)
+
+
+def drain_post_response_hooks():
+    while _post_response_hooks:
+        hook = _post_response_hooks.pop(0)
+        try:
+            hook()
+        except Exception as exc:
+            log.warning(f"post-response hook error: {exc}")
 
 
 PLUGIN_NAME = "Mo2AgentControl"
@@ -180,6 +203,13 @@ class MainThreadCallPump:
         self._owner_thread_id = threading.get_ident()
         self._calls: queue.Queue[MainThreadCall] = queue.Queue()
 
+    def enqueue(self, callback) -> MainThreadCall:
+        """Queue work for the owning thread without blocking the caller."""
+
+        call = MainThreadCall(callback)
+        self._calls.put(call)
+        return call
+
     def invoke(self, callback):
         """Run work on the owning thread, blocking callers from other threads."""
 
@@ -231,6 +261,23 @@ class MainThreadCallPump:
 
         return pumped
 
+
+_main_thread_pump: MainThreadCallPump | None = None
+
+
+def _set_main_thread_pump(main_thread_pump: MainThreadCallPump | None) -> None:
+    global _main_thread_pump
+    if main_thread_pump is not None:
+        _main_thread_pump = main_thread_pump
+
+
+def _get_main_thread_pump() -> MainThreadCallPump:
+    if _main_thread_pump is None:
+        raise RuntimeError("main-thread pump is unavailable")
+
+    return _main_thread_pump
+
+
 RUNTIME_FILE_NAMES = (
     RUNTIME_STATUS_FILE,
     RUNTIME_CAPABILITIES_FILE,
@@ -239,6 +286,7 @@ RUNTIME_FILE_NAMES = (
 
 SYSTEM_PING_METHOD = "system.ping"
 SYSTEM_CAPABILITIES_METHOD = "system.capabilities"
+SYSTEM_SHUTDOWN_METHOD = "system.shutdown"
 
 LAUNCH_START_METHOD = "launch.start"
 LAUNCH_STATUS_METHOD = "launch.status"
@@ -700,6 +748,7 @@ def serve_named_pipe_client(pipe_handle, handlers) -> None:
         except json.JSONDecodeError as exc:
             write_named_pipe_message(pipe_handle, build_invalid_request_response(exc))
             KERNEL32.FlushFileBuffers(pipe_handle)
+            drain_post_response_hooks()
             return
 
         if request is None:
@@ -712,6 +761,7 @@ def serve_named_pipe_client(pipe_handle, handlers) -> None:
 
         write_named_pipe_message(pipe_handle, response)
         KERNEL32.FlushFileBuffers(pipe_handle)
+        drain_post_response_hooks()
     finally:
         KERNEL32.DisconnectNamedPipe(pipe_handle)
         KERNEL32.CloseHandle(pipe_handle)
@@ -723,6 +773,26 @@ def handle_system_ping(_request: dict[str, object]) -> dict[str, object]:
     return {
         "status": RUNTIME_READY_STATE,
     }
+
+
+def _handle_system_shutdown(organizer, payload):
+    """Shutdown MO2 cleanly after the success ack reaches the client.
+
+    Ordering contract (PLAN-PATCH P-B2):
+    1. Handler returns success dict immediately.
+    2. dispatch_transport_request wraps + serve_named_pipe_client writes + FlushFileBuffers.
+    3. drain_post_response_hooks() runs and enqueues QCoreApplication.quit() on the main thread pump.
+    4. DisconnectNamedPipe closes the pipe.
+    """
+
+    pump = _get_main_thread_pump()
+
+    def enqueue_quit():
+        qt_core = import_qt_core_module()
+        pump.enqueue(lambda: qt_core.QCoreApplication.quit())
+
+    register_post_response_hook(enqueue_quit)
+    return {"ok": True, "result": {"shutting_down": True}, "error": None}
 
 
 def utc_now_timestamp() -> str:
@@ -1291,6 +1361,7 @@ def build_command_handlers(
     """Return the command handler registry for system and launch methods."""
 
     launch_registry = launch_registry if launch_registry is not None else create_launch_registry()
+    _set_main_thread_pump(main_thread_pump)
     launch_registry_lock = threading.Lock()
     launch_entry_locks: dict[str, threading.Condition] = {}
     handlers = {
@@ -1341,6 +1412,10 @@ def build_command_handlers(
         }
 
     handlers[SYSTEM_CAPABILITIES_METHOD] = handle_system_capabilities
+    handlers[SYSTEM_SHUTDOWN_METHOD] = lambda request: _handle_system_shutdown(
+        organizer,
+        request.get("payload", {}),
+    )["result"]
     return handlers
 
 
