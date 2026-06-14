@@ -19,6 +19,7 @@ import re as _re
 import subprocess
 import tempfile as _tempfile
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from io import StringIO as _StringIO
@@ -328,6 +329,7 @@ PLUGINS_SET_PRIORITY_METHOD = "plugins.set_priority"
 PLUGINS_SET_LOAD_ORDER_METHOD = "plugins.set_load_order"
 PROFILE_LIST_METHOD = "profile.list"
 PROFILE_ACTIVE_METHOD = "profile.active"
+ORGANIZER_REFRESH_METHOD = "organizer.refresh"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1566,6 +1568,37 @@ def _handle_profile_active(organizer, payload):
     }
 
 
+def _handle_organizer_refresh(organizer, pump, payload):
+    """Refresh MO2 internal state on the main thread."""
+
+    save_changes = payload.get("save_changes", True)
+    if not isinstance(save_changes, bool):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "save_changes: bool"},
+        }
+
+    def _main():
+        organizer.refresh(save_changes)
+        return {
+            "refreshed": True,
+            "save_changes": save_changes,
+            "timestamp_ms": int(time.time() * 1000),
+        }
+
+    try:
+        result = pump.invoke_blocking(_main, timeout_s=60)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    return {"ok": True, "result": result, "error": None}
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -2250,6 +2283,11 @@ def build_command_handlers(
     )
     handlers[PROFILE_ACTIVE_METHOD] = lambda request: _handle_profile_active(
         organizer,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_REFRESH_METHOD] = lambda request: _handle_organizer_refresh(
+        organizer,
+        main_thread_pump,
         request.get("payload", {}),
     )
     return handlers
