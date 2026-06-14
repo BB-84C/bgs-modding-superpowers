@@ -219,12 +219,12 @@ const handler: PlanApplyHandler = {
   async applyMutation(plan, ctx) {
     const args = plan.args;
     if (ctx.pipeClient) {
-      const resp = await ctx.pipeClient.call("organizer.startApplication", {
+      const resp = await ctx.pipeClient.call("organizer.start_application", {
         executable: args.title, args: [], cwd: "", profile: "", forcedCustomOverwrite: "", ignoreCustomOverwrite: false,
       });
       if (!resp.ok) throw new Error(resp.error?.message);
       if (args.wait) {
-        const wait = await ctx.pipeClient.call("organizer.waitForApplication", { handle: resp.result.handle, refresh: true });
+        const wait = await ctx.pipeClient.call("organizer.wait_for_application", { handle: resp.result.handle, refresh: true });
         return { handle: resp.result.handle, exit_code: wait.result?.exit_code, success: wait.result?.success };
       }
       return { handle: resp.result.handle, waiting: false };
@@ -241,7 +241,7 @@ const handler: PlanApplyHandler = {
 
 registerTool({
   name: "mo2_run_tool", tier: "T3",
-  description: "Run a configured customExecutable via MO2 VFS. Live: startApplication. Offline: CLI exe.",
+  description: "Run a configured customExecutable via MO2 VFS. Live: organizer.start_application. Offline: CLI exe.",
   inputSchema: z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("plan"), title: z.string(), wait: z.boolean().default(false) }),
     z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
@@ -253,7 +253,7 @@ registerTool({
 - [ ] **Steps 4-5:**
 
 ```bash
-git commit -am "feat(mo2-mcp): mo2_run_tool (T3 live startApplication + offline CLI fallback)"
+git commit -am "feat(mo2-mcp): mo2_run_tool (T3 live start_application + offline CLI fallback)"
 ```
 
 ---

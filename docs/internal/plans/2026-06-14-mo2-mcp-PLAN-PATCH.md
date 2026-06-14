@@ -150,11 +150,11 @@ Test: write to file, kill mid-write (kill the process), verify either old conten
 
 Insert as Task **S2.4.5** between S2a Task S2.4 (MO ini parser) and Task S2.5 (profile reader).
 
-## P-B5 — New broker commands `organizer.startApplication` + `organizer.waitForApplication` (S1b)
+## P-B5 — New broker commands `organizer.start_application` + `organizer.wait_for_application` (S1b)
 
 Insert as Tasks **S1b.18.5a** and **S1b.18.5b** after S1b Task 18.
 
-### `organizer.startApplication` (main-thread)
+### `organizer.start_application` (main-thread)
 ```python
 def _handle_organizer_startApplication(organizer, pump, payload):
     name_or_path = payload.get("executable")
@@ -178,7 +178,7 @@ def _handle_organizer_startApplication(organizer, pump, payload):
     return {"ok": True, "result": outcome[1], "error": None}
 ```
 
-### `organizer.waitForApplication` (main-thread; auto_refresh=True default)
+### `organizer.wait_for_application` (main-thread; auto_refresh=True default)
 ```python
 def _handle_organizer_waitForApplication(organizer, pump, payload):
     handle = payload.get("handle")
@@ -471,7 +471,7 @@ For any Task in S1-S5:
 Patch coverage:
 - **S1a Task 3** → P-B2 (system.shutdown handler ordering)
 - **S1a Tasks 4-15** → P-F4 + P-F5 (ModState + separator detection)
-- **S1b new Tasks 18.5a/b** → P-B5 (organizer.startApplication/waitForApplication)
+- **S1b new Tasks 18.5a/b** → P-B5 (organizer.start_application/wait_for_application)
 - **S1b new Task between 16-17** → P-F6 (profile.initialize)
 - **S1b Task 18** → P-F3 (real virtual_file_tree impl)
 - **S1b Tasks 23-24** → P-B7 (--game arg)

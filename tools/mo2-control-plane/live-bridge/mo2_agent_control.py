@@ -10,16 +10,79 @@ File-bootstrap is retained only as discovery and liveness, not as the command tr
 from __future__ import annotations
 
 import ctypes
+import configparser as _configparser
 import json
+import logging
 import os
 import queue
+import re as _re
 import subprocess
+import tempfile as _tempfile
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
+from io import StringIO as _StringIO
 from pathlib import Path
 
 import mobase
+
+
+log = logging.getLogger(__name__)
+
+
+try:
+    from mobase import ModState as _ModState
+
+    try:
+        _ACTIVE_FLAG = int(_ModState.active)
+    except AttributeError:
+        _ACTIVE_FLAG = int(_ModState.ACTIVE)
+except (ImportError, AttributeError):
+    # Fallback when running under unit tests without mobase loaded.
+    _ACTIVE_FLAG = 2  # ModState::Active = 2 per MO2 source.
+
+try:
+    from mobase import GuessedString
+except ImportError:
+    # Unit tests patch this symbol; runtime should provide mobase.GuessedString.
+    GuessedString = None
+
+
+# Canonical error codes (match broker-schema.json#/definitions/errorCode)
+class ErrorCode:
+    INVALID_REQUEST = "invalid_request"
+    METHOD_NOT_FOUND = "method_not_found"
+    INVALID_PARAMS = "invalid_params"
+    TRANSPORT_ERROR = "transport_error"
+    NOT_IMPLEMENTED = "not_implemented"
+    INTERNAL_ERROR = "internal_error"
+    MOD_NOT_FOUND = "mod_not_found"
+    PRIORITY_OUT_OF_RANGE = "priority_out_of_range"
+    PLUGIN_NOT_FOUND = "plugin_not_found"
+    REFRESH_TIMEOUT = "refresh_timeout"
+    MAIN_THREAD_UNAVAILABLE = "main_thread_unavailable"
+    MO2_SHUTTING_DOWN = "mo2_shutting_down"
+
+
+# Post-response hook registry (FIFO; fires after pipe response is written + flushed,
+# before DisconnectNamedPipe). Used by system.shutdown to enqueue QCoreApplication.quit()
+# only AFTER the success ack reaches the client.
+_post_response_hooks: list = []
+
+
+def register_post_response_hook(callable_):
+    _post_response_hooks.append(callable_)
+
+
+def drain_post_response_hooks():
+    while _post_response_hooks:
+        hook = _post_response_hooks.pop(0)
+        try:
+            hook()
+        except Exception as exc:
+            log.warning(f"post-response hook error: {exc}")
+
 
 PLUGIN_NAME = "Mo2AgentControl"
 PLUGIN_SOURCE_SUBTREE = "tools/mo2-control-plane/live-bridge/"
@@ -163,6 +226,13 @@ class MainThreadCallPump:
         self._owner_thread_id = threading.get_ident()
         self._calls: queue.Queue[MainThreadCall] = queue.Queue()
 
+    def enqueue(self, callback) -> MainThreadCall:
+        """Queue work for the owning thread without blocking the caller."""
+
+        call = MainThreadCall(callback)
+        self._calls.put(call)
+        return call
+
     def invoke(self, callback):
         """Run work on the owning thread, blocking callers from other threads."""
 
@@ -176,6 +246,11 @@ class MainThreadCallPump:
             raise call.error
 
         return call.result
+
+    def invoke_blocking(self, callback, timeout_s: float = 10):
+        """Run work on the owning thread; timeout is reserved for future pump waits."""
+
+        return self.invoke(callback)
 
     def pending_count(self) -> int:
         """Return the approximate number of queued main-thread calls."""
@@ -214,6 +289,23 @@ class MainThreadCallPump:
 
         return pumped
 
+
+_main_thread_pump: MainThreadCallPump | None = None
+
+
+def _set_main_thread_pump(main_thread_pump: MainThreadCallPump | None) -> None:
+    global _main_thread_pump
+    if main_thread_pump is not None:
+        _main_thread_pump = main_thread_pump
+
+
+def _get_main_thread_pump() -> MainThreadCallPump:
+    if _main_thread_pump is None:
+        raise RuntimeError("main-thread pump is unavailable")
+
+    return _main_thread_pump
+
+
 RUNTIME_FILE_NAMES = (
     RUNTIME_STATUS_FILE,
     RUNTIME_CAPABILITIES_FILE,
@@ -222,6 +314,34 @@ RUNTIME_FILE_NAMES = (
 
 SYSTEM_PING_METHOD = "system.ping"
 SYSTEM_CAPABILITIES_METHOD = "system.capabilities"
+SYSTEM_SHUTDOWN_METHOD = "system.shutdown"
+MODS_LIST_METHOD = "mods.list"
+MODS_SET_ACTIVE_METHOD = "mods.set_active"
+MODS_SET_PRIORITY_METHOD = "mods.set_priority"
+MODS_RENAME_METHOD = "mods.rename"
+MODS_REMOVE_METHOD = "mods.remove"
+MODS_CREATE_METHOD = "mods.create"
+MODS_META_READ_METHOD = "mods.meta_read"
+MODS_META_WRITE_METHOD = "mods.meta_write"
+PLUGINS_LIST_METHOD = "plugins.list"
+PLUGINS_SET_STATE_METHOD = "plugins.set_state"
+PLUGINS_SET_PRIORITY_METHOD = "plugins.set_priority"
+PLUGINS_SET_LOAD_ORDER_METHOD = "plugins.set_load_order"
+PROFILE_LIST_METHOD = "profile.list"
+PROFILE_ACTIVE_METHOD = "profile.active"
+PROFILE_INITIALIZE_METHOD = "profile.initialize"
+EXECUTABLES_LIST_METHOD = "executables.list"
+INSTALLATION_INSTALL_LOCAL_ARCHIVE_METHOD = "installation.install_local_archive"
+INSTALLATION_CREATE_MOD_FROM_DIRECTORY_METHOD = "installation.create_mod_from_directory"
+ORGANIZER_REFRESH_METHOD = "organizer.refresh"
+ORGANIZER_RESOLVE_PATH_METHOD = "organizer.resolve_path"
+ORGANIZER_GET_FILE_ORIGINS_METHOD = "organizer.get_file_origins"
+ORGANIZER_FIND_FILES_METHOD = "organizer.find_files"
+ORGANIZER_VIRTUAL_FILE_TREE_METHOD = "organizer.virtual_file_tree"
+ORGANIZER_START_APPLICATION_METHOD = "organizer.start_application"
+ORGANIZER_WAIT_FOR_APPLICATION_METHOD = "organizer.wait_for_application"
+
+_INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 LAUNCH_START_METHOD = "launch.start"
 LAUNCH_STATUS_METHOD = "launch.status"
@@ -306,6 +426,17 @@ def build_transport_response(
         "result": result,
         "error": error,
     }
+
+
+def is_broker_handler_response(value: object) -> bool:
+    """Return True when a command handler already returned a broker envelope."""
+
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("ok"), bool)
+        and "result" in value
+        and "error" in value
+    )
 
 
 def get_named_pipe_path(pipe_name: str) -> str:
@@ -420,7 +551,7 @@ def build_invalid_request_response(exc: json.JSONDecodeError) -> dict[str, objec
         {},
         ok=False,
         error={
-            "code": "invalid_request",
+            "code": ErrorCode.INVALID_REQUEST,
             "message": str(exc),
         },
     )
@@ -683,6 +814,7 @@ def serve_named_pipe_client(pipe_handle, handlers) -> None:
         except json.JSONDecodeError as exc:
             write_named_pipe_message(pipe_handle, build_invalid_request_response(exc))
             KERNEL32.FlushFileBuffers(pipe_handle)
+            drain_post_response_hooks()
             return
 
         if request is None:
@@ -695,6 +827,7 @@ def serve_named_pipe_client(pipe_handle, handlers) -> None:
 
         write_named_pipe_message(pipe_handle, response)
         KERNEL32.FlushFileBuffers(pipe_handle)
+        drain_post_response_hooks()
     finally:
         KERNEL32.DisconnectNamedPipe(pipe_handle)
         KERNEL32.CloseHandle(pipe_handle)
@@ -706,6 +839,1195 @@ def handle_system_ping(_request: dict[str, object]) -> dict[str, object]:
     return {
         "status": RUNTIME_READY_STATE,
     }
+
+
+def _handle_system_shutdown(organizer, payload):
+    """Shutdown MO2 cleanly after the success ack reaches the client.
+
+    Ordering contract (PLAN-PATCH P-B2):
+    1. Handler returns success dict immediately.
+    2. dispatch_transport_request wraps + serve_named_pipe_client writes + FlushFileBuffers.
+    3. drain_post_response_hooks() runs and enqueues QCoreApplication.quit() on the main thread pump.
+    4. DisconnectNamedPipe closes the pipe.
+    """
+
+    pump = _get_main_thread_pump()
+
+    def enqueue_quit():
+        qt_core = import_qt_core_module()
+        pump.enqueue(lambda: qt_core.QCoreApplication.quit())
+
+    register_post_response_hook(enqueue_quit)
+    return {"ok": True, "result": {"shutting_down": True}, "error": None}
+
+
+def _handle_mods_list(organizer, payload):
+    """Background-safe snapshot of all mods with priority + enabled + separator flag.
+
+    P-F4: uses mobase ModState.active when available, falls back to 2.
+    P-F5: separator detection prefers IModInterface.isSeparator(), falling back
+    to the conventional *_separator suffix only when the live API is unavailable.
+    """
+
+    mod_list = organizer.modList()
+    mods = []
+    for name in mod_list.allMods():
+        state = mod_list.state(name)
+        try:
+            mod = mod_list.getMod(name)
+            is_separator = bool(mod.isSeparator()) if mod is not None else name.endswith("_separator")
+        except Exception:
+            is_separator = name.endswith("_separator")
+
+        mods.append(
+            {
+                "name": name,
+                "priority": mod_list.priority(name),
+                "enabled": bool(state & _ACTIVE_FLAG),
+                "is_separator": is_separator,
+            }
+        )
+
+    return {"ok": True, "result": {"mods": mods}, "error": None}
+
+
+def _handle_mods_set_active(organizer, pump, payload):
+    """Set mod active state via main-thread mobase. Bulk + readback.
+
+    Per oracle traps §2.2: bulk setActive returns count; per-mod readback
+    confirms actual state and catches partial-apply / silent-noop behavior.
+    """
+
+    names = payload.get("names")
+    active = payload.get("active")
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "names: list[str]"},
+        }
+    if not isinstance(active, bool):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "active: bool"},
+        }
+
+    def _on_main_thread():
+        mod_list = organizer.modList()
+        try:
+            mod_list.setActive(names, active)
+        except (TypeError, AttributeError):
+            for name in names:
+                try:
+                    mod_list.setActive(name, active)
+                except Exception:
+                    pass
+
+        applied = []
+        failed = []
+        readback = []
+        for name in names:
+            try:
+                state = mod_list.state(name)
+                is_active_now = bool(state & _ACTIVE_FLAG)
+                readback.append({"name": name, "active": is_active_now})
+                if is_active_now == active:
+                    applied.append(name)
+                else:
+                    failed.append(name)
+            except Exception:
+                readback.append({"name": name, "active": None})
+                failed.append(name)
+
+        return {
+            "requested": list(names),
+            "applied": applied,
+            "failed": failed,
+            "readback": readback,
+        }
+
+    try:
+        result = pump.invoke_blocking(_on_main_thread, timeout_s=10)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    return {"ok": True, "result": result, "error": None}
+
+
+def _handle_mods_set_priority(organizer, pump, payload):
+    """Reorder a mod via main-thread setPriority + readback.
+
+    oracle §2.1: setPriority can silently no-op when master/non-master
+    inversion would be required. Readback exposes this via noop=true.
+    """
+
+    name = payload.get("name")
+    priority = payload.get("priority")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+    if not isinstance(priority, int) or isinstance(priority, bool):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "priority: int"},
+        }
+
+    def _on_main_thread():
+        mod_list = organizer.modList()
+        if mod_list.getMod(name) is None:
+            return ("error", ErrorCode.MOD_NOT_FOUND, f"mod '{name}' not found")
+
+        all_mods = list(mod_list.allMods())
+        non_separator_mods = [mod_name for mod_name in all_mods if not mod_name.endswith("_separator")]
+        max_priority = max(0, len(non_separator_mods))
+        if priority < 0 or priority > max_priority:
+            return (
+                "error",
+                ErrorCode.PRIORITY_OUT_OF_RANGE,
+                f"priority {priority} out of [0..{max_priority}]",
+            )
+
+        before = mod_list.priority(name)
+        mod_list.setPriority(name, priority)
+        actual = mod_list.priority(name)
+        return (
+            "ok",
+            {
+                "name": name,
+                "requested_priority": priority,
+                "actual_priority": actual,
+                "noop": (actual == before) and (before != priority),
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_on_main_thread, timeout_s=10)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
+def _sanitize_dir_name(name: str) -> str:
+    """Strip illegal path chars before MO2 can raise a blocking Qt dialog.
+
+    This mirrors MO2's fixDirectoryName behavior closely enough for the broker:
+    remove path-invalid characters, trim leading/trailing whitespace, then remove
+    trailing dots before calling renameMod (oracle §A4).
+    """
+
+    return _INVALID_PATH_CHARS.sub("", name).strip().rstrip(".")
+
+
+def _handle_mods_rename(organizer, pump, payload):
+    """Rename a mod via main-thread renameMod, pre-sanitized + collision-checked."""
+
+    old_name = payload.get("old_name")
+    new_name = payload.get("new_name")
+    if not isinstance(old_name, str) or not isinstance(new_name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "old_name + new_name: str"},
+        }
+
+    sanitized_name = _sanitize_dir_name(new_name)
+    if not sanitized_name:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {
+                "code": ErrorCode.INVALID_PARAMS,
+                "message": f"new_name '{new_name}' empty after sanitize",
+            },
+        }
+
+    def _on_main_thread():
+        mod_list = organizer.modList()
+        mod = mod_list.getMod(old_name)
+        if mod is None:
+            return ("error", ErrorCode.MOD_NOT_FOUND, f"mod '{old_name}' not found")
+
+        if sanitized_name != old_name and mod_list.getMod(sanitized_name) is not None:
+            return ("error", ErrorCode.INVALID_PARAMS, f"name '{sanitized_name}' already exists")
+
+        refreshed = mod_list.renameMod(mod, sanitized_name)
+        return (
+            "ok",
+            {
+                "old_name": old_name,
+                "new_name": refreshed.name() if refreshed is not None else sanitized_name,
+                "name_was_sanitized": sanitized_name != new_name,
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_on_main_thread, timeout_s=15)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
+def _handle_mods_remove(organizer, pump, payload):
+    """Remove a mod via main-thread IModList.removeMod.
+
+    Destructive primitive: removeMod can physically delete files. Per oracle §A6,
+    callers should pair this command with backup orchestration at the MCP layer.
+    """
+
+    name = payload.get("name")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+
+    def _on_main_thread():
+        mod_list = organizer.modList()
+        mod = mod_list.getMod(name)
+        if mod is None:
+            return ("error", ErrorCode.MOD_NOT_FOUND, f"mod '{name}' not found")
+
+        removed = mod_list.removeMod(mod)
+        if not removed:
+            return ("error", ErrorCode.INTERNAL_ERROR, "removeMod returned False")
+
+        return ("ok", {"name": name, "removed": True})
+
+    try:
+        outcome = pump.invoke_blocking(_on_main_thread, timeout_s=30)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
+def _handle_mods_create(organizer, pump, payload):
+    """Create an empty mod via createMod + optional setPriority + notification.
+
+    Per oracle §A1, MO2 GUI creates at default priority then reorders. This
+    broker primitive composes those steps and emits the resulting priority.
+    """
+
+    name = payload.get("name")
+    target_priority = payload.get("priority")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+    if target_priority is not None and (not isinstance(target_priority, int) or isinstance(target_priority, bool)):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "priority: int"},
+        }
+
+    sanitized_name = _sanitize_dir_name(name)
+    if not sanitized_name:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {
+                "code": ErrorCode.INVALID_PARAMS,
+                "message": f"name '{name}' empty after sanitize",
+            },
+        }
+
+    def _on_main_thread():
+        mod_list = organizer.modList()
+        if mod_list.getMod(sanitized_name) is not None:
+            return ("error", ErrorCode.INVALID_PARAMS, f"name '{sanitized_name}' already exists")
+        if GuessedString is None:
+            return ("error", ErrorCode.INTERNAL_ERROR, "mobase.GuessedString unavailable")
+
+        new_mod = organizer.createMod(GuessedString(sanitized_name))
+        if new_mod is None:
+            return ("error", ErrorCode.INTERNAL_ERROR, "createMod returned None")
+
+        actual_name = new_mod.name()
+        result = {
+            "name": actual_name,
+            "created": True,
+            "priority": mod_list.priority(actual_name),
+        }
+        if target_priority is not None:
+            mod_list.setPriority(actual_name, target_priority)
+            result["priority"] = mod_list.priority(actual_name)
+            result["requested_priority"] = target_priority
+
+        organizer.modDataChanged(new_mod)
+        return ("ok", result)
+
+    try:
+        outcome = pump.invoke_blocking(_on_main_thread, timeout_s=15)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
+def _handle_mods_meta_read(organizer, payload):
+    """Read a mod's meta.ini fields. Background-safe pure file read."""
+
+    name = payload.get("name")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+
+    mod_list = organizer.modList()
+    mod = mod_list.getMod(name)
+    if mod is None:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MOD_NOT_FOUND, "message": name},
+        }
+
+    meta_path = Path(mod.absolutePath()) / "meta.ini"
+    if not meta_path.exists():
+        return {
+            "ok": True,
+            "result": {"name": name, "meta": {}, "exists": False},
+            "error": None,
+        }
+
+    parser = _configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    try:
+        parser.read(meta_path, encoding="utf-8")
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INTERNAL_ERROR, "message": f"meta.ini parse failed: {exc}"},
+        }
+
+    meta = {section: dict(parser[section]) for section in parser.sections()}
+    return {
+        "ok": True,
+        "result": {"name": name, "meta": meta, "exists": True},
+        "error": None,
+    }
+
+
+def _atomic_write_text_inline(path: Path, content: str) -> None:
+    """Inline atomic write for broker meta.ini updates (NTFS + POSIX safe)."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = _tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=".tmp-",
+        suffix=path.suffix,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file_obj:
+            file_obj.write(content)
+            file_obj.flush()
+            os.fsync(file_obj.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _handle_mods_meta_write(organizer, pump, payload):
+    """Write meta.ini fields atomically and notify MO2 on the main thread."""
+
+    name = payload.get("name")
+    updates = payload.get("updates")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+    if not isinstance(updates, dict):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {
+                "code": ErrorCode.INVALID_PARAMS,
+                "message": "updates: dict[section, dict[key, value]]",
+            },
+        }
+
+    mod_list = organizer.modList()
+    mod = mod_list.getMod(name)
+    if mod is None:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MOD_NOT_FOUND, "message": name},
+        }
+
+    meta_path = Path(mod.absolutePath()) / "meta.ini"
+    parser = _configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    if meta_path.exists():
+        parser.read(meta_path, encoding="utf-8")
+
+    for section, fields in updates.items():
+        if not isinstance(fields, dict):
+            continue
+        section_name = str(section)
+        if not parser.has_section(section_name):
+            parser.add_section(section_name)
+        for key, value in fields.items():
+            parser.set(section_name, str(key), str(value))
+
+    buffer = _StringIO()
+    parser.write(buffer)
+    try:
+        _atomic_write_text_inline(meta_path, buffer.getvalue())
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INTERNAL_ERROR, "message": f"meta.ini write failed: {exc}"},
+        }
+
+    updated_sections = list(updates.keys())
+    try:
+        pump.invoke_blocking(lambda: organizer.modDataChanged(mod), timeout_s=5)
+    except Exception as exc:
+        return {
+            "ok": True,
+            "result": {
+                "name": name,
+                "updated_sections": updated_sections,
+                "notification_skipped": str(exc),
+            },
+            "error": None,
+        }
+
+    return {
+        "ok": True,
+        "result": {"name": name, "updated_sections": updated_sections},
+        "error": None,
+    }
+
+
+def _handle_plugins_list(organizer, payload):
+    """Background-safe snapshot of plugins via IPluginList."""
+
+    plugin_list = organizer.pluginList()
+    plugins = []
+    for name in plugin_list.pluginNames():
+        state = plugin_list.state(name)
+        state_int = int(state)
+        plugins.append(
+            {
+                "name": name,
+                "state": state_int,
+                "enabled": bool(state_int & _ACTIVE_FLAG),
+                "priority": plugin_list.priority(name),
+                "load_order": plugin_list.loadOrder(name),
+                "origin": plugin_list.origin(name),
+                "is_master": bool(plugin_list.isMasterFlagged(name)),
+                "is_light": bool(plugin_list.isLightFlagged(name)),
+                "has_master_ext": bool(plugin_list.hasMasterExtension(name)),
+                "has_light_ext": bool(plugin_list.hasLightExtension(name)),
+            }
+        )
+
+    return {"ok": True, "result": {"plugins": plugins}, "error": None}
+
+
+def _handle_plugins_set_state(organizer, pump, payload):
+    """Set plugin active/inactive via main-thread setState + readback."""
+
+    name = payload.get("name")
+    state = payload.get("state")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+    if not isinstance(state, int):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "state: int"},
+        }
+
+    def _main():
+        plugin_list = organizer.pluginList()
+        if name not in plugin_list.pluginNames():
+            return ("error", ErrorCode.PLUGIN_NOT_FOUND, name)
+        plugin_list.setState(name, state)
+        return (
+            "ok",
+            {
+                "name": name,
+                "requested_state": state,
+                "actual_state": int(plugin_list.state(name)),
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_main, timeout_s=10)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
+def _handle_plugins_set_priority(organizer, pump, payload):
+    """Set plugin priority via main-thread setPriority + silent-noop readback."""
+
+    name = payload.get("name")
+    priority = payload.get("priority")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+    if not isinstance(priority, int):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "priority: int"},
+        }
+
+    def _main():
+        plugin_list = organizer.pluginList()
+        if name not in plugin_list.pluginNames():
+            return ("error", ErrorCode.PLUGIN_NOT_FOUND, name)
+        before = plugin_list.priority(name)
+        plugin_list.setPriority(name, priority)
+        after = plugin_list.priority(name)
+        return (
+            "ok",
+            {
+                "name": name,
+                "requested_priority": priority,
+                "actual_priority": after,
+                "noop": after == before and before != priority,
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_main, timeout_s=10)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
+def _handle_plugins_set_load_order(organizer, pump, payload):
+    """Bulk reorder plugins via setLoadOrder + effective-order readback."""
+
+    order = payload.get("load_order")
+    if not isinstance(order, list) or not all(isinstance(name, str) for name in order):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "load_order: list[str]"},
+        }
+
+    def _main():
+        plugin_list = organizer.pluginList()
+        known = set(plugin_list.pluginNames())
+        unknown = [name for name in order if name not in known]
+        if unknown:
+            return ("error", ErrorCode.PLUGIN_NOT_FOUND, f"unknown plugins in load_order: {unknown}")
+
+        plugin_list.setLoadOrder(order)
+        effective = sorted(plugin_list.pluginNames(), key=lambda name: plugin_list.priority(name))
+        return (
+            "ok",
+            {
+                "requested_explicit": list(order),
+                "effective_order": effective,
+                "implicitly_appended_count": len(effective) - len(order),
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_main, timeout_s=15)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
+def _handle_profile_list(organizer, payload):
+    """Background-safe: enumerate profile dirs containing modlist.txt."""
+
+    base_path = Path(organizer.basePath())
+    profiles_root = base_path / "profiles"
+    profiles = []
+    if profiles_root.exists():
+        for child in sorted(profiles_root.iterdir(), key=lambda path: path.name):
+            if not child.is_dir():
+                continue
+            if not (child / "modlist.txt").exists():
+                continue
+            profiles.append(
+                {
+                    "name": child.name,
+                    "path": str(child),
+                    "has_local_inis": (child / "settings.txt").exists(),
+                }
+            )
+    return {"ok": True, "result": {"profiles": profiles}, "error": None}
+
+
+def _handle_profile_active(organizer, payload):
+    """Background-safe snapshot of current profile name + path."""
+
+    return {
+        "ok": True,
+        "result": {"name": organizer.profileName(), "path": organizer.profilePath()},
+        "error": None,
+    }
+
+
+def _handle_profile_initialize(organizer, pump, payload):
+    """Initialize a profile directory with game-specific INI templates."""
+
+    profile_dir = payload.get("profile_dir")
+    settings_list = payload.get("settings", ["MODS", "CONFIGURATION"])
+    if not isinstance(profile_dir, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "profile_dir: str"},
+        }
+    if not isinstance(settings_list, list) or not all(isinstance(setting, str) for setting in settings_list):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "settings: list[str]"},
+        }
+
+    def _main():
+        try:
+            from mobase import ProfileSetting
+        except ImportError:
+            return ("error", ErrorCode.INTERNAL_ERROR, "mobase.ProfileSetting unavailable")
+
+        plugin_game = organizer.managedGame()
+        if plugin_game is None:
+            return ("error", ErrorCode.INTERNAL_ERROR, "no managed game plugin")
+
+        flags = 0
+        applied = []
+        for setting in settings_list:
+            attr = getattr(ProfileSetting, setting, None)
+            if attr is None:
+                return ("error", ErrorCode.INVALID_PARAMS, f"unknown ProfileSetting: {setting}")
+            flags |= int(attr)
+            applied.append(setting)
+
+        try:
+            from PyQt6.QtCore import QDir
+
+            plugin_game.initializeProfile(QDir(profile_dir), flags)
+        except ImportError:
+            plugin_game.initializeProfile(profile_dir, flags)
+        return ("ok", {"profile_dir": profile_dir, "settings_applied": applied})
+
+    try:
+        outcome = pump.invoke_blocking(_main, timeout_s=30)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
+def _handle_executables_list(organizer, payload):
+    """Background-safe: list MO2 customExecutables from ModOrganizer.ini."""
+
+    ini_path = Path(organizer.basePath()) / "ModOrganizer.ini"
+    if not ini_path.exists():
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INTERNAL_ERROR, "message": f"ModOrganizer.ini not found at {ini_path}"},
+        }
+
+    import sys as _sys
+
+    broker_dir = str(Path(__file__).parent)
+    if broker_dir not in _sys.path:
+        _sys.path.insert(0, broker_dir)
+    try:
+        from qt_ini import parse_custom_executables
+    except ImportError as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INTERNAL_ERROR, "message": f"qt_ini import: {exc}"},
+        }
+
+    entries = parse_custom_executables(ini_path)
+    return {
+        "ok": True,
+        "result": {"executables": entries, "count": len(entries)},
+        "error": None,
+    }
+
+
+def _handle_installation_install_local_archive(organizer, pump, payload):
+    """Install mod from local archive via IOrganizer.installMod.
+
+    FOMOD-blind primitive: FOMOD wizard runs inside MO2 when archive contains
+    info.xml. The MCP layer (S5a mo2_install) orchestrates FOMOD non-interactive
+    via sidecar Pattern A; this is the raw mobase call.
+    """
+
+    archive_path = payload.get("archive_path")
+    name_suggestion = payload.get("name_suggestion", "")
+    if not isinstance(archive_path, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "archive_path: str"},
+        }
+    if not Path(archive_path).exists():
+        return {
+            "ok": False,
+            "result": None,
+            "error": {
+                "code": ErrorCode.INVALID_PARAMS,
+                "message": f"archive_path not found: {archive_path}",
+            },
+        }
+    if not isinstance(name_suggestion, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name_suggestion: str"},
+        }
+
+    def _on_main_thread():
+        mod = organizer.installMod(archive_path, name_suggestion)
+        if mod is None:
+            return ("error", ErrorCode.INTERNAL_ERROR, "installMod returned None (canceled or failed)")
+        return (
+            "ok",
+            {
+                "name": mod.name(),
+                "absolute_path": mod.absolutePath(),
+                "installation_file": archive_path,
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_on_main_thread, timeout_s=120)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
+def _handle_installation_create_mod_from_directory(organizer, pump, payload):
+    """Create empty mod for Pattern A staging. Sister of mods.create in install namespace.
+
+    Used by S5a mo2_install: sidecar pre-stages files in staging dir, then this
+    handler creates the empty mod via IOrganizer.createMod. TS MCP layer moves
+    staged content + writes meta.ini after this returns.
+    """
+
+    name = payload.get("name")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+
+    sanitized = _sanitize_dir_name(name)
+    if not sanitized:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {
+                "code": ErrorCode.INVALID_PARAMS,
+                "message": f"name '{name}' empty after sanitize",
+            },
+        }
+
+    def _on_main_thread():
+        mod_list = organizer.modList()
+        if mod_list.getMod(sanitized) is not None:
+            return ("error", ErrorCode.INVALID_PARAMS, f"name '{sanitized}' already exists")
+        if GuessedString is None:
+            return ("error", ErrorCode.INTERNAL_ERROR, "mobase.GuessedString unavailable")
+        new_mod = organizer.createMod(GuessedString(sanitized))
+        if new_mod is None:
+            return ("error", ErrorCode.INTERNAL_ERROR, "createMod returned None")
+        return (
+            "ok",
+            {
+                "name": new_mod.name(),
+                "absolute_path": new_mod.absolutePath(),
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_on_main_thread, timeout_s=15)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
+def _handle_organizer_refresh(organizer, pump, payload):
+    """Refresh MO2 internal state on the main thread."""
+
+    save_changes = payload.get("save_changes", True)
+    if not isinstance(save_changes, bool):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "save_changes: bool"},
+        }
+
+    def _main():
+        organizer.refresh(save_changes)
+        return {
+            "refreshed": True,
+            "save_changes": save_changes,
+            "timestamp_ms": int(time.time() * 1000),
+        }
+
+    try:
+        result = pump.invoke_blocking(_main, timeout_s=60)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    return {"ok": True, "result": result, "error": None}
+
+
+def _handle_organizer_resolve_path(organizer, payload):
+    """Background-safe: resolve a virtual path to a real on-disk path."""
+
+    filename = payload.get("filename")
+    if not isinstance(filename, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "filename: str"},
+        }
+
+    resolved = organizer.resolvePath(filename)
+    return {
+        "ok": True,
+        "result": {"filename": filename, "resolved": resolved or None},
+        "error": None,
+    }
+
+
+def _handle_organizer_get_file_origins(organizer, payload):
+    """Background-safe: return mods providing a virtual file."""
+
+    filename = payload.get("filename")
+    if not isinstance(filename, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "filename: str"},
+        }
+
+    origins = list(organizer.getFileOrigins(filename) or [])
+    return {
+        "ok": True,
+        "result": {"filename": filename, "origins": origins},
+        "error": None,
+    }
+
+
+def _handle_organizer_find_files(organizer, payload):
+    """Background-safe: find files matching glob patterns under a virtual path."""
+
+    path = payload.get("path", "")
+    patterns = payload.get("patterns", ["*"])
+    if not isinstance(path, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "path: str"},
+        }
+    if not isinstance(patterns, list) or not all(isinstance(pattern, str) for pattern in patterns):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "patterns: list[str]"},
+        }
+
+    found = list(organizer.findFiles(path, patterns) or [])
+    return {
+        "ok": True,
+        "result": {"path": path, "patterns": patterns, "files": found},
+        "error": None,
+    }
+
+
+def _handle_organizer_virtual_file_tree(organizer, payload):
+    """Background-safe: confirm virtual file tree liveness with a bounded response."""
+
+    path = payload.get("path", "")
+    max_depth = payload.get("max_depth", 3)
+    if not isinstance(path, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "path: str"},
+        }
+    if not isinstance(max_depth, int):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "max_depth: int"},
+        }
+
+    try:
+        organizer.virtualFileTree()
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INTERNAL_ERROR, "message": str(exc)},
+        }
+
+    return {
+        "ok": True,
+        "result": {
+            "path": path,
+            "max_depth": max_depth,
+            "entries": [],
+            "truncated": False,
+            "note": "Use organizer.find_files for content; this method confirms VFS liveness",
+        },
+        "error": None,
+    }
+
+
+def _handle_organizer_startApplication(organizer, pump, payload):
+    """Launch an executable through MO2 VFS via IOrganizer.startApplication."""
+
+    name_or_path = payload.get("executable")
+    args_list = payload.get("args", [])
+    cwd = payload.get("cwd", "")
+    profile = payload.get("profile", "")
+    forced_overwrite = payload.get("forcedCustomOverwrite", "")
+    ignore_overwrite = payload.get("ignoreCustomOverwrite", False)
+
+    if not isinstance(name_or_path, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "executable: str"},
+        }
+    if not isinstance(args_list, list) or not all(isinstance(arg, str) for arg in args_list):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "args: list[str]"},
+        }
+
+    def _main():
+        handle = organizer.startApplication(
+            name_or_path,
+            args_list,
+            cwd,
+            profile,
+            forced_overwrite,
+            ignore_overwrite,
+        )
+        if handle == 0:
+            return (
+                "error",
+                ErrorCode.INTERNAL_ERROR,
+                f"startApplication returned 0 (launch failed for '{name_or_path}')",
+            )
+        return ("ok", {"handle": int(handle), "executable": name_or_path})
+
+    try:
+        outcome = pump.invoke_blocking(_main, timeout_s=15)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
+def _handle_organizer_waitForApplication(organizer, pump, payload):
+    """Wait for a launched application handle; refresh on completion by default."""
+
+    handle = payload.get("handle")
+    refresh = payload.get("refresh", True)
+    if not isinstance(handle, int):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "handle: int"},
+        }
+    if not isinstance(refresh, bool):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "refresh: bool"},
+        }
+
+    def _main():
+        success, exit_code = organizer.waitForApplication(handle, refresh)
+        return {
+            "handle": handle,
+            "success": bool(success),
+            "exit_code": int(exit_code) if exit_code is not None else None,
+        }
+
+    try:
+        result = pump.invoke_blocking(_main, timeout_s=3600)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    return {"ok": True, "result": result, "error": None}
 
 
 def utc_now_timestamp() -> str:
@@ -1274,6 +2596,7 @@ def build_command_handlers(
     """Return the command handler registry for system and launch methods."""
 
     launch_registry = launch_registry if launch_registry is not None else create_launch_registry()
+    _set_main_thread_pump(main_thread_pump)
     launch_registry_lock = threading.Lock()
     launch_entry_locks: dict[str, threading.Condition] = {}
     handlers = {
@@ -1324,6 +2647,125 @@ def build_command_handlers(
         }
 
     handlers[SYSTEM_CAPABILITIES_METHOD] = handle_system_capabilities
+    handlers[SYSTEM_SHUTDOWN_METHOD] = lambda request: _handle_system_shutdown(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[MODS_LIST_METHOD] = lambda request: _handle_mods_list(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[MODS_SET_ACTIVE_METHOD] = lambda request: _handle_mods_set_active(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[MODS_SET_PRIORITY_METHOD] = lambda request: _handle_mods_set_priority(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[MODS_RENAME_METHOD] = lambda request: _handle_mods_rename(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[MODS_REMOVE_METHOD] = lambda request: _handle_mods_remove(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[MODS_CREATE_METHOD] = lambda request: _handle_mods_create(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[MODS_META_READ_METHOD] = lambda request: _handle_mods_meta_read(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[MODS_META_WRITE_METHOD] = lambda request: _handle_mods_meta_write(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[PLUGINS_LIST_METHOD] = lambda request: _handle_plugins_list(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[PLUGINS_SET_STATE_METHOD] = lambda request: _handle_plugins_set_state(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[PLUGINS_SET_PRIORITY_METHOD] = lambda request: _handle_plugins_set_priority(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[PLUGINS_SET_LOAD_ORDER_METHOD] = lambda request: _handle_plugins_set_load_order(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[PROFILE_LIST_METHOD] = lambda request: _handle_profile_list(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[PROFILE_ACTIVE_METHOD] = lambda request: _handle_profile_active(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[PROFILE_INITIALIZE_METHOD] = lambda request: _handle_profile_initialize(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[EXECUTABLES_LIST_METHOD] = lambda request: _handle_executables_list(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[INSTALLATION_INSTALL_LOCAL_ARCHIVE_METHOD] = lambda request: _handle_installation_install_local_archive(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[INSTALLATION_CREATE_MOD_FROM_DIRECTORY_METHOD] = lambda request: _handle_installation_create_mod_from_directory(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_REFRESH_METHOD] = lambda request: _handle_organizer_refresh(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_RESOLVE_PATH_METHOD] = lambda request: _handle_organizer_resolve_path(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_GET_FILE_ORIGINS_METHOD] = lambda request: _handle_organizer_get_file_origins(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_FIND_FILES_METHOD] = lambda request: _handle_organizer_find_files(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_VIRTUAL_FILE_TREE_METHOD] = lambda request: _handle_organizer_virtual_file_tree(
+        organizer,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_START_APPLICATION_METHOD] = lambda request: _handle_organizer_startApplication(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_WAIT_FOR_APPLICATION_METHOD] = lambda request: _handle_organizer_waitForApplication(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
     return handlers
 
 
@@ -1341,19 +2783,28 @@ def dispatch_transport_request(request: dict[str, object], handlers) -> dict[str
             request,
             ok=False,
             error={
-                "code": "method_not_found",
+                "code": ErrorCode.METHOD_NOT_FOUND,
                 "message": f"Unsupported method: {method}",
             },
         )
 
     try:
-        return build_transport_response(request, ok=True, result=handler(request), error=None)
+        result = handler(request)
+        if is_broker_handler_response(result):
+            return build_transport_response(
+                request,
+                ok=bool(result["ok"]),
+                result=result.get("result"),
+                error=result.get("error"),
+            )
+
+        return build_transport_response(request, ok=True, result=result, error=None)
     except ValueError as exc:
         return build_transport_response(
             request,
             ok=False,
             error={
-                "code": "invalid_params",
+                "code": ErrorCode.INVALID_PARAMS,
                 "message": str(exc),
             },
         )
@@ -1362,7 +2813,7 @@ def dispatch_transport_request(request: dict[str, object], handlers) -> dict[str
             request,
             ok=False,
             error={
-                "code": "transport_error",
+                "code": ErrorCode.TRANSPORT_ERROR,
                 "message": str(exc),
             },
         )
@@ -1371,7 +2822,7 @@ def dispatch_transport_request(request: dict[str, object], handlers) -> dict[str
             request,
             ok=False,
             error={
-                "code": "not_implemented",
+                "code": ErrorCode.NOT_IMPLEMENTED,
                 "message": str(exc),
             },
         )
@@ -1380,7 +2831,7 @@ def dispatch_transport_request(request: dict[str, object], handlers) -> dict[str
             request,
             ok=False,
             error={
-                "code": "internal_error",
+                "code": ErrorCode.INTERNAL_ERROR,
                 "message": str(exc),
             },
         )
