@@ -99,6 +99,7 @@ describe("mo2-mcp smoke", () => {
         "mo2_edit_meta",
         "mo2_profile_ini_set",
         "mo2_backup_mod",
+        "mo2_backup_profile",
       ]);
     } finally {
       void ready;
