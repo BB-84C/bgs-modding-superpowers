@@ -105,6 +105,7 @@ describe("mo2-mcp smoke", () => {
         "mo2_send_mod_to",
         "mo2_rollback",
         "mo2_restore_profile",
+        "mo2_install",
       ]);
     } finally {
       void ready;
