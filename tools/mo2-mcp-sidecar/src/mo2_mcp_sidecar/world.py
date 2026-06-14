@@ -4,6 +4,10 @@ PLAN-PATCH applied:
 - P-B7: WorldCache accepts `game` parameter (FALLOUT4 / SKYRIM_SE / etc.)
 - P-F10: Per-key threading lock coalesces concurrent _build() calls so two
   parallel requests don't both trigger a full enumeration.
+- P-B6 (this task): World now carries `archive_order` (ArchiveLoadOrder from
+  the engine) so install.conflict_preview can call
+  mo2_assets_engine.mod_enumerator.enumerate_mod_files for real overlap
+  detection instead of relying on a non-existent Mod.files attribute.
 """
 from __future__ import annotations
 
@@ -19,6 +23,20 @@ if _engine_src.exists() and str(_engine_src) not in sys.path:
     sys.path.insert(0, str(_engine_src))
 
 
+# Sidecar --game value -> engine Game string value.
+# Oblivion is not represented in the engine's Game enum (its archive conventions
+# differ from Skyrim's slightly); when game is OBLIVION, archive discovery is
+# skipped and an empty ArchiveLoadOrder is used (loose files still enumerate).
+_ENGINE_GAME_VALUE: dict[str, str | None] = {
+    "FALLOUT4": "fallout4",
+    "STARFIELD": "starfield",
+    "SKYRIM_SE": "skyrim",
+    "SKYRIM_LE": "skyrim",
+    "FALLOUT_NV": "fallout3-fnv",
+    "OBLIVION": None,
+}
+
+
 @dataclass(frozen=True)
 class WorldKey:
     profile_dir: str
@@ -31,6 +49,10 @@ class World:
     profile: Any
     mods: Any
     game: str
+    # archive_order is an mo2_assets_engine.archive_order.ArchiveLoadOrder when
+    # built by _build(); kept Any-typed + None-defaulted so existing test fakes
+    # that construct World(profile=..., mods=..., game=...) keep working.
+    archive_order: Any = None
 
 
 class WorldCache:
@@ -80,10 +102,47 @@ class WorldCache:
             self._cache.pop(key_str, None)
 
     def _build(self, profile_dir: Path) -> World:
-        """Build a World by reading profile + enumerating mods. P-B7: passes `game` to World."""
+        """Build a World by reading profile + computing archive_order.
+
+        P-B7: passes `game` to World.
+        P-B6: discovers .bsa/.ba2 archives across enabled mods and builds an
+        ArchiveLoadOrder so enumerate_mod_files() can attribute archived files.
+        """
+        # Lazy engine imports (sibling-dep shim above puts src/ on sys.path).
+        from mo2_assets_engine.archive_order import (  # type: ignore[import-not-found]
+            ArchiveLoadOrder,
+            Game,
+            discover_archives_for_plugins,
+        )
         from mo2_assets_engine.profile import read_profile  # type: ignore[import-not-found]
 
         profile = read_profile(profile_dir=profile_dir, mods_root=self.mods_root)
-        # Full file enumeration with archive ordering is deferred to later
-        # S1b tasks (26-29); for now World.mods holds the enabled Mod list.
-        return World(profile=profile, mods=profile.enabled_mods, game=self.game)
+
+        # Discover candidate archives (.bsa/.ba2) at the root of each enabled mod.
+        # Same convention as mod_enumerator._enumerate_archives.
+        candidate_archives: list[str] = []
+        for mod in profile.enabled_mods:
+            if not mod.root.exists():
+                continue
+            for child in sorted(mod.root.iterdir()):
+                if child.is_file() and child.suffix.lower() in (".bsa", ".ba2"):
+                    candidate_archives.append(child.name)
+
+        engine_game_value = _ENGINE_GAME_VALUE.get(self.game)
+        if engine_game_value is not None and candidate_archives:
+            archive_order = discover_archives_for_plugins(
+                plugins=profile.enabled_plugins,
+                candidate_archives=candidate_archives,
+                game=Game(engine_game_value),
+            )
+        else:
+            # No archives to discover, or game not modeled by engine -> empty order.
+            # Loose files still enumerate correctly; only archived members are skipped.
+            archive_order = ArchiveLoadOrder()
+
+        return World(
+            profile=profile,
+            mods=profile.enabled_mods,
+            game=self.game,
+            archive_order=archive_order,
+        )

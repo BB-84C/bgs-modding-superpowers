@@ -75,6 +75,27 @@ def test_game_param_carried_into_world(tmp_path, fake_world_factory):
     assert w.game == "STARFIELD"
 
 
+def test_real_build_populates_archive_order(tmp_path):
+    """P-B6: _build must populate world.archive_order with an ArchiveLoadOrder.
+
+    Uses a real (empty) profile fixture on disk + monkeypatch nothing — exercises
+    the lazy engine imports inside _build so the wiring is verified end-to-end.
+    """
+    profile = _make_profile(tmp_path)
+    mods_dir = tmp_path / "mods"
+    mods_dir.mkdir(exist_ok=True)
+    (mods_dir / "ModA").mkdir(exist_ok=True)  # match the "+ModA" in modlist.txt
+
+    cache = WorldCache(mods_root=mods_dir, game="FALLOUT4")
+    world = cache.get(profile)
+
+    # Engine's ArchiveLoadOrder is a frozen dataclass; even empty, the instance
+    # must exist (not None) so install.conflict_preview can pass it through.
+    assert world.archive_order is not None
+    assert hasattr(world.archive_order, "ordered_archives")
+    assert hasattr(world.archive_order, "rank_of")
+
+
 def test_concurrent_get_coalesces_builds(tmp_path, monkeypatch):
     """P-F10: two parallel get() calls on same profile_dir must trigger _build only once."""
     import threading
