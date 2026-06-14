@@ -10,7 +10,7 @@
         "protocol_version": {"const": "1"},
         "request_id": {"type": "string", "minLength": 1},
         "session_id": {"type": "string"},
-        "method": {"type": "string", "pattern": "^[A-Za-z]+(\\.[A-Za-z_]+)+$"},
+        "method": {"type": "string", "pattern": "^[a-z]+(\\.[a-z_]+)+$"},
         "payload": {"type": "object"}
       },
       "additionalProperties": false

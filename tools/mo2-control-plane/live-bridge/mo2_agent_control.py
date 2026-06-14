@@ -338,8 +338,8 @@ ORGANIZER_RESOLVE_PATH_METHOD = "organizer.resolve_path"
 ORGANIZER_GET_FILE_ORIGINS_METHOD = "organizer.get_file_origins"
 ORGANIZER_FIND_FILES_METHOD = "organizer.find_files"
 ORGANIZER_VIRTUAL_FILE_TREE_METHOD = "organizer.virtual_file_tree"
-ORGANIZER_START_APPLICATION_METHOD = "organizer.startApplication"
-ORGANIZER_WAIT_FOR_APPLICATION_METHOD = "organizer.waitForApplication"
+ORGANIZER_START_APPLICATION_METHOD = "organizer.start_application"
+ORGANIZER_WAIT_FOR_APPLICATION_METHOD = "organizer.wait_for_application"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 

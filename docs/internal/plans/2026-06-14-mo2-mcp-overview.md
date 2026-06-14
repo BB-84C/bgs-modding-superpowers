@@ -61,7 +61,7 @@
 | 20 | `mo2_install` | Includes FOMOD Pattern A (Q2=full) |
 | 21 | `mo2_rollback` | Restore from snapshot |
 | 22 | `mo2_restore_profile` | From `mo2_backup_profile` snapshot |
-| 23 | `mo2_run_tool` | Live: `startApplication`; offline: CLI `exe <title>` |
+| 23 | `mo2_run_tool` | Live: `organizer.start_application`; offline: CLI `exe <title>` |
 | 24 | `mo2_configure_executable` | action: add/edit/remove |
 | 25 | `mo2_switch_profile` | Cold-restart sequence |
 | 26 | `mo2_create_mod` | Empty mod with optional `above` |
