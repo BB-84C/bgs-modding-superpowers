@@ -238,3 +238,72 @@ def test_plugins_set_priority_plugin_not_found(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "plugin_not_found"
+
+
+def test_plugins_set_load_order_success(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    plugin_list = MagicMock()
+    plugin_list.pluginNames.return_value = ["A.esp", "B.esp", "C.esp"]
+    actual = {"order": ["A.esp", "B.esp", "C.esp"]}
+
+    def _set_load_order(sequence):
+        actual["order"] = list(sequence) + [
+            plugin for plugin in ["A.esp", "B.esp", "C.esp"] if plugin not in sequence
+        ]
+
+    plugin_list.setLoadOrder.side_effect = _set_load_order
+    plugin_list.priority.side_effect = lambda name: actual["order"].index(name)
+
+    organizer = MagicMock()
+    organizer.pluginList.return_value = plugin_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+
+    result = bridge._handle_plugins_set_load_order(organizer, pump, {"load_order": ["B.esp", "A.esp"]})
+
+    assert result["ok"] is True
+    readback = result["result"]
+    assert readback["requested_explicit"] == ["B.esp", "A.esp"]
+    assert readback["effective_order"][:2] == ["B.esp", "A.esp"]
+    assert readback["implicitly_appended_count"] == 1
+
+
+def test_plugins_set_load_order_unknown_plugin_rejected(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    plugin_list = MagicMock()
+    plugin_list.pluginNames.return_value = ["A.esp"]
+    organizer = MagicMock()
+    organizer.pluginList.return_value = plugin_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=15: fn()
+
+    result = bridge._handle_plugins_set_load_order(
+        organizer,
+        pump,
+        {"load_order": ["A.esp", "Nonexistent.esp"]},
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "plugin_not_found"
+
+
+def test_plugins_set_load_order_invalid_params(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    result = bridge._handle_plugins_set_load_order(
+        MagicMock(),
+        MagicMock(),
+        {"load_order": "not a list"},
+    )
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_params"
+
+    result = bridge._handle_plugins_set_load_order(
+        MagicMock(),
+        MagicMock(),
+        {"load_order": ["A.esp", 42]},
+    )
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_params"

@@ -325,6 +325,7 @@ MODS_META_WRITE_METHOD = "mods.meta_write"
 PLUGINS_LIST_METHOD = "plugins.list"
 PLUGINS_SET_STATE_METHOD = "plugins.set_state"
 PLUGINS_SET_PRIORITY_METHOD = "plugins.set_priority"
+PLUGINS_SET_LOAD_ORDER_METHOD = "plugins.set_load_order"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1484,6 +1485,53 @@ def _handle_plugins_set_priority(organizer, pump, payload):
     return {"ok": True, "result": outcome[1], "error": None}
 
 
+def _handle_plugins_set_load_order(organizer, pump, payload):
+    """Bulk reorder plugins via setLoadOrder + effective-order readback."""
+
+    order = payload.get("load_order")
+    if not isinstance(order, list) or not all(isinstance(name, str) for name in order):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "load_order: list[str]"},
+        }
+
+    def _main():
+        plugin_list = organizer.pluginList()
+        known = set(plugin_list.pluginNames())
+        unknown = [name for name in order if name not in known]
+        if unknown:
+            return ("error", ErrorCode.PLUGIN_NOT_FOUND, f"unknown plugins in load_order: {unknown}")
+
+        plugin_list.setLoadOrder(order)
+        effective = sorted(plugin_list.pluginNames(), key=lambda name: plugin_list.priority(name))
+        return (
+            "ok",
+            {
+                "requested_explicit": list(order),
+                "effective_order": effective,
+                "implicitly_appended_count": len(effective) - len(order),
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_main, timeout_s=15)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -2153,6 +2201,11 @@ def build_command_handlers(
         request.get("payload", {}),
     )
     handlers[PLUGINS_SET_PRIORITY_METHOD] = lambda request: _handle_plugins_set_priority(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[PLUGINS_SET_LOAD_ORDER_METHOD] = lambda request: _handle_plugins_set_load_order(
         organizer,
         main_thread_pump,
         request.get("payload", {}),
