@@ -1,4 +1,4 @@
-"""Unit tests for fomod.parse_choices.
+"""Unit tests for fomod.parse_choices + fomod.resolve_files.
 
 Most tests use synthetic FOMOD XML fixtures since pyfomod requires real
 ModuleConfig.xml. Tests skip if pyfomod isn't installed.
@@ -98,3 +98,98 @@ def test_parse_choices_non_fomod_dir_raises(tmp_path):
 def test_register_wires_parse_choices(tmp_path):
     fomod.register()
     assert "fomod.parse_choices" in _METHODS
+
+
+# --- Task 28: fomod.resolve_files tests ---
+
+_TWO_OPTION_FOMOD = """<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+  <moduleName>TwoOption</moduleName>
+  <installSteps order="Explicit">
+    <installStep name="MainStep">
+      <optionalFileGroups order="Explicit">
+        <group name="Variant" type="SelectExactlyOne">
+          <plugins order="Explicit">
+            <plugin name="Standard">
+              <description>standard variant</description>
+              <files>
+                <file source="standard.esp" destination="standard.esp"/>
+              </files>
+              <typeDescriptor><type name="Recommended"/></typeDescriptor>
+            </plugin>
+            <plugin name="HD">
+              <description>HD variant</description>
+              <files>
+                <file source="hd.esp" destination="hd.esp"/>
+              </files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>
+"""
+
+
+def _write_two_option_fomod(tmp_path: Path) -> Path:
+    fomod_dir = tmp_path / "TwoOptMod" / "fomod"
+    fomod_dir.mkdir(parents=True)
+    (fomod_dir / "ModuleConfig.xml").write_text(_TWO_OPTION_FOMOD, encoding="utf-8")
+    (fomod_dir / "info.xml").write_text(
+        '<?xml version="1.0"?><fomod><Name>TwoOpt</Name></fomod>', encoding="utf-8")
+    archive_root = fomod_dir.parent
+    # Drop source files so Installer can see them
+    (archive_root / "standard.esp").write_text("standard")
+    (archive_root / "hd.esp").write_text("hd")
+    return archive_root
+
+
+def test_resolve_files_selects_standard(tmp_path):
+    archive_root = _write_two_option_fomod(tmp_path)
+
+    result = fomod.fomod_resolve_files({
+        "archive_path": str(archive_root),
+        "choices": [
+            {"page_name": "MainStep",
+             "selected_options": [{"group_name": "Variant", "option_name": "Standard"}]}
+        ],
+    })
+
+    assert result["file_count"] >= 1
+    destinations = [f["destination"] for f in result["files"]]
+    assert any("standard.esp" in d for d in destinations)
+
+
+def test_resolve_files_selects_hd(tmp_path):
+    archive_root = _write_two_option_fomod(tmp_path)
+
+    result = fomod.fomod_resolve_files({
+        "archive_path": str(archive_root),
+        "choices": [
+            {"page_name": "MainStep",
+             "selected_options": [{"group_name": "Variant", "option_name": "HD"}]}
+        ],
+    })
+
+    destinations = [f["destination"] for f in result["files"]]
+    assert any("hd.esp" in d for d in destinations)
+
+
+def test_resolve_files_missing_archive_raises():
+    with pytest.raises(FileNotFoundError):
+        fomod.fomod_resolve_files({"archive_path": "/nope", "choices": []})
+
+
+def test_resolve_files_invalid_choices_type_raises(tmp_path):
+    archive_root = _write_two_option_fomod(tmp_path)
+    with pytest.raises(RuntimeError, match="invalid_choices"):
+        fomod.fomod_resolve_files({"archive_path": str(archive_root), "choices": "not a list"})
+
+
+def test_register_now_wires_both_methods():
+    fomod.register()
+    assert "fomod.parse_choices" in _METHODS
+    assert "fomod.resolve_files" in _METHODS

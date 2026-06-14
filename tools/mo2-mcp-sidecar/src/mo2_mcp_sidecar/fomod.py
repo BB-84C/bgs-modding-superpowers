@@ -102,6 +102,77 @@ def fomod_parse_choices(params: dict) -> dict:
     }
 
 
+def fomod_resolve_files(params: dict) -> dict:
+    """Apply user choices to a FOMOD installer and return the resolved file mapping.
+
+    pyfomod Installer is wizard-style: next() starts/advances pages, files() at end.
+    We walk pages via next(), matching user choices to InstallerOption objects.
+
+    Args:
+        params["archive_path"]: path to extracted FOMOD root
+        params["choices"]: list of {page_name, selected_options: [{group_name, option_name}]}
+
+    Returns:
+        {
+          "files": [{"source": str, "destination": str}],
+          "file_count": int,
+        }
+
+    Raises:
+        RuntimeError("pyfomod_not_available")
+        RuntimeError("invalid_choices: <reason>") if pyfomod rejects choices.
+    """
+    if not _PYFOMOD_AVAILABLE:
+        raise RuntimeError("pyfomod_not_available")
+
+    archive_path = Path(params["archive_path"])
+    if not archive_path.exists():
+        raise FileNotFoundError(f"archive not found: {archive_path}")
+    choices = params.get("choices", [])
+    if not isinstance(choices, list):
+        raise RuntimeError("invalid_choices: choices must be a list")
+
+    try:
+        root = pyfomod.parse(str(archive_path))
+    except Exception as exc:
+        raise RuntimeError(f"not_a_fomod: {exc}")
+
+    # Build lookup: page_name -> group_name -> set of selected option names
+    by_page: dict[str, dict[str, set[str]]] = {}
+    for ch in choices:
+        if not isinstance(ch, dict):
+            continue
+        page_name = ch.get("page_name", "")
+        groups = by_page.setdefault(page_name, {})
+        for sel in ch.get("selected_options", []) or []:
+            if not isinstance(sel, dict):
+                continue
+            group_name = sel.get("group_name", "")
+            opt_name = sel.get("option_name", "")
+            groups.setdefault(group_name, set()).add(opt_name)
+
+    installer = pyfomod.Installer(root, path=str(archive_path))
+    try:
+        page = installer.next()  # start at page 0
+        while page is not None:
+            wanted_by_group = by_page.get(getattr(page, "name", ""), {})
+            selected: list[Any] = []
+            for group in page:
+                wanted = wanted_by_group.get(getattr(group, "name", ""), set())
+                for opt in group:
+                    if getattr(opt, "name", "") in wanted:
+                        selected.append(opt)
+            page = installer.next(selected_options=selected)
+    except Exception as exc:
+        raise RuntimeError(f"invalid_choices: {exc}")
+
+    # installer.files() returns dict[str, str]: source → destination
+    resolved = installer.files()
+    files = [{"source": str(k), "destination": str(v)} for k, v in resolved.items()]
+
+    return {"files": files, "file_count": len(files)}
+
+
 def register() -> None:
     register_method("fomod.parse_choices", fomod_parse_choices)
-    # Task 28 will add fomod.resolve_files here
+    register_method("fomod.resolve_files", fomod_resolve_files)
