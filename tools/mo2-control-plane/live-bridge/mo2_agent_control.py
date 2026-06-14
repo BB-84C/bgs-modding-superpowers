@@ -236,6 +236,11 @@ class MainThreadCallPump:
 
         return call.result
 
+    def invoke_blocking(self, callback, timeout_s: float = 10):
+        """Run work on the owning thread; timeout is reserved for future pump waits."""
+
+        return self.invoke(callback)
+
     def pending_count(self) -> int:
         """Return the approximate number of queued main-thread calls."""
 
@@ -300,6 +305,7 @@ SYSTEM_PING_METHOD = "system.ping"
 SYSTEM_CAPABILITIES_METHOD = "system.capabilities"
 SYSTEM_SHUTDOWN_METHOD = "system.shutdown"
 MODS_LIST_METHOD = "mods.list"
+MODS_SET_ACTIVE_METHOD = "mods.set_active"
 
 LAUNCH_START_METHOD = "launch.start"
 LAUNCH_STATUS_METHOD = "launch.status"
@@ -384,6 +390,17 @@ def build_transport_response(
         "result": result,
         "error": error,
     }
+
+
+def is_broker_handler_response(value: object) -> bool:
+    """Return True when a command handler already returned a broker envelope."""
+
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("ok"), bool)
+        and "result" in value
+        and "error" in value
+    )
 
 
 def get_named_pipe_path(pipe_name: str) -> str:
@@ -836,6 +853,74 @@ def _handle_mods_list(organizer, payload):
         )
 
     return {"ok": True, "result": {"mods": mods}, "error": None}
+
+
+def _handle_mods_set_active(organizer, pump, payload):
+    """Set mod active state via main-thread mobase. Bulk + readback.
+
+    Per oracle traps §2.2: bulk setActive returns count; per-mod readback
+    confirms actual state and catches partial-apply / silent-noop behavior.
+    """
+
+    names = payload.get("names")
+    active = payload.get("active")
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "names: list[str]"},
+        }
+    if not isinstance(active, bool):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "active: bool"},
+        }
+
+    def _on_main_thread():
+        mod_list = organizer.modList()
+        try:
+            mod_list.setActive(names, active)
+        except (TypeError, AttributeError):
+            for name in names:
+                try:
+                    mod_list.setActive(name, active)
+                except Exception:
+                    pass
+
+        applied = []
+        failed = []
+        readback = []
+        for name in names:
+            try:
+                state = mod_list.state(name)
+                is_active_now = bool(state & _ACTIVE_FLAG)
+                readback.append({"name": name, "active": is_active_now})
+                if is_active_now == active:
+                    applied.append(name)
+                else:
+                    failed.append(name)
+            except Exception:
+                readback.append({"name": name, "active": None})
+                failed.append(name)
+
+        return {
+            "requested": list(names),
+            "applied": applied,
+            "failed": failed,
+            "readback": readback,
+        }
+
+    try:
+        result = pump.invoke_blocking(_on_main_thread, timeout_s=10)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    return {"ok": True, "result": result, "error": None}
 
 
 def utc_now_timestamp() -> str:
@@ -1458,11 +1543,16 @@ def build_command_handlers(
     handlers[SYSTEM_SHUTDOWN_METHOD] = lambda request: _handle_system_shutdown(
         organizer,
         request.get("payload", {}),
-    )["result"]
+    )
     handlers[MODS_LIST_METHOD] = lambda request: _handle_mods_list(
         organizer,
         request.get("payload", {}),
-    )["result"]
+    )
+    handlers[MODS_SET_ACTIVE_METHOD] = lambda request: _handle_mods_set_active(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
     return handlers
 
 
@@ -1486,7 +1576,16 @@ def dispatch_transport_request(request: dict[str, object], handlers) -> dict[str
         )
 
     try:
-        return build_transport_response(request, ok=True, result=handler(request), error=None)
+        result = handler(request)
+        if is_broker_handler_response(result):
+            return build_transport_response(
+                request,
+                ok=bool(result["ok"]),
+                result=result.get("result"),
+                error=result.get("error"),
+            )
+
+        return build_transport_response(request, ok=True, result=result, error=None)
     except ValueError as exc:
         return build_transport_response(
             request,
