@@ -161,6 +161,109 @@ def install_conflict_preview(params: dict) -> dict:
     }
 
 
+def install_stage_fomod(params: dict) -> dict:
+    """Stage a FOMOD archive into a directory using user-supplied choices.
+
+    Pipeline:
+    1. If archive_path is a .zip/.7z/.rar, extract to a temp scratch dir.
+       Otherwise (directory) use it in place.
+    2. Call fomod.fomod_resolve_files to get the {source, destination} list.
+    3. For each pair, copy fomod_root/source -> staging_dir/destination.
+    4. Clean up scratch dir (NOT staging_dir).
+
+    Args:
+        params["archive_path"]: absolute path to FOMOD archive (must be a directory
+            with a fomod/ subdir, OR a .zip/.7z/.rar that contains one)
+        params["choices"]: list of {page_name, selected_options: [{group_name, option_name}]}
+        params["staging_dir"]: absolute path to destination - created if missing
+
+    Returns:
+        {
+          "staging_dir": str,
+          "file_count": int,
+          "files": [{"source": str, "destination": str}],
+          "archive_format": "directory" | "zip" | "7z" | "rar",
+        }
+
+    Raises:
+        FileNotFoundError if archive missing
+        RuntimeError("pyfomod_not_available") / ("not_a_fomod") / ("invalid_choices")
+    """
+    import shutil
+    import tempfile
+
+    from .archive import archive_extract_all
+    from .fomod import _PYFOMOD_AVAILABLE, fomod_resolve_files
+
+    if not _PYFOMOD_AVAILABLE:
+        raise RuntimeError("pyfomod_not_available")
+
+    archive_path = Path(params["archive_path"])
+    choices = params.get("choices", [])
+    staging_dir = Path(params["staging_dir"])
+
+    if not archive_path.exists():
+        raise FileNotFoundError(f"archive not found: {archive_path}")
+    if not isinstance(choices, list):
+        raise RuntimeError("invalid_choices: choices must be a list")
+
+    staging_dir.mkdir(parents=True, exist_ok=True)
+
+    # Step 1: pre-extracted directory vs archive
+    scratch_dir: Path | None = None
+    if archive_path.is_dir():
+        fomod_root = archive_path
+        archive_format = "directory"
+    else:
+        scratch_dir = Path(tempfile.mkdtemp(prefix="fomod-stage-"))
+        extract_result = archive_extract_all({
+            "archive_path": str(archive_path),
+            "dest": str(scratch_dir),
+        })
+        archive_format = extract_result["format"]
+        fomod_root = scratch_dir
+
+    try:
+        # Step 2: resolve files via pyfomod (reuses existing fomod.fomod_resolve_files)
+        resolved = fomod_resolve_files({
+            "archive_path": str(fomod_root),
+            "choices": choices,
+        })
+        files = resolved.get("files", [])
+
+        # Step 3: copy each source -> staging_dir/destination
+        moved: list[dict[str, str]] = []
+        for entry in files:
+            src_rel = entry.get("source", "")
+            dst_rel = entry.get("destination", "")
+            if not src_rel or not dst_rel:
+                continue
+            src_path = fomod_root / src_rel
+            dst_path = staging_dir / dst_rel
+            if not src_path.exists():
+                # FOMOD may reference files not in the extracted set (e.g. NotUsable
+                # options) - silently skip rather than fail the whole stage.
+                continue
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            if src_path.is_file():
+                shutil.copy2(src_path, dst_path)
+                moved.append({"source": src_rel, "destination": dst_rel})
+            elif src_path.is_dir():
+                shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
+                moved.append({"source": src_rel, "destination": dst_rel})
+
+        return {
+            "staging_dir": str(staging_dir),
+            "file_count": len(moved),
+            "files": moved,
+            "archive_format": archive_format,
+        }
+    finally:
+        # Step 4: clean up scratch dir (NOT staging_dir - that's the output)
+        if scratch_dir is not None and scratch_dir.exists():
+            shutil.rmtree(scratch_dir, ignore_errors=True)
+
+
 def register() -> None:
     register_method("install.conflict_preview", install_conflict_preview)
-    # stage_fomod registered in next task
+    register_method("install.stage_fomod", install_stage_fomod)

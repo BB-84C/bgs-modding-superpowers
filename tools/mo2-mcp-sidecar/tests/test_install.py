@@ -119,3 +119,93 @@ def test_register_wires_install_conflict_preview(tmp_path):
     install.init_install(_cache_returning(_world_with_mods([])))
     install.register()
     assert "install.conflict_preview" in _METHODS
+
+
+# --- P-B6 method 3: install.stage_fomod ---
+
+from mo2_mcp_sidecar import fomod as _fomod  # noqa: E402  (skipif marker reads constant)
+
+
+_STAGE_FOMOD_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+  <moduleName>StageTest</moduleName>
+  <installSteps order="Explicit">
+    <installStep name="Choose">
+      <optionalFileGroups order="Explicit">
+        <group name="Variant" type="SelectExactlyOne">
+          <plugins order="Explicit">
+            <plugin name="Light">
+              <description>Light variant</description>
+              <files><file source="light.esp" destination="light.esp"/></files>
+              <typeDescriptor><type name="Recommended"/></typeDescriptor>
+            </plugin>
+            <plugin name="Heavy">
+              <description>Heavy variant</description>
+              <files><file source="heavy.esp" destination="heavy.esp"/></files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>
+"""
+
+
+@pytest.mark.skipif(not _fomod._PYFOMOD_AVAILABLE, reason="pyfomod not installed")
+def test_stage_fomod_from_directory_extracts_selected_only(tmp_path):
+    """Pre-extracted FOMOD directory + choices -> only selected files in staging."""
+    fomod_root = tmp_path / "MyFomod"
+    fomod_dir = fomod_root / "fomod"
+    fomod_dir.mkdir(parents=True)
+    (fomod_dir / "ModuleConfig.xml").write_text(_STAGE_FOMOD_XML, encoding="utf-8")
+    (fomod_dir / "info.xml").write_text(
+        '<?xml version="1.0"?><fomod><Name>StageTest</Name></fomod>', encoding="utf-8")
+    (fomod_root / "light.esp").write_text("light-data", encoding="utf-8")
+    (fomod_root / "heavy.esp").write_text("heavy-data", encoding="utf-8")
+
+    staging = tmp_path / "staging"
+
+    from mo2_mcp_sidecar.install import install_stage_fomod
+    result = install_stage_fomod({
+        "archive_path": str(fomod_root),
+        "choices": [{"page_name": "Choose",
+                     "selected_options": [{"group_name": "Variant",
+                                           "option_name": "Light"}]}],
+        "staging_dir": str(staging),
+    })
+
+    assert result["archive_format"] == "directory"
+    assert (staging / "light.esp").exists()
+    assert (staging / "light.esp").read_text() == "light-data"
+    # Heavy should NOT be staged
+    assert not (staging / "heavy.esp").exists()
+
+
+def test_stage_fomod_missing_archive_raises(tmp_path):
+    from mo2_mcp_sidecar.install import install_stage_fomod
+    with pytest.raises(FileNotFoundError):
+        install_stage_fomod({
+            "archive_path": "/nope", "choices": [], "staging_dir": str(tmp_path / "out"),
+        })
+
+
+def test_stage_fomod_invalid_choices_type_raises(tmp_path):
+    from mo2_mcp_sidecar.install import install_stage_fomod
+    fake = tmp_path / "fake"
+    fake.mkdir()
+    with pytest.raises(RuntimeError, match="invalid_choices"):
+        install_stage_fomod({
+            "archive_path": str(fake),
+            "choices": "not a list",
+            "staging_dir": str(tmp_path / "out"),
+        })
+
+
+def test_register_wires_stage_fomod_too(tmp_path):
+    install.init_install(_cache_returning(_world_with_mods([])))
+    install.register()
+    assert "install.stage_fomod" in _METHODS
+    assert "install.conflict_preview" in _METHODS
