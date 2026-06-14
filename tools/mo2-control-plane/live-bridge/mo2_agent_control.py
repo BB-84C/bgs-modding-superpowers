@@ -332,6 +332,7 @@ PROFILE_ACTIVE_METHOD = "profile.active"
 PROFILE_INITIALIZE_METHOD = "profile.initialize"
 EXECUTABLES_LIST_METHOD = "executables.list"
 INSTALLATION_INSTALL_LOCAL_ARCHIVE_METHOD = "installation.install_local_archive"
+INSTALLATION_CREATE_MOD_FROM_DIRECTORY_METHOD = "installation.create_mod_from_directory"
 ORGANIZER_REFRESH_METHOD = "organizer.refresh"
 ORGANIZER_RESOLVE_PATH_METHOD = "organizer.resolve_path"
 ORGANIZER_GET_FILE_ORIGINS_METHOD = "organizer.get_file_origins"
@@ -1736,6 +1737,68 @@ def _handle_installation_install_local_archive(organizer, pump, payload):
     return {"ok": True, "result": outcome[1], "error": None}
 
 
+def _handle_installation_create_mod_from_directory(organizer, pump, payload):
+    """Create empty mod for Pattern A staging. Sister of mods.create in install namespace.
+
+    Used by S5a mo2_install: sidecar pre-stages files in staging dir, then this
+    handler creates the empty mod via IOrganizer.createMod. TS MCP layer moves
+    staged content + writes meta.ini after this returns.
+    """
+
+    name = payload.get("name")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+
+    sanitized = _sanitize_dir_name(name)
+    if not sanitized:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {
+                "code": ErrorCode.INVALID_PARAMS,
+                "message": f"name '{name}' empty after sanitize",
+            },
+        }
+
+    def _on_main_thread():
+        mod_list = organizer.modList()
+        if mod_list.getMod(sanitized) is not None:
+            return ("error", ErrorCode.INVALID_PARAMS, f"name '{sanitized}' already exists")
+        if GuessedString is None:
+            return ("error", ErrorCode.INTERNAL_ERROR, "mobase.GuessedString unavailable")
+        new_mod = organizer.createMod(GuessedString(sanitized))
+        if new_mod is None:
+            return ("error", ErrorCode.INTERNAL_ERROR, "createMod returned None")
+        return (
+            "ok",
+            {
+                "name": new_mod.name(),
+                "absolute_path": new_mod.absolutePath(),
+            },
+        )
+
+    try:
+        outcome = pump.invoke_blocking(_on_main_thread, timeout_s=15)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if outcome[0] == "error":
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": outcome[1], "message": outcome[2]},
+        }
+    return {"ok": True, "result": outcome[1], "error": None}
+
+
 def _handle_organizer_refresh(organizer, pump, payload):
     """Refresh MO2 internal state on the main thread."""
 
@@ -2663,6 +2726,11 @@ def build_command_handlers(
         request.get("payload", {}),
     )
     handlers[INSTALLATION_INSTALL_LOCAL_ARCHIVE_METHOD] = lambda request: _handle_installation_install_local_archive(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[INSTALLATION_CREATE_MOD_FROM_DIRECTORY_METHOD] = lambda request: _handle_installation_create_mod_from_directory(
         organizer,
         main_thread_pump,
         request.get("payload", {}),
