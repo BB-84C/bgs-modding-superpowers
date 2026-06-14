@@ -330,6 +330,7 @@ PLUGINS_SET_LOAD_ORDER_METHOD = "plugins.set_load_order"
 PROFILE_LIST_METHOD = "profile.list"
 PROFILE_ACTIVE_METHOD = "profile.active"
 PROFILE_INITIALIZE_METHOD = "profile.initialize"
+EXECUTABLES_LIST_METHOD = "executables.list"
 ORGANIZER_REFRESH_METHOD = "organizer.refresh"
 ORGANIZER_RESOLVE_PATH_METHOD = "organizer.resolve_path"
 ORGANIZER_GET_FILE_ORIGINS_METHOD = "organizer.get_file_origins"
@@ -1638,6 +1639,39 @@ def _handle_profile_initialize(organizer, pump, payload):
     return {"ok": True, "result": outcome[1], "error": None}
 
 
+def _handle_executables_list(organizer, payload):
+    """Background-safe: list MO2 customExecutables from ModOrganizer.ini."""
+
+    ini_path = Path(organizer.basePath()) / "ModOrganizer.ini"
+    if not ini_path.exists():
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INTERNAL_ERROR, "message": f"ModOrganizer.ini not found at {ini_path}"},
+        }
+
+    import sys as _sys
+
+    broker_dir = str(Path(__file__).parent)
+    if broker_dir not in _sys.path:
+        _sys.path.insert(0, broker_dir)
+    try:
+        from qt_ini import parse_custom_executables
+    except ImportError as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INTERNAL_ERROR, "message": f"qt_ini import: {exc}"},
+        }
+
+    entries = parse_custom_executables(ini_path)
+    return {
+        "ok": True,
+        "result": {"executables": entries, "count": len(entries)},
+        "error": None,
+    }
+
+
 def _handle_organizer_refresh(organizer, pump, payload):
     """Refresh MO2 internal state on the main thread."""
 
@@ -2558,6 +2592,10 @@ def build_command_handlers(
     handlers[PROFILE_INITIALIZE_METHOD] = lambda request: _handle_profile_initialize(
         organizer,
         main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[EXECUTABLES_LIST_METHOD] = lambda request: _handle_executables_list(
+        organizer,
         request.get("payload", {}),
     )
     handlers[ORGANIZER_REFRESH_METHOD] = lambda request: _handle_organizer_refresh(
