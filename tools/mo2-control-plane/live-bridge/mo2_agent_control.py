@@ -17,9 +17,11 @@ import os
 import queue
 import re as _re
 import subprocess
+import tempfile as _tempfile
 import threading
 import uuid
 from datetime import datetime, timezone
+from io import StringIO as _StringIO
 from pathlib import Path
 
 import mobase
@@ -319,6 +321,7 @@ MODS_RENAME_METHOD = "mods.rename"
 MODS_REMOVE_METHOD = "mods.remove"
 MODS_CREATE_METHOD = "mods.create"
 MODS_META_READ_METHOD = "mods.meta_read"
+MODS_META_WRITE_METHOD = "mods.meta_write"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1249,6 +1252,106 @@ def _handle_mods_meta_read(organizer, payload):
     }
 
 
+def _atomic_write_text_inline(path: Path, content: str) -> None:
+    """Inline atomic write for broker meta.ini updates (NTFS + POSIX safe)."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = _tempfile.mkstemp(
+        dir=str(path.parent),
+        prefix=".tmp-",
+        suffix=path.suffix,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file_obj:
+            file_obj.write(content)
+            file_obj.flush()
+            os.fsync(file_obj.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _handle_mods_meta_write(organizer, pump, payload):
+    """Write meta.ini fields atomically and notify MO2 on the main thread."""
+
+    name = payload.get("name")
+    updates = payload.get("updates")
+    if not isinstance(name, str):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
+        }
+    if not isinstance(updates, dict):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {
+                "code": ErrorCode.INVALID_PARAMS,
+                "message": "updates: dict[section, dict[key, value]]",
+            },
+        }
+
+    mod_list = organizer.modList()
+    mod = mod_list.getMod(name)
+    if mod is None:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MOD_NOT_FOUND, "message": name},
+        }
+
+    meta_path = Path(mod.absolutePath()) / "meta.ini"
+    parser = _configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    if meta_path.exists():
+        parser.read(meta_path, encoding="utf-8")
+
+    for section, fields in updates.items():
+        if not isinstance(fields, dict):
+            continue
+        section_name = str(section)
+        if not parser.has_section(section_name):
+            parser.add_section(section_name)
+        for key, value in fields.items():
+            parser.set(section_name, str(key), str(value))
+
+    buffer = _StringIO()
+    parser.write(buffer)
+    try:
+        _atomic_write_text_inline(meta_path, buffer.getvalue())
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INTERNAL_ERROR, "message": f"meta.ini write failed: {exc}"},
+        }
+
+    updated_sections = list(updates.keys())
+    try:
+        pump.invoke_blocking(lambda: organizer.modDataChanged(mod), timeout_s=5)
+    except Exception as exc:
+        return {
+            "ok": True,
+            "result": {
+                "name": name,
+                "updated_sections": updated_sections,
+                "notification_skipped": str(exc),
+            },
+            "error": None,
+        }
+
+    return {
+        "ok": True,
+        "result": {"name": name, "updated_sections": updated_sections},
+        "error": None,
+    }
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -1901,6 +2004,11 @@ def build_command_handlers(
     )
     handlers[MODS_META_READ_METHOD] = lambda request: _handle_mods_meta_read(
         organizer,
+        request.get("payload", {}),
+    )
+    handlers[MODS_META_WRITE_METHOD] = lambda request: _handle_mods_meta_write(
+        organizer,
+        main_thread_pump,
         request.get("payload", {}),
     )
     return handlers

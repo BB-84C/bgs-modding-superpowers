@@ -581,3 +581,127 @@ def test_mods_meta_read_not_found(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "mod_not_found"
+
+
+def test_mods_meta_write_creates_meta_ini(monkeypatch, tmp_path):
+    bridge = _load_bridge(monkeypatch)
+    import configparser
+
+    mod_dir = tmp_path / "ModA"
+    mod_dir.mkdir()
+    mod = MagicMock()
+    mod.absolutePath.return_value = str(mod_dir)
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = mod
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=5: fn()
+
+    result = bridge._handle_mods_meta_write(
+        organizer,
+        pump,
+        {"name": "ModA", "updates": {"General": {"version": "1.0.0", "notes": '"hello"'}}},
+    )
+
+    assert result["ok"] is True
+    assert result["result"]["name"] == "ModA"
+    assert "General" in result["result"]["updated_sections"]
+    organizer.modDataChanged.assert_called_once_with(mod)
+
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read(mod_dir / "meta.ini", encoding="utf-8")
+    assert parser["General"]["version"] == "1.0.0"
+
+
+def test_mods_meta_write_merges_existing(monkeypatch, tmp_path):
+    bridge = _load_bridge(monkeypatch)
+    import configparser
+
+    mod_dir = tmp_path / "ModA"
+    mod_dir.mkdir()
+    (mod_dir / "meta.ini").write_text(
+        "[General]\nversion=0.9\nold_key=keep_me\n[Nexus]\nnexusID=42\n",
+        encoding="utf-8",
+    )
+
+    mod = MagicMock()
+    mod.absolutePath.return_value = str(mod_dir)
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = mod
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=5: fn()
+
+    result = bridge._handle_mods_meta_write(
+        organizer,
+        pump,
+        {"name": "ModA", "updates": {"General": {"version": "2.0"}}},
+    )
+
+    assert result["ok"] is True
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read(mod_dir / "meta.ini", encoding="utf-8")
+    assert parser["General"]["version"] == "2.0"
+    assert parser["General"]["old_key"] == "keep_me"
+    assert parser["Nexus"]["nexusID"] == "42"
+
+
+def test_mods_meta_write_invalid_params(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    organizer = MagicMock()
+    pump = MagicMock()
+
+    result = bridge._handle_mods_meta_write(organizer, pump, {"name": "ModA"})
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_params"
+
+    result = bridge._handle_mods_meta_write(organizer, pump, {"name": "ModA", "updates": "not a dict"})
+    assert result["ok"] is False
+
+
+def test_mods_meta_write_mod_not_found(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = None
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+
+    result = bridge._handle_mods_meta_write(
+        organizer,
+        pump,
+        {"name": "NoSuch", "updates": {"General": {"x": "y"}}},
+    )
+    assert result["ok"] is False
+    assert result["error"]["code"] == "mod_not_found"
+
+
+def test_mods_meta_write_atomic_no_leftover_tmp(monkeypatch, tmp_path):
+    """Atomic write must clean up temp file after success."""
+
+    bridge = _load_bridge(monkeypatch)
+
+    mod_dir = tmp_path / "ModA"
+    mod_dir.mkdir()
+    mod = MagicMock()
+    mod.absolutePath.return_value = str(mod_dir)
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = mod
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=5: fn()
+
+    result = bridge._handle_mods_meta_write(
+        organizer,
+        pump,
+        {"name": "ModA", "updates": {"General": {"key": "value"}}},
+    )
+
+    assert result["ok"] is True
+    leftovers = list(mod_dir.glob(".tmp-*"))
+    assert leftovers == []
