@@ -335,6 +335,7 @@ ORGANIZER_GET_FILE_ORIGINS_METHOD = "organizer.get_file_origins"
 ORGANIZER_FIND_FILES_METHOD = "organizer.find_files"
 ORGANIZER_VIRTUAL_FILE_TREE_METHOD = "organizer.virtual_file_tree"
 ORGANIZER_START_APPLICATION_METHOD = "organizer.startApplication"
+ORGANIZER_WAIT_FOR_APPLICATION_METHOD = "organizer.waitForApplication"
 
 _INVALID_PATH_CHARS = _re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -1766,6 +1767,44 @@ def _handle_organizer_startApplication(organizer, pump, payload):
     return {"ok": True, "result": outcome[1], "error": None}
 
 
+def _handle_organizer_waitForApplication(organizer, pump, payload):
+    """Wait for a launched application handle; refresh on completion by default."""
+
+    handle = payload.get("handle")
+    refresh = payload.get("refresh", True)
+    if not isinstance(handle, int):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "handle: int"},
+        }
+    if not isinstance(refresh, bool):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "refresh: bool"},
+        }
+
+    def _main():
+        success, exit_code = organizer.waitForApplication(handle, refresh)
+        return {
+            "handle": handle,
+            "success": bool(success),
+            "exit_code": int(exit_code) if exit_code is not None else None,
+        }
+
+    try:
+        result = pump.invoke_blocking(_main, timeout_s=3600)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    return {"ok": True, "result": result, "error": None}
+
+
 def utc_now_timestamp() -> str:
     """Return a stable UTC timestamp string for registry entries."""
 
@@ -2474,6 +2513,11 @@ def build_command_handlers(
         request.get("payload", {}),
     )
     handlers[ORGANIZER_START_APPLICATION_METHOD] = lambda request: _handle_organizer_startApplication(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[ORGANIZER_WAIT_FOR_APPLICATION_METHOD] = lambda request: _handle_organizer_waitForApplication(
         organizer,
         main_thread_pump,
         request.get("payload", {}),

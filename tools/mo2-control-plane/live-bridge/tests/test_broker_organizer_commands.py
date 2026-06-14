@@ -202,3 +202,48 @@ def test_organizer_startApplication_invalid_params(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "invalid_params"
+
+
+def test_organizer_waitForApplication_success(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    organizer = MagicMock()
+    organizer.waitForApplication.return_value = (True, 0)
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=3600: fn()
+
+    result = bridge._handle_organizer_waitForApplication(organizer, pump, {"handle": 42, "refresh": True})
+
+    assert result["ok"] is True
+    readback = result["result"]
+    assert readback["handle"] == 42
+    assert readback["success"] is True
+    assert readback["exit_code"] == 0
+    organizer.waitForApplication.assert_called_once_with(42, True)
+
+
+def test_organizer_waitForApplication_default_refresh_true(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    organizer = MagicMock()
+    organizer.waitForApplication.return_value = (True, 0)
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=3600: fn()
+
+    result = bridge._handle_organizer_waitForApplication(organizer, pump, {"handle": 10})
+
+    assert result["ok"] is True
+    organizer.waitForApplication.assert_called_once_with(10, True)
+
+
+def test_organizer_waitForApplication_invalid_handle(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    result = bridge._handle_organizer_waitForApplication(
+        MagicMock(),
+        MagicMock(),
+        {"handle": "not int"},
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_params"
