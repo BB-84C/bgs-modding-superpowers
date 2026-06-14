@@ -67,3 +67,39 @@ def test_register_wires_four_methods(tmp_path):
     assert "assets.conflicts" in _METHODS
     assert "assets.resolve_file" in _METHODS
     assert "world.invalidate" in _METHODS
+
+
+# --- F-M2: assets reuses World.archive_order instead of re-discovering ---
+
+
+def test_build_entries_by_mod_reuses_world_archive_order(monkeypatch):
+    """F-M2: when w.archive_order is set, must NOT call discover_archives_for_plugins.
+
+    Sets a real (empty) ArchiveLoadOrder on the fake world; spies on the engine's
+    discover function via monkeypatch; asserts the spy is never invoked. This is
+    the perf-critical fast path on multi-hundred-mod profiles.
+    """
+    # Force the sidecar's sibling-dep shim to run so we can import the engine.
+    from mo2_mcp_sidecar import world as _w  # noqa: F401
+    from mo2_assets_engine import archive_order as ao_module
+
+    # Spy that fails the test if called.
+    spy_calls = {"count": 0}
+
+    def _spy_discover(*args, **kwargs):
+        spy_calls["count"] += 1
+        return ao_module.ArchiveLoadOrder()
+
+    monkeypatch.setattr(ao_module, "discover_archives_for_plugins", _spy_discover)
+
+    # Fake world with archive_order pre-populated (mirrors what WorldCache._build does)
+    fake_world = MagicMock(game="FALLOUT4", mods=[])
+    fake_world.archive_order = ao_module.ArchiveLoadOrder()  # non-None -> fast path
+
+    result = assets._build_entries_by_mod(fake_world)
+
+    assert result == {}, "empty mods list -> empty entries_by_mod"
+    assert spy_calls["count"] == 0, (
+        "F-M2 regression: discover_archives_for_plugins called despite "
+        "w.archive_order being non-None"
+    )

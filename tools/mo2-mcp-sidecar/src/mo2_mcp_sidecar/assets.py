@@ -37,33 +37,42 @@ def _world(profile_dir: str):
 
 
 def _build_entries_by_mod(w: Any) -> dict[str, list[Any]]:
-    """Enumerate files per mod using mo2_assets_engine (with archive order)."""
-    from mo2_assets_engine.archive_order import (  # type: ignore[import-not-found]
-        Game as EngineGame,
-        discover_archives_for_plugins,
-    )
+    """Enumerate files per mod using mo2_assets_engine (with archive order).
+
+    F-M2: reuse World.archive_order computed once by WorldCache._build() instead
+    of re-scanning the mods root and re-running discover_archives_for_plugins on
+    every assets.* call. The candidate-archive scan is O(mods x dir-entries) and
+    becomes painful on 800-mod profiles. The legacy fallback below only fires
+    for test fakes / pre-F-B7 cached worlds where archive_order is unset.
+    """
     from mo2_assets_engine.mod_enumerator import enumerate_mod_files  # type: ignore[import-not-found]
 
-    engine_game = EngineGame(_GAME_MAP.get(w.game, "fallout4"))
-    profile = w.profile
-    plugins = profile.enabled_plugins if hasattr(profile, "enabled_plugins") else []
-
-    # Discover attached archives from the mods root
-    candidate_archives: list[str] = []
-    mods_root = _cache.mods_root if _cache else Path(".")
-    for mod in (w.mods or []):
-        mod_path = mod.root if hasattr(mod, "root") else mods_root / str(mod)
-        if not mod_path.exists():
-            continue
-        for child in mod_path.iterdir():
-            if child.is_file() and child.suffix.lower() in (".bsa", ".ba2"):
-                candidate_archives.append(child.name.lower())
-
-    archive_order = discover_archives_for_plugins(
-        plugins=plugins,
-        candidate_archives=list(set(candidate_archives)),
-        game=engine_game,
-    )
+    archive_order = getattr(w, "archive_order", None)
+    if archive_order is None:
+        # Legacy fallback path: discover in place. Kept for backward compat with
+        # older cached worlds and any test fixture that constructs World without
+        # going through WorldCache._build().
+        from mo2_assets_engine.archive_order import (  # type: ignore[import-not-found]
+            Game as EngineGame,
+            discover_archives_for_plugins,
+        )
+        engine_game = EngineGame(_GAME_MAP.get(w.game, "fallout4"))
+        profile = w.profile
+        plugins = profile.enabled_plugins if hasattr(profile, "enabled_plugins") else []
+        candidate_archives: list[str] = []
+        mods_root = _cache.mods_root if _cache else Path(".")
+        for mod in (w.mods or []):
+            mod_path = mod.root if hasattr(mod, "root") else mods_root / str(mod)
+            if not mod_path.exists():
+                continue
+            for child in mod_path.iterdir():
+                if child.is_file() and child.suffix.lower() in (".bsa", ".ba2"):
+                    candidate_archives.append(child.name.lower())
+        archive_order = discover_archives_for_plugins(
+            plugins=plugins,
+            candidate_archives=list(set(candidate_archives)),
+            game=engine_game,
+        )
 
     entries_by_mod: dict[str, list[Any]] = {}
     for mod in w.mods or []:
