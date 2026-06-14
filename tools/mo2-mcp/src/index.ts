@@ -37,6 +37,7 @@ import { runRules, hasBlocking } from "./pipeline/rules.js";
 import { getAllRules } from "./pipeline/registry.js";
 import "./pipeline/rules/STOCK001-stock-game-deny.js"; // side-effect: register STOCK001
 import "./tools/mo2-status.js"; // side-effect: register mo2_status
+import "./tools/mo2-machine-contract.js"; // side-effect: register mo2_machine_contract
 import type { ToolContext } from "./types.js";
 
 const GAME_MAP: Record<string, SidecarGame> = {
