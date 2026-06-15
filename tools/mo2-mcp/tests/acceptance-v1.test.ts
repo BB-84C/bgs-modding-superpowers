@@ -420,10 +420,10 @@ describe.skipIf(process.env.MO2_MCP_ACCEPTANCE !== "1")("v1 acceptance", () => {
       const beforeModlist = await readFile(modlistPath, "utf8");
       const rel = "textures/acceptance/at19.dds";
       try {
-        await mkdir(join(HARNESS_MO2_ROOT, "mods", high, "Data", "textures", "acceptance"), { recursive: true });
-        await mkdir(join(HARNESS_MO2_ROOT, "mods", low, "Data", "textures", "acceptance"), { recursive: true });
-        await writeFile(join(HARNESS_MO2_ROOT, "mods", high, "Data", rel), "high", "utf8");
-        await writeFile(join(HARNESS_MO2_ROOT, "mods", low, "Data", rel), "low", "utf8");
+        await mkdir(join(HARNESS_MO2_ROOT, "mods", high, "textures", "acceptance"), { recursive: true });
+        await mkdir(join(HARNESS_MO2_ROOT, "mods", low, "textures", "acceptance"), { recursive: true });
+        await writeFile(join(HARNESS_MO2_ROOT, "mods", high, rel), "high", "utf8");
+        await writeFile(join(HARNESS_MO2_ROOT, "mods", low, rel), "low", "utf8");
         await writeFile(modlistPath, `+${high}\n+${low}\n${beforeModlist}`, "utf8");
         const original = await mcp.call("mo2_assets_resolve", { profile: HARNESS_PROFILE, virtual_path: rel });
         expectOk(original);
