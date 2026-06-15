@@ -9,6 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
+import { readMoIni } from "../src/mo-ini.js";
 
 const PROJECT_ROOT = process.env.BGS_MO2_ACCEPTANCE_PROJECT_ROOT ?? String.raw`D:\awesome-bgs-mod-master`;
 const REAL_MO2_ROOT = process.env.BGS_MO2_ROOT ?? String.raw`B:\WastelandBlues 2.0`;
@@ -19,8 +20,8 @@ const ARTIFACTS = join(PROJECT_ROOT, ".opencode", "artifacts", "mo2-mcp", "accep
 const MCP_CWD = process.cwd();
 
 const ACCEPTANCE_MOD = process.env.BGS_MO2_ACCEPTANCE_MOD ?? "LODGen 覆盖素材";
-const ACCEPTANCE_SEPARATOR = process.env.BGS_MO2_ACCEPTANCE_SEPARATOR ?? "Separator_separator";
-const ALT_PROFILE = process.env.BGS_MO2_ACCEPTANCE_ALT_PROFILE ?? "Default";
+const ACCEPTANCE_SEPARATOR = process.env.BGS_MO2_ACCEPTANCE_SEPARATOR;
+const ALT_PROFILE = process.env.BGS_MO2_ACCEPTANCE_ALT_PROFILE;
 const FOMOD_ARCHIVE = process.env.BGS_MO2_ACCEPTANCE_FOMOD_ARCHIVE ?? join(ARTIFACTS, "fixtures", "test-fomod.7z");
 const SIMPLE_ARCHIVE = process.env.BGS_MO2_ACCEPTANCE_SIMPLE_ARCHIVE ?? join(ARTIFACTS, "fixtures", "test-simple.7z");
 const OVERRIDDEN_FILE = process.env.BGS_MO2_ACCEPTANCE_OVERRIDDEN_FILE ?? "textures/acceptance/winner.dds";
@@ -128,11 +129,14 @@ describe.skipIf(process.env.MO2_MCP_ACCEPTANCE !== "1")("v1 acceptance", () => {
     });
   }, 60_000);
 
-  it("AT5: STOCK001 hard-denies Stock Game Data path mutation", async () => {
+  it("AT5: STOCK001 hard-denies gamePath-derived Data path mutation", async () => {
     await withMcp(harnessEnv(), async (mcp) => {
+      const ini = await readMoIni(join(HARNESS_MO2_ROOT, "ModOrganizer.ini"));
+      expect(ini.general.gamePath, "ModOrganizer.ini [General] gamePath is required for AT5").toBeTruthy();
+      const gameDataPath = `${ini.general.gamePath!.replace(/[\\/]+$/g, "")}\\Data\\Fallout4.esm`;
       const response = await mcp.call("mo2_set_file_hidden", {
         mode: "plan",
-        virtual_path: String.raw`Stock Game\Data\Fallout4.esm`,
+        virtual_path: gameDataPath,
         hidden: true,
       });
       expect(response.ok).toBe(false);
@@ -168,9 +172,9 @@ describe.skipIf(process.env.MO2_MCP_ACCEPTANCE !== "1")("v1 acceptance", () => {
     });
   }, 120_000);
 
-  it("AT7: mo2_switch_profile cold-restarts to alternate profile and back", async () => {
+  it.skipIf(!ALT_PROFILE)("AT7: mo2_switch_profile cold-restarts to alternate profile and back (requires BGS_MO2_ACCEPTANCE_ALT_PROFILE)", async () => {
     await withMcp(realEnv(), async (mcp) => {
-      const toAlt = await planApply(mcp, "mo2_switch_profile", { new_profile: ALT_PROFILE });
+      const toAlt = await planApply(mcp, "mo2_switch_profile", { new_profile: ALT_PROFILE! });
       expectOk(toAlt.apply);
       const statusAlt = await mcp.call("mo2_status", {});
       const back = await planApply(mcp, "mo2_switch_profile", { new_profile: REAL_PROFILE });
@@ -293,13 +297,13 @@ describe.skipIf(process.env.MO2_MCP_ACCEPTANCE !== "1")("v1 acceptance", () => {
     }
   }, 90_000);
 
-  it("AT13: mo2_send_mod_to covers all six implemented target modes", async () => {
+  it.skipIf(!ACCEPTANCE_SEPARATOR)("AT13: mo2_send_mod_to covers all six implemented target modes (requires BGS_MO2_ACCEPTANCE_SEPARATOR)", async () => {
     await withMcp(realEnv(), async (mcp) => {
       const cases = [
         { target_mode: "top" },
         { target_mode: "bottom" },
         { target_mode: "priority", target_priority: 10 },
-        { target_mode: "above_separator", target_separator: ACCEPTANCE_SEPARATOR },
+        { target_mode: "above_separator", target_separator: ACCEPTANCE_SEPARATOR! },
         { target_mode: "above_first_conflict" },
         { target_mode: "below_last_conflict" },
       ];
@@ -313,7 +317,7 @@ describe.skipIf(process.env.MO2_MCP_ACCEPTANCE !== "1")("v1 acceptance", () => {
     });
   }, 240_000);
 
-  it("AT14: mo2_assets_resolve winner matches manual MO2 GUI cross-check", async () => {
+  it.skipIf(!EXPECTED_WINNER)("AT14: mo2_assets_resolve winner matches manual MO2 GUI cross-check (requires BGS_MO2_ACCEPTANCE_EXPECTED_WINNER)", async () => {
     // Manual assertion recorded for the selected file: the expected winner must
     // be set by the operator after checking MO2's Conflicts/Data view.
     await withMcp(realEnv(), async (mcp) => {
