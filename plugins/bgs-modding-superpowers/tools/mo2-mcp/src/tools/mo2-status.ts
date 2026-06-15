@@ -42,6 +42,7 @@ registerTool({
         game_path: ini.general.gamePath,
         profile: profile?.name ?? profileName,
         permission_ceiling: ctx.config.permissionCeiling,
+        deny_patterns: ctx.config.deny.length,
         detection: {
           process_running: detection.processRunning,
           shared_memory_present: detection.sharedMemoryPresent,
