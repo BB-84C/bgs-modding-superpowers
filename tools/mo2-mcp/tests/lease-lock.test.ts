@@ -148,4 +148,31 @@ describe("lease-lock", () => {
     const raw = await readFile(lockPath, "utf8");
     expect(JSON.parse(raw).plan_id).toBe("plan-b");
   });
+
+  it("retries partial JSON readback before deciding the lock is stale", async () => {
+    const root = await tempMo2Root();
+    const lockPath = leaseLockPath(root, "hash1");
+    await mkdir(join(root, ".mo2-mcp", "leases"), { recursive: true });
+    await writeFile(lockPath, '{"plan_id": "plan-a', { flag: "wx" });
+    const fullLock = metadata({ plan_id: "plan-a", mcp_session_id: "writer-session" });
+    setTimeout(() => {
+      void writeFile(lockPath, `${JSON.stringify(fullLock, null, 2)}\n`, "utf8");
+    }, 25);
+
+    const second = await acquireLeaseLock(
+      root,
+      "hash1",
+      metadata({ plan_id: "plan-b", mcp_session_id: "second-session" }),
+    );
+
+    expect(second.acquired).toBe(false);
+    if (!second.acquired) {
+      expect(second.holder).toMatchObject({
+        mcp_pid: process.pid,
+        tool_name: "mo2_toggle_mod",
+      });
+    }
+    const raw = await readFile(lockPath, "utf8");
+    expect(JSON.parse(raw).plan_id).toBe("plan-a");
+  });
 });

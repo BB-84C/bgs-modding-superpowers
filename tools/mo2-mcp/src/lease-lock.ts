@@ -80,13 +80,26 @@ function holderFrom(metadata: LeaseLockMetadata): LeaseLockHolder {
   };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function readExistingLock(path: string): Promise<LeaseLockMetadata | null> {
-  try {
-    return parseLock(await readFile(path, "utf8"));
-  } catch (error) {
-    if (isEnoent(error)) return null;
-    throw error;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const parsed = parseLock(await readFile(path, "utf8"));
+      if (parsed) return parsed;
+      if (attempt < 3) {
+        await sleep(100);
+        continue;
+      }
+      return null;
+    } catch (error) {
+      if (isEnoent(error)) return null;
+      throw error;
+    }
   }
+  return null;
 }
 
 async function removeLockIfPresent(path: string): Promise<void> {
