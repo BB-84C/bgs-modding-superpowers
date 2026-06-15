@@ -12,12 +12,7 @@ import { walkStringArgs } from "../arg-walk.js";
 import type { Rule } from "../../types.js";
 
 const DENY_PATTERNS = [
-  /Stock Game[/\\]Fallout 4[/\\]Data[/\\]/i,
-  /Stock Game[/\\]Skyrim Special Edition[/\\]Data[/\\]/i,
-  /Stock Game[/\\]Starfield[/\\]Data[/\\]/i,
-  /Stock Game[/\\]Fallout New Vegas[/\\]Data[/\\]/i,
-  /Stock Game[/\\][^/\\]+[/\\]Data[/\\]/i,
-  /Stock Game[/\\]Data[/\\]/i,
+  /Stock Game[/\\](?:[^/\\]+[/\\])?Data(?:[/\\]|$)/i,
 ];
 
 export const stockGameDenyRule: Rule = {
