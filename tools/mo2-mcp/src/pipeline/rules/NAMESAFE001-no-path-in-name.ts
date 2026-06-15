@@ -22,7 +22,7 @@ export const nameSafetyDenyRule: Rule = {
   id: "NAMESAFE001",
   severity: "CRITICAL",
   appliesTo: () => true,
-  evaluate: async (_ctx, args) => {
+  evaluate: async (_ctx, args, _toolName) => {
     for (const arg of walkStringArgs(args)) {
       if (NAME_KEY_PATTERN.test(arg.key) && hasUnsafeNameShape(arg.value)) {
         return {

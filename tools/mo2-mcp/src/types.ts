@@ -17,6 +17,9 @@ export interface RuleFinding {
   decision: RuleDecision;
   message: string;
   data?: unknown;
+  tier?: "T1" | "T2" | "T3";
+  required_ceiling?: Config["permissionCeiling"];
+  configured_ceiling?: Config["permissionCeiling"];
 }
 
 export interface ToolContext {
@@ -33,5 +36,5 @@ export interface Rule {
   id: string;
   severity: Severity;
   appliesTo: (toolName: string) => boolean;
-  evaluate: (ctx: ToolContext, args: Record<string, unknown>) => Promise<RuleFinding | null>;
+  evaluate: (ctx: ToolContext, args: Record<string, unknown>, toolName: string) => Promise<RuleFinding | null>;
 }

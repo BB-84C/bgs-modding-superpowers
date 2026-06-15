@@ -24,7 +24,7 @@ export const stockGameDenyRule: Rule = {
   id: "STOCK001",
   severity: "CRITICAL",
   appliesTo: () => true,
-  evaluate: async (_ctx, args) => {
+  evaluate: async (_ctx, args, _toolName) => {
     for (const arg of walkStringArgs(args)) {
       if (DENY_PATTERNS.some((pattern) => pattern.test(arg.value))) {
         return {

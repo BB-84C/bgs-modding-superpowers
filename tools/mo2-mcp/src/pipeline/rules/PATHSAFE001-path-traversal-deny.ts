@@ -16,7 +16,7 @@ export const pathTraversalDenyRule: Rule = {
   id: "PATHSAFE001",
   severity: "CRITICAL",
   appliesTo: () => true,
-  evaluate: async (_ctx, args) => {
+  evaluate: async (_ctx, args, _toolName) => {
     for (const arg of walkStringArgs(args)) {
       if (arg.value.includes("\0") || hasParentSegment(arg.value)) {
         return {
