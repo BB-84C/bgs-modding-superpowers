@@ -427,15 +427,15 @@ describe.skipIf(process.env.MO2_MCP_ACCEPTANCE !== "1")("v1 acceptance", () => {
         await writeFile(modlistPath, `+${high}\n+${low}\n${beforeModlist}`, "utf8");
         const original = await mcp.call("mo2_assets_resolve", { profile: HARNESS_PROFILE, virtual_path: rel });
         expectOk(original);
-        expect(original.result.winner).toBe(high);
+        expect(original.result.winner?.owner_mod).toBe(high);
         const hide = await planApply(mcp, "mo2_set_file_hidden", { virtual_path: rel, hidden: true });
         const hidden = await mcp.call("mo2_assets_resolve", { profile: HARNESS_PROFILE, virtual_path: rel });
         expectOk(hidden);
-        expect(hidden.result.winner).toBe(low);
+        expect(hidden.result.winner?.owner_mod).toBe(low);
         const unhide = await planApply(mcp, "mo2_set_file_hidden", { virtual_path: `${rel}.mohidden`, hidden: false });
         const restored = await mcp.call("mo2_assets_resolve", { profile: HARNESS_PROFILE, virtual_path: rel });
         expectOk(restored);
-        expect(restored.result.winner).toBe(high);
+        expect(restored.result.winner?.owner_mod).toBe(high);
         await writeEvidence("AT19-file-hidden-roundtrip", { original, hide, hidden, unhide, restored });
       } finally {
         await writeFile(modlistPath, beforeModlist, "utf8");

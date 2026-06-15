@@ -13,6 +13,12 @@
  */
 import { readFile } from "node:fs/promises";
 const BOOL_KEYS = new Set(["ownicon", "hide", "toolbar", "minimizeToSystemTray"]);
+function decodeIniValue(value) {
+    const byteArray = value.match(/^@ByteArray\((.*)\)$/);
+    if (!byteArray)
+        return value;
+    return byteArray[1].replace(/\\\\/g, "\\");
+}
 export async function readMoIni(path) {
     const raw = await readFile(path, "utf8");
     const lines = raw.split(/\r?\n/);
@@ -40,7 +46,7 @@ export async function readMoIni(path) {
         for (const line of sectionLines.get(sectionName) ?? []) {
             const eq = line.indexOf("=");
             if (eq > 0)
-                result[line.slice(0, eq).trim()] = line.slice(eq + 1);
+                result[line.slice(0, eq).trim()] = decodeIniValue(line.slice(eq + 1));
         }
         return result;
     };

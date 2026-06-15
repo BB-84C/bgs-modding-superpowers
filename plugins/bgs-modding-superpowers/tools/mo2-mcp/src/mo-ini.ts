@@ -48,6 +48,12 @@ export interface MoIni {
 
 const BOOL_KEYS = new Set(["ownicon", "hide", "toolbar", "minimizeToSystemTray"]);
 
+function decodeIniValue(value: string): string {
+  const byteArray = value.match(/^@ByteArray\((.*)\)$/);
+  if (!byteArray) return value;
+  return byteArray[1].replace(/\\\\/g, "\\");
+}
+
 export async function readMoIni(path: string): Promise<MoIni> {
   const raw = await readFile(path, "utf8");
   const lines = raw.split(/\r?\n/);
@@ -74,7 +80,7 @@ export async function readMoIni(path: string): Promise<MoIni> {
     const result: Record<string, string> = {};
     for (const line of sectionLines.get(sectionName) ?? []) {
       const eq = line.indexOf("=");
-      if (eq > 0) result[line.slice(0, eq).trim()] = line.slice(eq + 1);
+      if (eq > 0) result[line.slice(0, eq).trim()] = decodeIniValue(line.slice(eq + 1));
     }
     return result;
   };
