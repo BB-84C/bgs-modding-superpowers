@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MO2 control-plane broker protocol",
+  "description": "Canonical envelope schema shared between mo2_agent_control.py (Python broker inside MO2) and the TypeScript MCP server (pipe client).",
+  "definitions": {
+    "request": {
+      "type": "object",
+      "required": ["protocol_version", "request_id", "method", "payload"],
+      "properties": {
+        "protocol_version": {"const": "1"},
+        "request_id": {"type": "string", "minLength": 1},
+        "session_id": {"type": "string"},
+        "method": {"type": "string", "pattern": "^[a-z]+(\\.[a-z_]+)+$"},
+        "payload": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": ["protocol_version", "request_id", "ok"],
+      "properties": {
+        "protocol_version": {"const": "1"},
+        "request_id": {"type": "string", "minLength": 1},
+        "ok": {"type": "boolean"},
+        "result": {"type": ["object", "null"]},
+        "error": {
+          "type": ["object", "null"],
+          "required": ["code", "message"],
+          "properties": {
+            "code": {"$ref": "#/definitions/errorCode"},
+            "message": {"type": "string"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "errorCode": {
+      "enum": [
+        "invalid_request",
+        "method_not_found",
+        "invalid_params",
+        "transport_error",
+        "not_implemented",
+        "internal_error",
+        "mod_not_found",
+        "priority_out_of_range",
+        "plugin_not_found",
+        "refresh_timeout",
+        "main_thread_unavailable",
+        "mo2_shutting_down"
+      ]
+    }
+  }
+}

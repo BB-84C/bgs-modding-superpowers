@@ -67,3 +67,7 @@ AGENTS.md
 # materialized plugin tree, for the same reason.
 /plugins/bgs-modding-superpowers/tools/bgs-translator/build/
 /plugins/bgs-modding-superpowers/tools/bgs-translator/dist/
+
+# Superpowers skill auto-injected docs (not committed)
+docs/superpowers/
+

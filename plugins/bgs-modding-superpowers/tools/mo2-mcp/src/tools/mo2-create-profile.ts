@@ -1,0 +1,101 @@
+/**
+ * mo2_create_profile — T3 create profile with online initialize when available.
+ *
+ * Online path calls broker profile.initialize, which wraps
+ * IPluginGame.initializeProfile. Offline fallback creates the profile directory
+ * and minimal profile text files but cannot synthesize game INI defaults.
+ */
+import { z } from "zod";
+import { existsSync } from "node:fs";
+import { mkdir, writeFile, copyFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
+import { registerTool } from "../tool-registry.js";
+import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
+
+const ProfileSettingSchema = z.enum(["MODS", "SAVEGAMES", "CONFIGURATION", "PREFER_DEFAULTS"]);
+
+const inputSchema = z.discriminatedUnion("mode", [
+  z.object({
+    mode: z.literal("plan"),
+    name: z.string(),
+    from_profile: z.string().optional(),
+    settings: z.array(ProfileSettingSchema).optional(),
+  }),
+  z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+]);
+
+async function _copyProfileTextAndIni(profilesRoot: string, fromProfile: string, newDir: string): Promise<void> {
+  const srcDir = join(profilesRoot, fromProfile);
+  const files = await readdir(srcDir).catch(() => [] as string[]);
+  for (const file of files) {
+    if (!file.endsWith(".txt") && !file.endsWith(".ini")) continue;
+    try {
+      await copyFile(join(srcDir, file), join(newDir, file));
+    } catch {
+      // Best-effort clone: tolerate profile-specific files being locked/missing.
+    }
+  }
+}
+
+const handler: PlanApplyHandler = {
+  toolName: "mo2_create_profile",
+  async buildPlan(args, ctx) {
+    const name = args.name as string;
+    const profilesRoot = join(ctx.config.mo2Root, "profiles");
+    const newDir = join(profilesRoot, name);
+    if (existsSync(newDir)) throw new Error(`profile_exists: ${name}`);
+    const path = ctx.pipeClient ? "online" : "offline";
+    return {
+      diff: `Create profile ${name} via ${path} path${args.from_profile ? `, clone modlist from ${String(args.from_profile)}` : ""}`,
+      affectedFiles: [newDir],
+      targets: [],
+    };
+  },
+  async applyMutation(plan, ctx) {
+    const name = plan.args.name as string;
+    const profilesRoot = join(ctx.config.mo2Root, "profiles");
+    const newDir = join(profilesRoot, name);
+    await mkdir(newDir, { recursive: true });
+    await writeFile(join(newDir, "modlist.txt"), "", "utf8");
+    await writeFile(join(newDir, "archives.txt"), "", "utf8");
+
+    let source: "online_initialized" | "online_init_failed_offline_fallback" | "offline_created" = ctx.pipeClient
+      ? "online_initialized"
+      : "offline_created";
+    let warning: string | undefined;
+
+    if (ctx.pipeClient) {
+      try {
+        const resp = await ctx.pipeClient.call("profile.initialize", {
+          profile_dir: newDir,
+          settings: plan.args.settings ?? ["MODS", "CONFIGURATION"],
+        }) as { ok: boolean; error?: { message?: string } | null };
+        if (!resp.ok) throw new Error(resp.error?.message ?? "profile.initialize failed");
+      } catch (e) {
+        source = "online_init_failed_offline_fallback";
+        warning = e instanceof Error ? e.message : String(e);
+      }
+    }
+
+    if (typeof plan.args.from_profile === "string") {
+      await _copyProfileTextAndIni(profilesRoot, plan.args.from_profile, newDir);
+    }
+
+    return {
+      profile_name: name,
+      path: newDir,
+      source,
+      ...(warning ? { warning } : {}),
+    };
+  },
+};
+
+registerTool({
+  name: "mo2_create_profile",
+  tier: "T3",
+  description:
+    "Create a new profile. Online: broker calls IPluginGame.initializeProfile. Offline: filesystem-only create (no game INI defaults). Optional from_profile clones modlist+plugins from existing profile.",
+  inputSchema,
+  handler: (args, ctx) =>
+    routeToPlanApply(handler, args, ctx, ctx.plans, ctx.snapshots) as Promise<unknown>,
+});

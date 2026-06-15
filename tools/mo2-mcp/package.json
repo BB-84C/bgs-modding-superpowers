@@ -1,0 +1,22 @@
+{
+  "name": "mo2-mcp",
+  "version": "0.1.0",
+  "description": "Unified MO2 MCP server",
+  "type": "module",
+  "bin": { "mo2-mcp": "./dist/index.js" },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src tests --ext .ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.6.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "@types/node": "^22.0.0"
+  }
+}

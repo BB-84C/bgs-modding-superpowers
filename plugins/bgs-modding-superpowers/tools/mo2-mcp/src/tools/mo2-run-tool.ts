@@ -1,0 +1,122 @@
+/**
+ * mo2_run_tool — T3 run a configured MO2 executable via VFS.
+ *
+ * Live path uses the broker's organizer.start_application and optional
+ * organizer.wait_for_application calls. Offline fallback launches MO2's CLI
+ * entrypoint with `run -e <title>` so the executable still runs through the
+ * configured profile/VFS surface.
+ */
+import { spawn } from "node:child_process";
+import { z } from "zod";
+import { join } from "node:path";
+import { registerTool } from "../tool-registry.js";
+import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
+import { readMoIni } from "../mo-ini.js";
+
+const inputSchema = z.discriminatedUnion("mode", [
+  z.object({
+    mode: z.literal("plan"),
+    title: z.string(),
+    wait: z.boolean().default(false),
+    profile: z.string().default("Default"),
+  }),
+  z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+]);
+
+interface StartApplicationResult {
+  handle?: unknown;
+}
+
+interface WaitApplicationResult {
+  exit_code?: unknown;
+  success?: unknown;
+}
+
+function _configuredTitles(titles: string[]): string {
+  return titles.length > 0 ? titles.join(", ") : "<none>";
+}
+
+function _numberHandle(result: unknown): number {
+  const handle = (result as StartApplicationResult | undefined)?.handle;
+  if (typeof handle !== "number") {
+    throw new Error("start_application_missing_handle");
+  }
+  return handle;
+}
+
+const handler: PlanApplyHandler = {
+  toolName: "mo2_run_tool",
+  async buildPlan(args, ctx) {
+    const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
+    const exe = ini.customExecutables.find((entry) => entry.title === args.title);
+    if (!exe) {
+      throw new Error(
+        `executable_not_found: ${String(args.title)} (configured: ${_configuredTitles(
+          ini.customExecutables.map((entry) => entry.title),
+        )})`,
+      );
+    }
+    return {
+      diff: `Run ${exe.binary} ${exe.arguments ?? ""} via MO2 VFS (wait=${String(args.wait ?? false)})`,
+      affectedFiles: [],
+      targets: [],
+    };
+  },
+  async applyMutation(plan, ctx) {
+    const args = plan.args;
+    const title = args.title as string;
+    const wait = (args.wait as boolean | undefined) ?? false;
+    const profile = (args.profile as string | undefined) ?? "Default";
+
+    if (ctx.pipeClient) {
+      const started = await ctx.pipeClient.call("organizer.start_application", {
+        executable: title,
+        args: [],
+        cwd: "",
+        profile,
+        forcedCustomOverwrite: "",
+        ignoreCustomOverwrite: false,
+      });
+      if (!started.ok) throw new Error(started.error?.message ?? "broker error");
+      const handle = _numberHandle(started.result);
+      if (wait) {
+        const waited = await ctx.pipeClient.call("organizer.wait_for_application", {
+          handle,
+          refresh: true,
+        });
+        if (!waited.ok) throw new Error(waited.error?.message ?? "broker error");
+        const waitResult = waited.result as WaitApplicationResult | undefined;
+        return {
+          handle,
+          exit_code: typeof waitResult?.exit_code === "number" ? waitResult.exit_code : null,
+          success: waitResult?.success === true,
+        };
+      }
+      return { handle, waiting: false };
+    }
+
+    const child = spawn(
+      join(ctx.config.mo2Root, "ModOrganizer.exe"),
+      ["-p", profile, "run", "-e", title],
+      { detached: !wait, stdio: "ignore" },
+    );
+    if (!wait) {
+      child.unref();
+      return { pid: child.pid, waiting: false, source: "offline_cli" };
+    }
+    const exitCode = await new Promise<number>((resolve) => {
+      child.on("exit", (code) => resolve(code ?? -1));
+    });
+    return { exit_code: exitCode, source: "offline_cli" };
+  },
+};
+
+registerTool({
+  name: "mo2_run_tool",
+  tier: "T3",
+  description:
+    "Run a configured customExecutable via MO2 VFS. Live: organizer.start_application. Offline: ModOrganizer run -e.",
+  inputSchema,
+  handler: (args, ctx) =>
+    routeToPlanApply(handler, args, ctx, ctx.plans, ctx.snapshots) as Promise<unknown>,
+});

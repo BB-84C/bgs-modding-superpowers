@@ -282,6 +282,7 @@ Copy-Tree -From "skills" -To "skills"
 #       already ship dist/ pre-built, so strip build/test scripts + dev deps.
 Copy-McpPackage -PackageName "xedit-mcp"
 Copy-McpPackage -PackageName "bgs-kb-mcp"
+Copy-McpPackage -PackageName "mo2-mcp"
 
 # ---- 5. tools/xedit-hook-bridge (dist DLL only) ----------------------------
 Copy-Tree -From "tools/xedit-hook-bridge/dist" -To "tools/xedit-hook-bridge/dist"
@@ -357,6 +358,32 @@ if ($LASTEXITCODE -gt 7) {
 # Reset $LASTEXITCODE so downstream cmdlets see a clean state.
 $global:LASTEXITCODE = 0
 
+# ---- 6d. tools/mo2-mcp-sidecar (Python JSON-RPC sidecar) -------------------
+# Bundled so the mo2-mcp TypeScript server can launch the sidecar from the
+# materialized plugin tree. Use robocopy with /XD for Python dev caches.
+$mo2SidecarSrc = Join-Path $RepoRoot "tools/mo2-mcp-sidecar"
+$mo2SidecarDst = Join-Path $PluginRoot "tools/mo2-mcp-sidecar"
+if (-not (Test-Path -LiteralPath $mo2SidecarSrc)) {
+  throw "Source not found: tools/mo2-mcp-sidecar"
+}
+New-Item -ItemType Directory -Path $mo2SidecarDst -Force | Out-Null
+$robocopyArgs = @(
+  $mo2SidecarSrc,
+  $mo2SidecarDst,
+  "/E",
+  "/XD", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+  "/XD", "*.egg-info", "build", "dist",
+  "/XD", ".venv",
+  "/NFL", "/NDL", "/NJH", "/NJS", "/NP"
+)
+& robocopy @robocopyArgs | Out-Null
+# robocopy exit codes 0-7 are success variants; 8+ are real errors.
+if ($LASTEXITCODE -gt 7) {
+  throw "robocopy failed copying tools/mo2-mcp-sidecar (exit $LASTEXITCODE)"
+}
+# Reset $LASTEXITCODE so downstream cmdlets see a clean state.
+$global:LASTEXITCODE = 0
+
 # ---- 7. Bundled knowledge-base core pack -----------------------------------
 # Large per-game and localization packs ship as KB Release artifacts. Keep the
 # portable plugin small and deterministic; first-run/maintenance can install
@@ -400,13 +427,15 @@ function Resolve-McpEntryPath {
   }
 }
 
-if (-not $mcp.mcpServers -or -not $mcp.mcpServers.xedit -or -not $mcp.mcpServers.bgs_kb) {
-  throw "Materialized .mcp.json is missing mcpServers.xedit or mcpServers.bgs_kb. The source .mcp.json shape changed; update this script."
+if (-not $mcp.mcpServers -or -not $mcp.mcpServers.xedit -or -not $mcp.mcpServers.bgs_kb -or -not $mcp.mcpServers.mo2) {
+  throw "Materialized .mcp.json is missing mcpServers.xedit, mcpServers.bgs_kb, or mcpServers.mo2. The source .mcp.json shape changed; update this script."
 }
 $xeditMcpPath = Resolve-McpEntryPath -EntryRel "tools/xedit-mcp/dist/index.js"
 $bgsKbMcpPath = Resolve-McpEntryPath -EntryRel "tools/bgs-kb-mcp/dist/index.js"
+$mo2McpPath = Resolve-McpEntryPath -EntryRel "tools/mo2-mcp/dist/index.js"
 $mcp.mcpServers.xedit.args = @($xeditMcpPath)
 $mcp.mcpServers.bgs_kb.args = @($bgsKbMcpPath)
+$mcp.mcpServers.mo2.args = @($mo2McpPath)
 
 # Pretty-print without BOM, LF line endings.
 $mcpOut = ($mcp | ConvertTo-Json -Depth 10).Replace("`r`n", "`n")
