@@ -111,6 +111,7 @@ export interface PlanModeOk {
   ok: true;
   result: {
     mode: "plan";
+    plan_id: string;
     planId: string;
     lease_token: string;
     diff: string;
@@ -213,6 +214,7 @@ export async function runPlanMode(
     ok: true,
     result: {
       mode: "plan",
+      plan_id: rec.planId,
       planId: rec.planId,
       lease_token: lease.token,
       diff: built.diff,

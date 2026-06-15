@@ -99,7 +99,7 @@ export async function dispatchToolCall({
     const result = await tool.handler(validatedArgs, ctx);
     const mode = validatedArgs.mode as "plan" | "apply" | undefined;
     const resultObj = result as
-      | { ok?: boolean; result?: { planId?: string; snapshot_id?: string } }
+      | { ok?: boolean; result?: { plan_id?: string; snapshot_id?: string } }
       | undefined;
     await ctx.audit.log({
       ts: new Date().toISOString(),
@@ -116,7 +116,7 @@ export async function dispatchToolCall({
               ? "applied"
               : "ok",
       durationMs: Date.now() - t0,
-      planId: resultObj?.result?.planId,
+      plan_id: resultObj?.result?.plan_id,
       snapshotId: resultObj?.result?.snapshot_id,
     });
     return { content: [jsonText(result)] };
