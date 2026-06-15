@@ -2,19 +2,20 @@
  * Snapshot manager — saves files before T2/T3 mutations, restores on rollback.
  *
  * Layout: <snapshotRoot>/<sessionId>/<ts>-<tool>/
- *   manifest.json  <- { snapshotId, tool, ts, files: [{source, backup}] }
+ *   manifest.json  <- { snapshotId, tool, ts, files: [{source, kind, backup}] }
  *   <flattened source path>
  *
  * Per oracle §3.4 + §3.2: snapshot before write, restore by snapshotId UUID.
  * Source path flattening: replace path separators with _ to make a flat
  * filename inside the snapshot dir; manifest carries the original path.
  */
-import { cp, mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 export interface SnapshotFile {
   source: string;
+  kind: "file" | "directory" | "absent";
   backup: string;
 }
 
@@ -32,9 +33,9 @@ export class SnapshotManager {
   ) {}
 
   /**
-   * Snapshot a set of source files into a new dir under the session.
-   * Returns the SnapshotRecord with snapshotId; files that don't exist
-   * yet are skipped (recorded with empty backup path).
+   * Snapshot a set of source files/directories into a new dir under the session.
+   * Returns the SnapshotRecord with snapshotId; sources that do not exist yet
+   * are recorded as absent so restore can remove newly-created paths.
    */
   async snapshot(tool: string, sourceFiles: string[]): Promise<SnapshotRecord> {
     const snapshotId = randomUUID();
@@ -46,10 +47,15 @@ export class SnapshotManager {
     for (const source of sourceFiles) {
       const backup = join(dir, flattenPath(source));
       try {
+        const sourceStat = await stat(source);
         await cp(source, backup, { recursive: true });
-        files.push({ source, backup });
-      } catch {
-        files.push({ source, backup: "" });
+        files.push({ source, kind: sourceStat.isDirectory() ? "directory" : "file", backup });
+      } catch (e) {
+        if (isNotFoundError(e)) {
+          files.push({ source, kind: "absent", backup: "" });
+          continue;
+        }
+        throw e;
       }
     }
 
@@ -76,12 +82,9 @@ export class SnapshotManager {
         const restored: string[] = [];
         const failed: string[] = [];
         for (const file of record.files) {
-          if (!file.backup) {
+          if (file.kind === "absent" || !file.backup) {
             try {
-              const exists = await stat(file.source)
-                .then(() => true)
-                .catch(() => false);
-              if (exists) await unlink(file.source);
+              await rm(file.source, { recursive: true, force: true });
               restored.push(file.source);
             } catch {
               failed.push(file.source);
@@ -91,6 +94,7 @@ export class SnapshotManager {
 
           try {
             await mkdir(dirname(file.source), { recursive: true });
+            await rm(file.source, { recursive: true, force: true });
             await cp(file.backup, file.source, { recursive: true, force: true });
             restored.push(file.source);
           } catch {
@@ -108,4 +112,8 @@ export class SnapshotManager {
 
 function flattenPath(source: string): string {
   return source.replace(/[/\\]/g, "_").replace(/[<>:"|?*]/g, "");
+}
+
+function isNotFoundError(e: unknown): boolean {
+  return e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "ENOENT";
 }

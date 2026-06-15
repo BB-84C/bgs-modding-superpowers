@@ -174,6 +174,12 @@ describe("mo2_install", () => {
 
     const modlist = await readFile(join(root, "profiles", "Default", "modlist.txt"), "utf8");
     expect(modlist).toContain("+NewSimple");
+
+    expect(apply.result.snapshot_id).toMatch(/^[0-9a-f-]+$/);
+    const rollback = await ctx.snapshots.restore(apply.result.snapshot_id!);
+    expect(rollback.failed).toEqual([]);
+    expect(existsSync(join(root, "mods", "NewSimple"))).toBe(false);
+    expect(await readFile(join(root, "profiles", "Default", "modlist.txt"), "utf8")).toBe("+ExistingMod\n");
   });
 
   it("apply live broker path copies staged content into broker-created mod dir", async () => {
@@ -221,7 +227,7 @@ describe("mo2_install", () => {
     const apply = (await tool.handler(
       { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
       ctx,
-    )) as { ok: boolean; result: { dest_path: string } };
+    )) as { ok: boolean; result: { dest_path: string; snapshot_id?: string } };
 
     expect(apply.ok).toBe(true);
     expect(apply.result.dest_path).toBe(join(root, "mods", "LiveMod"));

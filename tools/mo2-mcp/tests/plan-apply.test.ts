@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mkdtemp, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -74,6 +74,59 @@ describe("PlanCache", () => {
 });
 
 describe("runPlanMode + runApplyMode", () => {
+  it("takes snapshot during apply after lease verification, not during plan", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pa-"));
+    const target = join(root, "data.txt");
+    await writeFile(target, "before\n", "utf8");
+
+    const cache = new PlanCache();
+    const order: string[] = [];
+    const snaps = {
+      snapshot: vi.fn(async (tool: string, files: string[]) => {
+        order.push("snapshot");
+        expect(await readFile(target, "utf8")).toBe("before\n");
+        return {
+          snapshotId: "snap-apply",
+          tool,
+          ts: "now",
+          files: files.map((source) => ({ source, backup: join(root, "backup") })),
+        };
+      }),
+    } as unknown as SnapshotManager;
+
+    const handler: PlanApplyHandler = {
+      toolName: "test_apply_snapshot_timing",
+      async buildPlan() {
+        return {
+          diff: "set after snapshot",
+          affectedFiles: [target],
+          targets: [{ path: target, kind: "text-file" }],
+        };
+      },
+      async applyMutation(plan) {
+        order.push(`apply:${plan.snapshotId}`);
+        await writeFile(target, "after\n", "utf8");
+        return {};
+      },
+    };
+
+    const plan = await runPlanMode(handler, { mode: "plan" }, stubCtx, cache, snaps);
+    expect(plan.result.snapshot_id).toBeUndefined();
+    expect(snaps.snapshot).not.toHaveBeenCalled();
+
+    const apply = await runApplyMode(
+      handler,
+      { plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      stubCtx,
+      cache,
+      snaps,
+    );
+
+    expect(apply.ok).toBe(true);
+    if (apply.ok) expect(apply.result.snapshot_id).toBe("snap-apply");
+    expect(order).toEqual(["snapshot", "apply:snap-apply"]);
+  });
+
   it("full plan → apply round-trip mutates the file", async () => {
     const root = await mkdtemp(join(tmpdir(), "pa-"));
     const target = join(root, "data.txt");
@@ -113,6 +166,7 @@ describe("runPlanMode + runApplyMode", () => {
       { plan_id: planId, lease_token: leaseToken },
       stubCtx,
       cache,
+      snaps,
     );
     expect(apply.ok).toBe(true);
 
@@ -151,6 +205,7 @@ describe("runPlanMode + runApplyMode", () => {
       { plan_id: plan.result.planId, lease_token: plan.result.lease_token },
       stubCtx,
       cache,
+      snaps,
     );
 
     expect(apply.ok).toBe(false);
@@ -176,6 +231,7 @@ describe("runPlanMode + runApplyMode", () => {
       { plan_id: "no-such-plan", lease_token: "t" },
       stubCtx,
       cache,
+      snaps,
     );
     expect(apply.ok).toBe(false);
     if (!apply.ok) {
@@ -209,6 +265,7 @@ describe("runPlanMode + runApplyMode", () => {
       { plan_id: plan.result.planId, lease_token: "wrong-token" },
       stubCtx,
       cache,
+      snaps,
     );
     expect(apply.ok).toBe(false);
     if (!apply.ok) {

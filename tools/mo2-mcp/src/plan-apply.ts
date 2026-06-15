@@ -1,9 +1,10 @@
 /**
  * Plan/apply pipeline — one tool with `mode: "plan" | "apply"` arg.
  *
- * Plan mode: snapshot affected files, compute lease, store record, return
+ * Plan mode: compute lease, store record, return
  *   { plan_id, lease_token, diff, affected_files, expires_at }.
- * Apply mode: consume plan_id + lease_token, re-verify lease, run handler.
+ * Apply mode: consume plan_id + lease_token, re-verify lease, snapshot the
+ *   current pre-apply state, then run handler.
  *
  * PLAN-PATCH P-B3: every S4/S5 tool calls routeToPlanApply(handler, args, ctx).
  */
@@ -114,18 +115,16 @@ export async function runPlanMode(
   args: Record<string, unknown>,
   ctx: ToolContext,
   cache: PlanCache,
-  snapshots: SnapshotManager,
+  _snapshots: SnapshotManager,
 ): Promise<PlanModeOk> {
   const built = await handler.buildPlan(args, ctx);
   const lease = await computeLease(built.targets);
-  const snapshot = await snapshots.snapshot(handler.toolName, built.affectedFiles);
   const rec = cache.store({
     tool: handler.toolName,
     args,
     diff: built.diff,
     affectedFiles: built.affectedFiles,
     lease,
-    snapshotId: snapshot.snapshotId,
   });
   return {
     ok: true,
@@ -136,7 +135,6 @@ export async function runPlanMode(
       diff: built.diff,
       affected_files: built.affectedFiles,
       expires_at: new Date(rec.expiresAt).toISOString(),
-      snapshot_id: snapshot.snapshotId,
     },
   };
 }
@@ -156,6 +154,7 @@ export async function runApplyMode(
   args: { plan_id: string; lease_token: string },
   ctx: ToolContext,
   cache: PlanCache,
+  snapshots: SnapshotManager,
 ): Promise<ApplyResult> {
   const rec = cache.consume(args.plan_id);
   if (!rec) {
@@ -188,6 +187,8 @@ export async function runApplyMode(
     };
   }
 
+  const snapshot = await snapshots.snapshot(handler.toolName, rec.affectedFiles);
+  rec.snapshotId = snapshot.snapshotId;
   const result = await handler.applyMutation(rec, ctx);
   return {
     ok: true,
@@ -224,6 +225,7 @@ export async function routeToPlanApply(
       args as unknown as { plan_id: string; lease_token: string },
       ctx,
       cache,
+      snapshots,
     );
   }
   throw new Error(`invalid mode: ${String(mode)} (must be "plan" or "apply")`);

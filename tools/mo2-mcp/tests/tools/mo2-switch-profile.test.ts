@@ -92,7 +92,15 @@ async function _fixture(allowedProfiles = ["Default", "ProfileB"]): Promise<{ ro
     },
     sessionId: "test",
     plans: new PlanCache(),
-    snapshots: new SnapshotManager(join(root, ".mo2-mcp", "snapshots"), "test"),
+    snapshots: {
+      snapshot: vi.fn(async (tool: string, sourceFiles: string[]) => ({
+        snapshotId: "switch-profile-snapshot",
+        tool,
+        ts: "now",
+        files: sourceFiles.map((source) => ({ source, kind: "absent" as const, backup: "" })),
+      })),
+      restore: vi.fn(),
+    } as unknown as SnapshotManager,
     audit: new AuditLogger(join(root, ".mo2-mcp", "audit"), "test"),
   };
   return { root, ctx };

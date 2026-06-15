@@ -111,11 +111,16 @@ describe("mo2_create_profile", () => {
     const apply = (await tool.handler(
       { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
       ctx,
-    )) as { ok: boolean; result: { profile_name: string; path: string; source: string } };
+    )) as { ok: boolean; result: { profile_name: string; path: string; source: string; snapshot_id?: string } };
 
     expect(apply.result).toMatchObject({ profile_name: "OfflineNew", path: join(root, "profiles", "OfflineNew"), source: "offline_created" });
     expect(await readFile(join(root, "profiles", "OfflineNew", "modlist.txt"), "utf8")).toBe("");
     expect(await readFile(join(root, "profiles", "OfflineNew", "archives.txt"), "utf8")).toBe("");
+
+    expect(apply.result.snapshot_id).toMatch(/^[0-9a-f-]+$/);
+    const rollback = await ctx.snapshots.restore(apply.result.snapshot_id!);
+    expect(rollback.failed).toEqual([]);
+    expect(existsSync(join(root, "profiles", "OfflineNew"))).toBe(false);
   });
 
   it("apply with from_profile copies source txt and ini files only", async () => {

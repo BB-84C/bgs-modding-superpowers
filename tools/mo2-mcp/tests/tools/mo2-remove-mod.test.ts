@@ -173,7 +173,8 @@ describe("mo2_remove_mod", () => {
       ctx,
     )) as { ok: boolean; result: { backup_name?: string } };
 
-    expect(cp).not.toHaveBeenCalled();
+    const backupCopies = vi.mocked(cp).mock.calls.filter(([, dest]) => String(dest).includes("Targetbackup"));
+    expect(backupCopies).toEqual([]);
     expect(pipeCalls).toEqual([{ method: "mods.remove", params: { name: "Target" } }]);
     expect(apply.result.backup_name).toBeUndefined();
   });
