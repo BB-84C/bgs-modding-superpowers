@@ -32,6 +32,7 @@ export interface AuditRecord {
   snapshotId?: string;
   durationMs: number;
   error?: { code: string; message: string };
+  details?: unknown;
 }
 
 export class AuditLogger {

@@ -29,12 +29,12 @@ import { readMoIni } from "./mo-ini.js";
 import { detectMo2Running } from "./detection.js";
 import { PipeClient } from "./pipe-client.js";
 import { SidecarClient, type SidecarGame } from "./sidecar-client.js";
-import { AuditLogger, hashArgs } from "./audit.js";
+import { AuditLogger } from "./audit.js";
 import { SnapshotManager } from "./snapshot.js";
 import { PlanCache } from "./plan-apply.js";
-import { getAllTools, getTool } from "./tool-registry.js";
-import { runRules, hasBlocking } from "./pipeline/rules.js";
+import { getAllTools } from "./tool-registry.js";
 import { getAllRules } from "./pipeline/registry.js";
+import { dispatchToolCall } from "./dispatch.js";
 import "./pipeline/rules/STOCK001-stock-game-deny.js"; // side-effect: register STOCK001
 import "./pipeline/rules/PATHSAFE001-path-traversal-deny.js"; // side-effect: register PATHSAFE001
 import "./pipeline/rules/NAMESAFE001-no-path-in-name.js"; // side-effect: register NAMESAFE001
@@ -170,93 +170,12 @@ async function main(): Promise<void> {
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const t0 = Date.now();
-    const tool = getTool(req.params.name);
-    if (!tool) {
-      await audit.log({
-        ts: new Date().toISOString(),
-        sessionId,
-        tool: req.params.name,
-        argsHash: hashArgs(req.params.arguments),
-        decision: "refused",
-        durationMs: Date.now() - t0,
-        error: { code: "tool_not_found", message: req.params.name },
-      });
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({ ok: false, error: { code: "tool_not_found" } }),
-          },
-        ],
-      };
-    }
-
-    const args = (req.params.arguments ?? {}) as Record<string, unknown>;
-    const findings = await runRules(rules, tool.name, ctx, args);
-    if (hasBlocking(findings)) {
-      const blocking = findings.find((f) => f.decision === "block")!;
-      await audit.log({
-        ts: new Date().toISOString(),
-        sessionId,
-        tool: tool.name,
-        argsHash: hashArgs(args),
-        decision: "refused",
-        ruleFindings: findings,
-        durationMs: Date.now() - t0,
-        error: { code: blocking.code, message: blocking.message },
-      });
-      return {
-        content: [{ type: "text", text: JSON.stringify({ ok: false, error: blocking }) }],
-      };
-    }
-
-    try {
-      const result = await tool.handler(args, ctx);
-      const mode = args.mode as "plan" | "apply" | undefined;
-      const resultObj = result as { ok?: boolean; result?: { planId?: string; snapshot_id?: string } } | undefined;
-      await audit.log({
-        ts: new Date().toISOString(),
-        sessionId,
-        tool: tool.name,
-        mode,
-        argsHash: hashArgs(args),
-        decision:
-          resultObj?.ok === false
-            ? "refused"
-            : mode === "plan"
-            ? "plan_generated"
-            : mode === "apply"
-            ? "applied"
-            : "ok",
-        durationMs: Date.now() - t0,
-        planId: resultObj?.result?.planId,
-        snapshotId: resultObj?.result?.snapshot_id,
-      });
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await audit.log({
-        ts: new Date().toISOString(),
-        sessionId,
-        tool: tool.name,
-        argsHash: hashArgs(args),
-        decision: "refused",
-        durationMs: Date.now() - t0,
-        error: { code: "internal_error", message: msg },
-      });
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              ok: false,
-              error: { code: "internal_error", message: msg },
-            }),
-          },
-        ],
-      };
-    }
+    return dispatchToolCall({
+      toolName: req.params.name,
+      rawArgs: req.params.arguments,
+      ctx,
+      rules,
+    }) as any;
   });
 
   lifecycle.markReady({
