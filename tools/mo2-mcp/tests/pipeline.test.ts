@@ -22,6 +22,14 @@ const stubCtx = {
   audit: new AuditLogger("/tmp/.mo2-mcp/audit", "test-session"),
 } satisfies ToolContext;
 
+const denyCtx = {
+  ...stubCtx,
+  config: {
+    ...stubCtx.config,
+    deny: ["Protected/Data"],
+  },
+} satisfies ToolContext;
+
 describe("rule registry", () => {
   beforeEach(() => {
     _clearRulesForTests();
@@ -99,26 +107,26 @@ describe("runRules", () => {
   });
 });
 
-describe("STOCK001 stock-game-deny", () => {
+describe("STOCK001 protected path deny", () => {
   beforeEach(() => {
     _clearRulesForTests();
     registerRule(stockGameDenyRule);
   });
 
-  it("blocks paths under Stock Game/Data", async () => {
+  it("blocks configured deny patterns", async () => {
     const rules = getAllRules();
-    const findings = await runRules(rules, "mo2_set_mod_notes", stubCtx, {
-      path: "C:/Games/MO2/Stock Game/Data/Fallout4.esm",
+    const findings = await runRules(rules, "mo2_set_mod_notes", denyCtx, {
+      path: "C:/Games/MO2/Protected/Data/Fallout4.esm",
     });
     expect(findings).toHaveLength(1);
     expect(findings[0].code).toBe("STOCK001");
     expect(findings[0].decision).toBe("block");
   });
 
-  it("blocks Stock Game/Data with backslashes (Windows)", async () => {
+  it("blocks configured deny patterns with backslashes (Windows)", async () => {
     const rules = getAllRules();
-    const findings = await runRules(rules, "mo2_set_mod_notes", stubCtx, {
-      virtual_path: "C:\\MO2\\Stock Game\\Data\\Skyrim.esm",
+    const findings = await runRules(rules, "mo2_set_mod_notes", denyCtx, {
+      virtual_path: "C:\\MO2\\Protected\\Data\\Skyrim.esm",
     });
     expect(findings[0].code).toBe("STOCK001");
   });

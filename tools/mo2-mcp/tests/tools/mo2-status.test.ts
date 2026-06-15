@@ -29,7 +29,7 @@ function _buildCtx(mo2Root: string): ToolContext {
       mo2Root,
       permissionCeiling: "metadata-editable",
       allowedProfiles: ["Default"],
-      deny: [],
+      deny: ["DoNotTouch", "Stock Game/Fallout 4/Data"],
       snapshotRoot: join(mo2Root, ".mo2-mcp", "snapshots"),
       auditRoot: join(mo2Root, ".mo2-mcp", "audit"),
     },
@@ -62,6 +62,7 @@ describe("mo2_status", () => {
         mo2_root: string;
         game?: string;
         permission_ceiling: string;
+        deny_patterns: number;
         counts: { mods_total: number; mods_enabled: number; plugins_total: number; plugins_enabled: number } | null;
         detection: { online: boolean };
       };
@@ -70,6 +71,7 @@ describe("mo2_status", () => {
     expect(result.result.mo2_root).toBe(mo2Root);
     expect(result.result.game).toBe("fallout4");
     expect(result.result.permission_ceiling).toBe("metadata-editable");
+    expect(result.result.deny_patterns).toBe(2);
     expect(result.result.counts?.mods_total).toBe(2);
     expect(result.result.counts?.mods_enabled).toBe(1);
     expect(result.result.counts?.plugins_enabled).toBe(1);
