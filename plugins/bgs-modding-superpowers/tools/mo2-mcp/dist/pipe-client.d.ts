@@ -13,7 +13,9 @@ export declare class PipeClient {
      * Discover the broker pipe via endpoint.json, then smoke-test with
      * system.ping. Throws if discovery or ping fails.
      */
-    discoverAndConnect(mo2Root: string, timeoutMs?: number): Promise<void>;
+    discoverAndConnect(mo2Root: string, timeoutMs?: number, options?: {
+        expectedPid?: number;
+    }): Promise<void>;
     /**
      * Send one JSON-RPC-shaped request, receive one response, socket closes.
      *
