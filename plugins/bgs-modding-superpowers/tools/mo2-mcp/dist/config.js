@@ -17,7 +17,7 @@ export const ConfigSchema = z
         .enum(["read-only", "metadata-editable", "full-control"])
         .default("metadata-editable"),
     allowed_profiles: z.array(z.string()).default(["Default"]),
-    deny: z.array(z.string()).default(["Stock Game/Data/**"]),
+    deny: z.array(z.string()).default([]),
     snapshot_root: z.string().default(".mo2-mcp/snapshots"),
     audit_root: z.string().default(".mo2-mcp/audit"),
 })

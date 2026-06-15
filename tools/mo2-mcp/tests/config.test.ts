@@ -22,7 +22,7 @@ describe("loadConfig", () => {
     expect(cfg.allowedProfiles).toEqual(["Default", "Modding"]);
     expect(cfg.snapshotRoot).toBe(join(root, ".mo2-mcp", "snapshots"));
     expect(cfg.auditRoot).toBe(join(root, ".mo2-mcp", "audit"));
-    expect(cfg.deny).toEqual(["Stock Game/Data/**"]);
+    expect(cfg.deny).toEqual([]);
   });
 
   it("defaults to metadata-editable when .mo2-mcp.json missing", async () => {
@@ -30,7 +30,19 @@ describe("loadConfig", () => {
     const cfg = await loadConfig({ mo2Root: root });
     expect(cfg.permissionCeiling).toBe("metadata-editable");
     expect(cfg.allowedProfiles).toEqual(["Default"]);
-    expect(cfg.deny).toEqual(["Stock Game/Data/**"]);
+    expect(cfg.deny).toEqual([]);
+  });
+
+  it("reads user-configured deny patterns", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    await writeFile(
+      join(root, ".mo2-mcp.json"),
+      JSON.stringify({ deny: ["Stock Game/Fallout 4/Data", "DoNotTouch"] }),
+    );
+
+    const cfg = await loadConfig({ mo2Root: root });
+
+    expect(cfg.deny).toEqual(["Stock Game/Fallout 4/Data", "DoNotTouch"]);
   });
 
   it("rejects empty mo2Root", async () => {
