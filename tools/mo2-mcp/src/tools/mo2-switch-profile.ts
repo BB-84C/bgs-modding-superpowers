@@ -2,8 +2,8 @@
  * mo2_switch_profile — T3 cold-restart MO2 under a different profile.
  *
  * Sequence: broker shutdown ACK → wait for old PID to disappear → launch
- * ModOrganizer.exe -p <profile> → wait for fresh endpoint.json with matching
- * PID → reconnect PipeClient → invalidate sidecar world cache.
+ * ModOrganizer.exe -p <profile> → wait for fresh endpoint.json + status.json
+ * with matching PID → reconnect PipeClient → invalidate sidecar world cache.
  */
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -24,6 +24,10 @@ const inputSchema = z.discriminatedUnion("mode", [
 
 interface EndpointInfo {
   endpoint?: unknown;
+}
+
+interface StatusInfo {
+  state?: unknown;
   mo2Pid?: unknown;
 }
 
@@ -41,22 +45,26 @@ async function _waitForMo2Gone(mo2Root: string): Promise<void> {
 }
 
 async function _waitForFreshEndpoint(mo2Root: string): Promise<string> {
-  const endpointPath = join(
+  const runtimeDir = join(
     mo2Root,
     "plugins",
     "Mo2AgentControl",
     "bootstrap",
     "runtime",
-    "endpoint.json",
   );
+  const endpointPath = join(runtimeDir, "endpoint.json");
+  const statusPath = join(runtimeDir, "status.json");
   for (let i = 0; i < 60; i++) {
     try {
       const info = JSON.parse(await readFile(endpointPath, "utf8")) as EndpointInfo;
+      const status = JSON.parse(await readFile(statusPath, "utf8")) as StatusInfo;
       const det = await detectMo2Running({ mo2Root });
       if (
         typeof info.endpoint === "string" &&
-        typeof info.mo2Pid === "number" &&
-        det.pid === info.mo2Pid
+        status.state === "ok" &&
+        typeof status.mo2Pid === "number" &&
+        det.processRunning &&
+        det.pid === status.mo2Pid
       ) {
         return info.endpoint;
       }
