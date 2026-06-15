@@ -42,6 +42,12 @@ import "./tools/mo2-modlist.js"; // side-effect: register mo2_modlist
 import "./tools/mo2-pluginlist.js"; // side-effect: register mo2_pluginlist
 import "./tools/mo2-mod-info.js"; // side-effect: register mo2_mod_info
 import "./tools/mo2-profile-ini-get.js"; // side-effect: register mo2_profile_ini_get
+import "./tools/mo2-assets-summary.js"; // side-effect: register mo2_assets_summary
+import "./tools/mo2-assets-conflicts.js"; // side-effect: register mo2_assets_conflicts
+import "./tools/mo2-assets-resolve.js"; // side-effect: register mo2_assets_resolve
+import "./tools/mo2-search-files.js"; // side-effect: register mo2_search_files
+import "./tools/mo2-list-executables.js"; // side-effect: register mo2_list_executables
+import "./tools/mo2-audit-query.js"; // side-effect: register mo2_audit_query
 import "./tools/mo2-set-mod-notes.js"; // side-effect: register mo2_set_mod_notes
 import "./tools/mo2-edit-meta.js"; // side-effect: register mo2_edit_meta
 import "./tools/mo2-profile-ini-set.js"; // side-effect: register mo2_profile_ini_set
