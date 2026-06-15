@@ -12,6 +12,7 @@ import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import { readMoIni } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
+import { assertActiveProfile } from "../profile-guard.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -59,6 +60,7 @@ const handler: PlanApplyHandler = {
   async applyMutation(plan, ctx) {
     if (!ctx.pipeClient) throw new Error("live_mo2_required");
     const profile = (plan.args.profile as string | undefined) ?? "Default";
+    await assertActiveProfile(ctx, profile);
     const sepName = _separatorName(plan.args.name);
     const targetPri = await _targetPriority(ctx.config.mo2Root, profile, plan.args.above);
     const payload: { name: string; priority?: number } = { name: sepName };

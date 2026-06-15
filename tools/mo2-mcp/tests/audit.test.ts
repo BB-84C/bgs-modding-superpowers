@@ -52,14 +52,14 @@ describe("AuditLogger", () => {
       mode: "plan",
       decision: "plan_generated",
       durationMs: 25,
-      planId: "p-1",
+      plan_id: "p-1",
     });
 
     const files = await readdir(root);
     const content = await readFile(join(root, files[0]), "utf8");
     const lines = content.trim().split("\n");
     expect(lines).toHaveLength(2);
-    expect(JSON.parse(lines[1]).planId).toBe("p-1");
+    expect(JSON.parse(lines[1]).plan_id).toBe("p-1");
   });
 
   it("never throws even if write fails (logs to stderr)", async () => {

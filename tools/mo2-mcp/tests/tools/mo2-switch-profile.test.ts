@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -19,6 +19,21 @@ const pipeState = vi.hoisted(() => ({
     isConnected: ReturnType<typeof vi.fn>;
   }>,
 }));
+
+const fsState = vi.hoisted(() => ({
+  actualReadFile: undefined as undefined | ((...args: any[]) => Promise<any>),
+  readFile: vi.fn(),
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  fsState.actualReadFile = actual.readFile as unknown as (...args: any[]) => Promise<any>;
+  fsState.readFile.mockImplementation((...args: any[]) => fsState.actualReadFile!(...args));
+  return {
+    ...actual,
+    readFile: fsState.readFile,
+  };
+});
 
 vi.mock("node:child_process", () => ({
   spawn: vi.fn(),
@@ -77,7 +92,15 @@ async function _fixture(allowedProfiles = ["Default", "ProfileB"]): Promise<{ ro
     },
     sessionId: "test",
     plans: new PlanCache(),
-    snapshots: new SnapshotManager(join(root, ".mo2-mcp", "snapshots"), "test"),
+    snapshots: {
+      snapshot: vi.fn(async (tool: string, sourceFiles: string[]) => ({
+        snapshotId: "switch-profile-snapshot",
+        tool,
+        ts: "now",
+        files: sourceFiles.map((source) => ({ source, kind: "absent" as const, backup: "" })),
+      })),
+      restore: vi.fn(),
+    } as unknown as SnapshotManager,
     audit: new AuditLogger(join(root, ".mo2-mcp", "audit"), "test"),
   };
   return { root, ctx };
@@ -87,6 +110,11 @@ describe("mo2_switch_profile", () => {
   beforeAll(async () => {
     _clearToolsForTests();
     await import("../../src/tools/mo2-switch-profile.js");
+  });
+
+  beforeEach(() => {
+    fsState.readFile.mockClear();
+    fsState.readFile.mockImplementation((...args: any[]) => fsState.actualReadFile!(...args));
   });
 
   it("plan throws profile_not_found when the profile directory is missing", async () => {
@@ -128,9 +156,15 @@ describe("mo2_switch_profile", () => {
       vi.mocked(detectMo2Running).mockReset();
       vi.mocked(spawn).mockReset();
       const { root, ctx } = await _fixture();
+      const runtimeDir = join(root, "plugins", "Mo2AgentControl", "bootstrap", "runtime");
       await writeFile(
-        join(root, "plugins", "Mo2AgentControl", "bootstrap", "runtime", "endpoint.json"),
-        JSON.stringify({ endpoint: "\\\\.\\pipe\\mo2-new", mo2Pid: 777 }),
+        join(runtimeDir, "endpoint.json"),
+        JSON.stringify({ schemaVersion: 1, transport: "named-pipe", endpoint: "\\\\.\\pipe\\mo2-new" }),
+        "utf8",
+      );
+      await writeFile(
+        join(runtimeDir, "status.json"),
+        JSON.stringify({ schemaVersion: 1, state: "ok", mo2Pid: 777 }),
         "utf8",
       );
       vi.mocked(detectMo2Running)
@@ -221,6 +255,116 @@ describe("mo2_switch_profile", () => {
 
       await rejection;
       expect(detectMo2Running).toHaveBeenCalledTimes(30);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("apply keeps polling when endpoint exists but status.json is missing", async () => {
+    vi.useFakeTimers();
+    try {
+      pipeState.instances.length = 0;
+      vi.mocked(detectMo2Running).mockReset();
+      vi.mocked(spawn).mockReset();
+      const { root, ctx } = await _fixture();
+      const runtimeDir = join(root, "plugins", "Mo2AgentControl", "bootstrap", "runtime");
+      await writeFile(
+        join(runtimeDir, "endpoint.json"),
+        JSON.stringify({ schemaVersion: 1, transport: "named-pipe", endpoint: "\\\\.\\pipe\\mo2-new" }),
+        "utf8",
+      );
+      vi.mocked(detectMo2Running)
+        .mockResolvedValueOnce(_det(true, 100))
+        .mockResolvedValueOnce(_det(false))
+        .mockResolvedValue(_det(true, 777));
+      vi.mocked(spawn).mockReturnValue({ unref: vi.fn() } as never);
+      ctx.pipeClient = {
+        call: async () => ({ ok: true, result: { shutting_down: true } }),
+        close: vi.fn(),
+        discoverAndConnect: async () => {},
+        isConnected: () => true,
+      } as unknown as ToolContext["pipeClient"];
+      const tool = getTool("mo2_switch_profile")!;
+      const plan = (await tool.handler(
+        { mode: "plan", new_profile: "ProfileB" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+      const applyPromise = tool.handler(
+        { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+      ) as Promise<{ ok: boolean; result: { new_profile: string; new_pipe: string } }>;
+      await vi.advanceTimersByTimeAsync(1000);
+      await writeFile(
+        join(runtimeDir, "status.json"),
+        JSON.stringify({ schemaVersion: 1, state: "ok", mo2Pid: 777 }),
+        "utf8",
+      );
+      await vi.advanceTimersByTimeAsync(122000);
+
+      const apply = await applyPromise;
+      expect(apply.ok).toBe(true);
+      expect(apply.result.new_pipe).toBe("\\\\.\\pipe\\mo2-new");
+      expect(detectMo2Running).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("apply keeps polling while status.json mo2Pid is stale", async () => {
+    vi.useFakeTimers();
+    try {
+      pipeState.instances.length = 0;
+      vi.mocked(detectMo2Running).mockReset();
+      vi.mocked(spawn).mockReset();
+      const { root, ctx } = await _fixture();
+      const runtimeDir = join(root, "plugins", "Mo2AgentControl", "bootstrap", "runtime");
+      let statusPolls = 0;
+      fsState.readFile.mockImplementation(async (pathLike: unknown) => {
+        const path = String(pathLike);
+        if (path === join(runtimeDir, "endpoint.json")) {
+          return JSON.stringify({ schemaVersion: 1, transport: "named-pipe", endpoint: "\\\\.\\pipe\\mo2-new" });
+        }
+        if (path === join(runtimeDir, "status.json")) {
+          statusPolls += 1;
+          return JSON.stringify({
+            schemaVersion: 1,
+            state: "ok",
+            mo2Pid: statusPolls < 5 ? 100 : 777,
+          });
+        }
+        return fsState.actualReadFile!(pathLike as never);
+      });
+      vi.mocked(detectMo2Running)
+        .mockResolvedValueOnce(_det(true, 100))
+        .mockResolvedValueOnce(_det(false))
+        .mockResolvedValue(_det(true, 777));
+      vi.mocked(spawn).mockReturnValue({ unref: vi.fn() } as never);
+      ctx.pipeClient = {
+        call: async () => ({ ok: true, result: { shutting_down: true } }),
+        close: vi.fn(),
+        discoverAndConnect: async () => {},
+        isConnected: () => true,
+      } as unknown as ToolContext["pipeClient"];
+      const tool = getTool("mo2_switch_profile")!;
+      const plan = (await tool.handler(
+        { mode: "plan", new_profile: "ProfileB" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+      const applyPromise = tool.handler(
+        { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+      ) as Promise<{ ok: boolean; result: { new_profile: string; new_pipe: string } }>;
+      for (const ms of [1000, 2000, 2000, 2000, 2000]) {
+        await vi.advanceTimersByTimeAsync(ms);
+      }
+
+      const apply = await applyPromise;
+      expect(apply.ok).toBe(true);
+      expect(apply.result).toMatchObject({ new_profile: "ProfileB", new_pipe: "\\\\.\\pipe\\mo2-new" });
+      expect(statusPolls).toBe(5);
+      expect(detectMo2Running).toHaveBeenCalledTimes(7);
     } finally {
       vi.useRealTimers();
     }

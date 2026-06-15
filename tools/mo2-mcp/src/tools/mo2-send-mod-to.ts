@@ -17,6 +17,7 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { atomicWriteText } from "../atomic.js";
 import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir } from "../path-helpers.js";
+import { assertActiveProfile } from "../profile-guard.js";
 
 const ModeSchema = z.enum([
   "top",
@@ -100,9 +101,10 @@ const handler: PlanApplyHandler = {
   async applyMutation(plan, ctx) {
     const args = plan.args;
     const profile = (args.profile as string) ?? "Default";
-    const targetPri = await _computeTargetPriority(args, ctx, profile);
 
     if (ctx.pipeClient) {
+      await assertActiveProfile(ctx, profile);
+      const targetPri = await _computeTargetPriority(args, ctx, profile);
       const resp = await ctx.pipeClient.call("mods.set_priority", {
         name: args.name,
         priority: targetPri,
@@ -114,6 +116,7 @@ const handler: PlanApplyHandler = {
       };
     }
     // Offline: rewrite modlist.txt line order
+    const targetPri = await _computeTargetPriority(args, ctx, profile);
     const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
     const text = await readFile(modlistPath, "utf8");
     const lines = text.split(/\r?\n/).filter((l) => l.length > 0);

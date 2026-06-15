@@ -452,11 +452,11 @@ async function withMcp<T>(env: Record<string, string>, fn: (mcp: McpHandle) => P
 }
 
 function realEnv(extra: Record<string, string> = {}): Record<string, string> {
-  return { BGS_MO2_ROOT: REAL_MO2_ROOT, BGS_MO2_PROFILE: REAL_PROFILE, ...extra };
+  return { BGS_MO2_ROOT: REAL_MO2_ROOT, BGS_MO2_PROFILE: REAL_PROFILE, BGS_MO2_PERMISSION_CEILING: "full-control", ...extra };
 }
 
 function harnessEnv(extra: Record<string, string> = {}): Record<string, string> {
-  return { BGS_MO2_ROOT: HARNESS_MO2_ROOT, BGS_MO2_PROFILE: HARNESS_PROFILE, ...extra };
+  return { BGS_MO2_ROOT: HARNESS_MO2_ROOT, BGS_MO2_PROFILE: HARNESS_PROFILE, BGS_MO2_PERMISSION_CEILING: "full-control", ...extra };
 }
 
 async function planApply(mcp: McpHandle, tool: string, args: Record<string, unknown>): Promise<{ plan: ToolResponse; apply: ToolResponse }> {

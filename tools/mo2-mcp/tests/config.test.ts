@@ -48,6 +48,23 @@ describe("loadConfig", () => {
     expect(cfg.permissionCeiling).toBe("read-only");
   });
 
+  it("BGS_MO2_PERMISSION_CEILING overrides .mo2-mcp.json", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    await writeFile(
+      join(root, ".mo2-mcp.json"),
+      JSON.stringify({ permission_ceiling: "metadata-editable" }),
+    );
+    const previous = process.env.BGS_MO2_PERMISSION_CEILING;
+    process.env.BGS_MO2_PERMISSION_CEILING = "full-control";
+    try {
+      const cfg = await loadConfig({ mo2Root: root });
+      expect(cfg.permissionCeiling).toBe("full-control");
+    } finally {
+      if (previous === undefined) delete process.env.BGS_MO2_PERMISSION_CEILING;
+      else process.env.BGS_MO2_PERMISSION_CEILING = previous;
+    }
+  });
+
   it("rejects invalid ceiling value", async () => {
     const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
     await writeFile(

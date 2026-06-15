@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mkdtemp, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -12,6 +12,10 @@ import {
 import { SnapshotManager } from "../src/snapshot.js";
 import { AuditLogger } from "../src/audit.js";
 import type { ToolContext } from "../src/types.js";
+import {
+  acquireLeasesForTargets,
+  releaseLeaseLocks,
+} from "../src/lease-lock.js";
 
 const stubCtx = {
   config: {
@@ -37,6 +41,7 @@ describe("PlanCache", () => {
       diff: "d",
       affectedFiles: [],
       lease: { token: "t", components: [] },
+      leaseLockTargetHashes: ["h"],
     });
     expect(c.get(rec.planId)?.tool).toBe("x");
   });
@@ -54,6 +59,7 @@ describe("PlanCache", () => {
       diff: "d",
       affectedFiles: [],
       lease: { token: "t", components: [] },
+      leaseLockTargetHashes: ["h"],
     });
     expect(c.consume(rec.planId)).not.toBeNull();
     expect(c.get(rec.planId)).toBeNull();
@@ -67,6 +73,7 @@ describe("PlanCache", () => {
       diff: "d",
       affectedFiles: [],
       lease: { token: "t", components: [] },
+      leaseLockTargetHashes: ["h"],
       ttlMs: -1, // already expired
     });
     expect(c.get(rec.planId)).toBeNull();
@@ -74,6 +81,61 @@ describe("PlanCache", () => {
 });
 
 describe("runPlanMode + runApplyMode", () => {
+  it("takes snapshot during apply after lease verification, not during plan", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pa-"));
+    const target = join(root, "data.txt");
+    await writeFile(target, "before\n", "utf8");
+
+    const cache = new PlanCache();
+    const order: string[] = [];
+    const snaps = {
+      snapshot: vi.fn(async (tool: string, files: string[]) => {
+        order.push("snapshot");
+        expect(await readFile(target, "utf8")).toBe("before\n");
+        return {
+          snapshotId: "snap-apply",
+          tool,
+          ts: "now",
+          files: files.map((source) => ({ source, backup: join(root, "backup") })),
+        };
+      }),
+    } as unknown as SnapshotManager;
+
+    const handler: PlanApplyHandler = {
+      toolName: "test_apply_snapshot_timing",
+      async buildPlan() {
+        return {
+          diff: "set after snapshot",
+          affectedFiles: [target],
+          targets: [{ path: target, kind: "text-file" }],
+        };
+      },
+      async applyMutation(plan) {
+        order.push(`apply:${plan.snapshotId}`);
+        await writeFile(target, "after\n", "utf8");
+        return {};
+      },
+    };
+
+    const plan = await runPlanMode(handler, { mode: "plan" }, stubCtx, cache, snaps);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) throw new Error(plan.error.message);
+    expect(plan.result.snapshot_id).toBeUndefined();
+    expect(snaps.snapshot).not.toHaveBeenCalled();
+
+    const apply = await runApplyMode(
+      handler,
+      { plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      stubCtx,
+      cache,
+      snaps,
+    );
+
+    expect(apply.ok).toBe(true);
+    if (apply.ok) expect(apply.result.snapshot_id).toBe("snap-apply");
+    expect(order).toEqual(["snapshot", "apply:snap-apply"]);
+  });
+
   it("full plan → apply round-trip mutates the file", async () => {
     const root = await mkdtemp(join(tmpdir(), "pa-"));
     const target = join(root, "data.txt");
@@ -105,6 +167,7 @@ describe("runPlanMode + runApplyMode", () => {
       snaps,
     );
     expect(plan.ok).toBe(true);
+    if (!plan.ok) throw new Error(plan.error.message);
     const planId = plan.result.planId;
     const leaseToken = plan.result.lease_token;
 
@@ -113,6 +176,7 @@ describe("runPlanMode + runApplyMode", () => {
       { plan_id: planId, lease_token: leaseToken },
       stubCtx,
       cache,
+      snaps,
     );
     expect(apply.ok).toBe(true);
 
@@ -142,6 +206,8 @@ describe("runPlanMode + runApplyMode", () => {
     };
 
     const plan = await runPlanMode(handler, { mode: "plan" }, stubCtx, cache, snaps);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) throw new Error(plan.error.message);
 
     // External mutation between plan and apply
     await writeFile(target, "EXTERNAL MUTATION\n", "utf8");
@@ -151,6 +217,7 @@ describe("runPlanMode + runApplyMode", () => {
       { plan_id: plan.result.planId, lease_token: plan.result.lease_token },
       stubCtx,
       cache,
+      snaps,
     );
 
     expect(apply.ok).toBe(false);
@@ -176,6 +243,7 @@ describe("runPlanMode + runApplyMode", () => {
       { plan_id: "no-such-plan", lease_token: "t" },
       stubCtx,
       cache,
+      snaps,
     );
     expect(apply.ok).toBe(false);
     if (!apply.ok) {
@@ -204,15 +272,132 @@ describe("runPlanMode + runApplyMode", () => {
       },
     };
     const plan = await runPlanMode(handler, {}, stubCtx, cache, snaps);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) throw new Error(plan.error.message);
     const apply = await runApplyMode(
       handler,
       { plan_id: plan.result.planId, lease_token: "wrong-token" },
       stubCtx,
       cache,
+      snaps,
     );
     expect(apply.ok).toBe(false);
     if (!apply.ok) {
       expect(apply.error.code).toBe("lease_token_mismatch");
+    }
+  });
+
+  it("releases the target lock when applyMutation throws after snapshot", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pa-"));
+    const target = join(root, "data.txt");
+    await writeFile(target, "x", "utf8");
+    const ctx = {
+      ...stubCtx,
+      config: {
+        ...stubCtx.config,
+        mo2Root: root,
+        snapshotRoot: join(root, ".mo2-mcp", "snapshots"),
+        auditRoot: join(root, ".mo2-mcp", "audit"),
+      },
+      sessionId: "apply-failure-session",
+    } satisfies ToolContext;
+    const targets = [{ path: target, kind: "text-file" as const }];
+    const cache = new PlanCache();
+    const snaps = new SnapshotManager(join(root, ".snap"), "s");
+    const handler: PlanApplyHandler = {
+      toolName: "test_apply_failure_release",
+      async buildPlan() {
+        return {
+          diff: "x",
+          affectedFiles: [target],
+          targets,
+        };
+      },
+      async applyMutation() {
+        throw new Error("mutation boom");
+      },
+    };
+    const plan = await runPlanMode(handler, { mode: "plan" }, ctx, cache, snaps);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) throw new Error(plan.error.message);
+
+    await expect(
+      runApplyMode(
+        handler,
+        { plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+        cache,
+        snaps,
+      ),
+    ).rejects.toThrow(/mutation boom/);
+
+    const reacquire = await acquireLeasesForTargets(root, targets, {
+      plan_id: "replacement-plan",
+      mcp_pid: process.pid,
+      mcp_session_id: "replacement-session",
+      lease_token: "replacement-lease",
+      tool_name: "test_apply_failure_release",
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    });
+    expect(reacquire.acquired).toBe(true);
+    if (reacquire.acquired) await releaseLeaseLocks(root, reacquire.targetHashes, "replacement-plan");
+  });
+
+  it("plan fails with lease_held when another live process holds the target lock", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pa-"));
+    const target = join(root, "data.txt");
+    await writeFile(target, "x", "utf8");
+    const ctx = {
+      ...stubCtx,
+      config: {
+        ...stubCtx.config,
+        mo2Root: root,
+        snapshotRoot: join(root, ".mo2-mcp", "snapshots"),
+        auditRoot: join(root, ".mo2-mcp", "audit"),
+      },
+      sessionId: "blocked-session",
+    } satisfies ToolContext;
+    const targets = [{ path: target, kind: "text-file" as const }];
+    const otherLock = await acquireLeasesForTargets(root, targets, {
+      plan_id: "other-plan",
+      mcp_pid: process.pid,
+      mcp_session_id: "other-session",
+      lease_token: "other-lease",
+      tool_name: "test_locked_plan",
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    });
+    expect(otherLock.acquired).toBe(true);
+    const cache = new PlanCache();
+    const snaps = new SnapshotManager(join(root, ".snap"), "s");
+    const handler: PlanApplyHandler = {
+      toolName: "test_locked_plan",
+      async buildPlan() {
+        return {
+          diff: "x",
+          affectedFiles: [target],
+          targets,
+        };
+      },
+      async applyMutation() {
+        return {};
+      },
+    };
+
+    try {
+      const plan = await runPlanMode(handler, { mode: "plan" }, ctx, cache, snaps);
+      expect(plan.ok).toBe(false);
+      if (!plan.ok) {
+        expect(plan.error.code).toBe("lease_held");
+        expect(plan.error.holder).toMatchObject({
+          mcp_pid: process.pid,
+          tool_name: "test_locked_plan",
+        });
+      }
+      expect(cache.size()).toBe(0);
+    } finally {
+      if (otherLock.acquired) await releaseLeaseLocks(root, otherLock.targetHashes, "other-plan");
     }
   });
 });

@@ -21,6 +21,9 @@ async function _fixture(sidecarBuilder?: (root: string) => MockSidecar): Promise
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(join(root, "profiles", "Default", "modlist.txt"), "+ExistingMod\n", "utf8");
   await writeFile(join(root, "profiles", "Default", "plugins.txt"), "", "utf8");
+  await mkdir(join(root, "profiles", "BB84自用"), { recursive: true });
+  await writeFile(join(root, "profiles", "BB84自用", "modlist.txt"), "+ExistingMod\n", "utf8");
+  await writeFile(join(root, "profiles", "BB84自用", "plugins.txt"), "", "utf8");
   await writeFile(
     join(root, "ModOrganizer.ini"),
     "[General]\ngame=fallout4\n[Settings]\nbase_directory=" + root + "\n",
@@ -174,5 +177,145 @@ describe("mo2_install", () => {
 
     const modlist = await readFile(join(root, "profiles", "Default", "modlist.txt"), "utf8");
     expect(modlist).toContain("+NewSimple");
+
+    expect(apply.result.snapshot_id).toMatch(/^[0-9a-f-]+$/);
+    const rollback = await ctx.snapshots.restore(apply.result.snapshot_id!);
+    expect(rollback.failed).toEqual([]);
+    expect(existsSync(join(root, "mods", "NewSimple"))).toBe(false);
+    expect(await readFile(join(root, "profiles", "Default", "modlist.txt"), "utf8")).toBe("+ExistingMod\n");
+  });
+
+  it("apply live broker path copies staged content into broker-created mod dir", async () => {
+    const { root, ctx } = await _fixture((rootDir) => ({
+      call: async (method, params) => {
+        if (method === "fomod.parse_choices") {
+          throw new Error("not_a_fomod");
+        }
+        if (method === "archive.extract_all") {
+          const dest = (params as { dest: string }).dest;
+          await mkdir(dest, { recursive: true });
+          await writeFile(join(dest, "live.esp"), "fake-live", "utf8");
+          return { files: ["live.esp"], file_count: 1, dest, format: "7z" };
+        }
+        if (method === "world.invalidate") return { invalidated: true };
+        throw new Error(`unmocked sidecar: ${method}`);
+      },
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    }));
+    const brokerCalls: Array<{ method: string; params: unknown }> = [];
+    ctx.pipeClient = {
+      call: async (method: string, params: unknown) => {
+        brokerCalls.push({ method, params });
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+        if (method === "installation.create_mod_from_directory") {
+          const absolutePath = join(root, "mods", "LiveMod");
+          await mkdir(absolutePath, { recursive: true });
+          return { ok: true, result: { name: "LiveMod", absolute_path: absolutePath }, error: null };
+        }
+        if (method === "organizer.refresh") return { ok: true, result: { refreshed: true }, error: null };
+        throw new Error(`unmocked broker: ${method}`);
+      },
+      close: () => {},
+      discoverAndConnect: async () => {},
+      isConnected: () => true,
+    } as unknown as ToolContext["pipeClient"];
+
+    const tool = getTool("mo2_install")!;
+    const plan = (await tool.handler(
+      { mode: "plan", archive_path: "/tmp/live.7z", mod_name: "LiveMod", target_priority: "bottom" },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+    const apply = (await tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )) as { ok: boolean; result: { dest_path: string; snapshot_id?: string } };
+
+    expect(apply.ok).toBe(true);
+    expect(apply.result.dest_path).toBe(join(root, "mods", "LiveMod"));
+    expect(existsSync(join(root, "mods", "LiveMod", "live.esp"))).toBe(true);
+    expect(existsSync(join(root, "mods", "LiveMod", "meta.ini"))).toBe(true);
+    const meta = await readFile(join(root, "mods", "LiveMod", "meta.ini"), "utf8");
+    expect(meta).toContain("installationFile=live.7z");
+    const modlist = await readFile(join(root, "profiles", "Default", "modlist.txt"), "utf8");
+    expect(modlist).toContain("+LiveMod");
+    expect(brokerCalls.map((call) => call.method)).toEqual([
+      "profile.active",
+      "installation.create_mod_from_directory",
+      "organizer.refresh",
+    ]);
+  });
+
+  it("live apply blocks when requested profile is not the active MO2 profile", async () => {
+    const { ctx } = await _fixture((rootDir) => ({
+      call: async (method, params) => {
+        if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+        if (method === "archive.extract_all") {
+          const dest = (params as { dest: string }).dest;
+          await mkdir(dest, { recursive: true });
+          await writeFile(join(dest, "blocked.esp"), "fake", "utf8");
+          return { files: ["blocked.esp"], file_count: 1, dest, format: "7z" };
+        }
+        throw new Error(`unmocked sidecar: ${method}`);
+      },
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    }));
+    ctx.pipeClient = {
+      call: async (method: string) => {
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+        throw new Error(`unexpected live mutation: ${method}`);
+      },
+      close: () => {},
+      discoverAndConnect: async () => {},
+      isConnected: () => true,
+    } as unknown as ToolContext["pipeClient"];
+    const tool = getTool("mo2_install")!;
+    const plan = (await tool.handler(
+      { mode: "plan", archive_path: "/tmp/blocked.7z", mod_name: "BlockedLive", profile: "BB84自用" },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+    await expect(tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )).rejects.toThrow(/cross_profile_live_mutation_blocked/);
+    expect(existsSync(join(ctx.config.mo2Root, "mods", "BlockedLive"))).toBe(false);
+  });
+
+  it("apply offline path preserves the destPath clobber guard", async () => {
+    const { root, ctx } = await _fixture((rootDir) => ({
+      call: async (method, params) => {
+        if (method === "fomod.parse_choices") {
+          throw new Error("not_a_fomod");
+        }
+        if (method === "archive.extract_all") {
+          const dest = (params as { dest: string }).dest;
+          await mkdir(dest, { recursive: true });
+          await writeFile(join(dest, "offline.esp"), "fake-offline", "utf8");
+          return { files: ["offline.esp"], file_count: 1, dest, format: "7z" };
+        }
+        throw new Error(`unmocked: ${method}`);
+      },
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    }));
+    const tool = getTool("mo2_install")!;
+    const plan = (await tool.handler(
+      { mode: "plan", archive_path: "/tmp/offline.7z", mod_name: "OfflineMod" },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+    await mkdir(join(root, "mods", "OfflineMod"), { recursive: true });
+
+    await expect(
+      tool.handler(
+        { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+      ),
+    ).rejects.toThrow(/mod_name_exists: OfflineMod/);
   });
 });

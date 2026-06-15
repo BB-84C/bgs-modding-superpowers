@@ -15,7 +15,7 @@ export async function runRules(
   const out: RuleFinding[] = [];
   for (const rule of rules.filter((r) => r.appliesTo(toolName))) {
     try {
-      const finding = await rule.evaluate(ctx, args);
+      const finding = await rule.evaluate(ctx, args, toolName);
       if (finding) out.push(finding);
     } catch (e) {
       out.push({

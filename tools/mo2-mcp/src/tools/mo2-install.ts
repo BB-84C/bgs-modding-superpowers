@@ -18,7 +18,7 @@
  * 6. organizer.refresh + world.invalidate
  */
 import { z } from "zod";
-import { readFile, mkdir, rename, cp } from "node:fs/promises";
+import { readFile, mkdir, rename, cp, readdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -27,6 +27,7 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { atomicWriteText } from "../atomic.js";
 import { resolveModsDir, resolveProfileDir } from "../path-helpers.js";
 import { readMoIni } from "../mo-ini.js";
+import { assertActiveProfile } from "../profile-guard.js";
 
 const FomodChoiceSchema = z.object({
   page_name: z.string(),
@@ -49,6 +50,14 @@ const inputSchema = z.discriminatedUnion("mode", [
   }),
   z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
 ]);
+
+async function _copyDirectoryContents(sourceDir: string, destDir: string): Promise<void> {
+  await mkdir(destDir, { recursive: true });
+  const entries = await readdir(sourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    await cp(join(sourceDir, entry.name), join(destDir, entry.name), { recursive: true });
+  }
+}
 
 const handler: PlanApplyHandler = {
   toolName: "mo2_install",
@@ -104,6 +113,7 @@ const handler: PlanApplyHandler = {
     const stagingDir = join(ctx.config.mo2Root, ".mo2-mcp", "staging", installId);
 
     if (!ctx.sidecar) throw new Error("sidecar_required");
+    await assertActiveProfile(ctx, profile);
 
     // 1. Stage content into stagingDir.
     if (args.fomod_choices) {
@@ -119,30 +129,40 @@ const handler: PlanApplyHandler = {
       });
     }
 
-    // 2. Ask the live broker to create the mod when available, then move
-    // staged content into the final mod directory. Offline tests use mkdir.
+    // 2. Live broker createMod creates the destination directory itself; copy
+    // staged contents into that broker-returned path. Offline path owns the
+    // destination directory creation and keeps the clobber guard before rename.
+    let finalDestPath = destPath;
     if (ctx.pipeClient) {
       const resp = await ctx.pipeClient.call("installation.create_mod_from_directory", {
         name: modName,
         source_dir: stagingDir,
       });
       if (!resp.ok) throw new Error(resp.error?.message ?? "broker error");
+      const result = resp.result as { absolute_path?: unknown } | undefined;
+      finalDestPath = typeof result?.absolute_path === "string" ? result.absolute_path : destPath;
+      await _copyDirectoryContents(stagingDir, finalDestPath);
+      await rm(stagingDir, { recursive: true, force: true });
     } else {
       await mkdir(modsDir, { recursive: true });
+      if (existsSync(destPath)) {
+        throw new Error(`mod_name_exists: ${modName}`);
+      }
+      try {
+        await rename(stagingDir, destPath);
+      } catch (e) {
+        if (e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "EXDEV") {
+          // Cross-volume: fallback to copy.
+          await cp(stagingDir, destPath, { recursive: true });
+        } else {
+          throw e;
+        }
+      }
+      finalDestPath = destPath;
     }
 
-    if (existsSync(destPath)) {
-      throw new Error(`mod_name_exists: ${modName}`);
-    }
-    try {
-      await rename(stagingDir, destPath);
-    } catch (e) {
-      if (e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code === "EXDEV") {
-        // Cross-volume: fallback to copy.
-        await cp(stagingDir, destPath, { recursive: true });
-      } else {
-        throw e;
-      }
+    if (!existsSync(finalDestPath)) {
+      throw new Error(`mod_destination_missing: ${finalDestPath}`);
     }
 
     // 3. Write meta.ini (oracle §4.3 fields).
@@ -159,7 +179,7 @@ const handler: PlanApplyHandler = {
       "notes=\"\"",
       "validated=true",
     ].join("\n");
-    await atomicWriteText(join(destPath, "meta.ini"), meta + "\n");
+    await atomicWriteText(join(finalDestPath, "meta.ini"), meta + "\n");
 
     // 4. Register in modlist.txt.
     const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
@@ -180,7 +200,7 @@ const handler: PlanApplyHandler = {
 
     return {
       mod_name: modName,
-      dest_path: destPath,
+      dest_path: finalDestPath,
       fomod_used: !!args.fomod_choices,
       installation_file: basename(archivePath),
     };

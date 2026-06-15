@@ -17,6 +17,9 @@ async function _fixture(withPipe = true): Promise<{ root: string; ctx: ToolConte
     "utf8",
   );
   await writeFile(join(root, "profiles", "Default", "plugins.txt"), "", "utf8");
+  await mkdir(join(root, "profiles", "BB84自用"), { recursive: true });
+  await writeFile(join(root, "profiles", "BB84自用", "modlist.txt"), ["+AnchorMod", ""].join("\n"), "utf8");
+  await writeFile(join(root, "profiles", "BB84自用", "plugins.txt"), "", "utf8");
   await mkdir(join(root, "mods"), { recursive: true });
   await writeFile(
     join(root, "ModOrganizer.ini"),
@@ -40,7 +43,10 @@ async function _fixture(withPipe = true): Promise<{ root: string; ctx: ToolConte
   };
   if (withPipe) {
     ctx.pipeClient = {
-      call: async () => ({ ok: true, result: { name: "NewEmpty", created: true, priority: 2 } }),
+      call: async (method: string) => {
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+        return { ok: true, result: { name: "NewEmpty", created: true, priority: 2 } };
+      },
       close: () => {},
       discoverAndConnect: async () => {},
       isConnected: () => true,
@@ -93,6 +99,7 @@ describe("mo2_create_mod", () => {
     ctx.pipeClient = {
       call: async (method: string, params: Record<string, unknown>) => {
         pipeCalls.push({ method, params });
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
         return { ok: true, result: { name: params.name, created: true, priority: params.priority } };
       },
       close: () => {},
@@ -122,10 +129,34 @@ describe("mo2_create_mod", () => {
 
     expect(apply.ok).toBe(true);
     expect(pipeCalls).toEqual([
+      { method: "profile.active", params: {} },
       { method: "mods.create", params: { name: "NewEmpty", priority: 2 } },
     ]);
     expect(sidecarCalls).toEqual([
       { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } },
     ]);
+  });
+
+  it("live apply blocks when requested profile is not the active MO2 profile", async () => {
+    const { ctx } = await _fixture();
+    ctx.pipeClient = {
+      call: async (method: string) => {
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+        throw new Error(`unexpected live mutation: ${method}`);
+      },
+      close: () => {},
+      discoverAndConnect: async () => {},
+      isConnected: () => true,
+    } as unknown as ToolContext["pipeClient"];
+    const tool = getTool("mo2_create_mod")!;
+    const plan = (await tool.handler(
+      { mode: "plan", name: "NewEmpty", above: "AnchorMod", profile: "BB84自用" },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+    await expect(tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )).rejects.toThrow(/cross_profile_live_mutation_blocked/);
   });
 });

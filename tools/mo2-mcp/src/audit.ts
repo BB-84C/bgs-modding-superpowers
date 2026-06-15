@@ -28,10 +28,11 @@ export interface AuditRecord {
   argsHash: string;
   decision: AuditDecision;
   ruleFindings?: unknown[];
-  planId?: string;
+  plan_id?: string;
   snapshotId?: string;
   durationMs: number;
   error?: { code: string; message: string };
+  details?: unknown;
 }
 
 export class AuditLogger {

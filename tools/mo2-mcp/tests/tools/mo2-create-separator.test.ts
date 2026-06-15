@@ -18,6 +18,9 @@ async function _fixture(withPipe = true): Promise<{ root: string; ctx: ToolConte
     "utf8",
   );
   await writeFile(join(root, "profiles", "Default", "plugins.txt"), "", "utf8");
+  await mkdir(join(root, "profiles", "BB84自用"), { recursive: true });
+  await writeFile(join(root, "profiles", "BB84自用", "modlist.txt"), ["+AnchorMod", ""].join("\n"), "utf8");
+  await writeFile(join(root, "profiles", "BB84自用", "plugins.txt"), "", "utf8");
   await mkdir(join(root, "mods"), { recursive: true });
   await writeFile(
     join(root, "ModOrganizer.ini"),
@@ -41,7 +44,10 @@ async function _fixture(withPipe = true): Promise<{ root: string; ctx: ToolConte
   };
   if (withPipe) {
     ctx.pipeClient = {
-      call: async () => ({ ok: true, result: { name: "Section_separator", created: true, priority: 2 } }),
+      call: async (method: string) => {
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+        return { ok: true, result: { name: "Section_separator", created: true, priority: 2 } };
+      },
       close: () => {},
       discoverAndConnect: async () => {},
       isConnected: () => true,
@@ -95,6 +101,7 @@ describe("mo2_create_separator", () => {
     ctx.pipeClient = {
       call: async (method: string, params: Record<string, unknown>) => {
         pipeCalls.push({ method, params });
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
         return { ok: true, result: { name: params.name, created: true, priority: params.priority } };
       },
       close: () => {},
@@ -125,6 +132,7 @@ describe("mo2_create_separator", () => {
     expect(apply.ok).toBe(true);
     expect(apply.result).toMatchObject({ separator_name: "Section_separator", color_set: true });
     expect(pipeCalls).toEqual([
+      { method: "profile.active", params: {} },
       { method: "mods.create", params: { name: "Section_separator", priority: 2 } },
       { method: "organizer.refresh", params: { save_changes: false } },
     ]);
@@ -141,6 +149,7 @@ describe("mo2_create_separator", () => {
     ctx.pipeClient = {
       call: async (method: string, params: Record<string, unknown>) => {
         pipeCalls.push({ method, params });
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
         return { ok: true, result: { name: params.name, created: true, priority: params.priority } };
       },
       close: () => {},
@@ -161,8 +170,32 @@ describe("mo2_create_separator", () => {
     expect(apply.ok).toBe(true);
     expect(apply.result).toMatchObject({ separator_name: "Plain_separator", color_set: false });
     expect(pipeCalls).toEqual([
+      { method: "profile.active", params: {} },
       { method: "mods.create", params: { name: "Plain_separator" } },
     ]);
     expect(existsSync(join(root, "mods", "Plain_separator", "meta.ini"))).toBe(false);
+  });
+
+  it("live apply blocks when requested profile is not the active MO2 profile", async () => {
+    const { ctx } = await _fixture();
+    ctx.pipeClient = {
+      call: async (method: string) => {
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+        throw new Error(`unexpected live mutation: ${method}`);
+      },
+      close: () => {},
+      discoverAndConnect: async () => {},
+      isConnected: () => true,
+    } as unknown as ToolContext["pipeClient"];
+    const tool = getTool("mo2_create_separator")!;
+    const plan = (await tool.handler(
+      { mode: "plan", name: "Section", above: "AnchorMod", profile: "BB84自用" },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+    await expect(tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )).rejects.toThrow(/cross_profile_live_mutation_blocked/);
   });
 });

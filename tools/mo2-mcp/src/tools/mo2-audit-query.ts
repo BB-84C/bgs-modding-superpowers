@@ -57,7 +57,7 @@ registerTool({
         }
         if (args.tool && rec.tool !== args.tool) continue;
         if (args.decision && rec.decision !== args.decision) continue;
-        if (args.plan_id && rec.planId !== args.plan_id) continue;
+        if (args.plan_id && rec.plan_id !== args.plan_id) continue;
         matched.push(rec);
         if (matched.length >= maxResults) {
           truncated = true;

@@ -15,6 +15,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { atomicWriteText } from "../atomic.js";
 import { resolveModsDir, resolveProfileDir } from "../path-helpers.js";
+import { assertActiveProfile } from "../profile-guard.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -67,7 +68,9 @@ const handler: PlanApplyHandler = {
   },
   async applyMutation(plan, ctx) {
     const args = plan.args;
+    const profile = (args.profile as string) ?? "Default";
     if (ctx.pipeClient) {
+      await assertActiveProfile(ctx, profile);
       // PluginState::Active=2, Inactive=1 in mobase
       const stateInt = args.enabled ? 2 : 1;
       const resp = await ctx.pipeClient.call("plugins.set_state", {
@@ -94,7 +97,6 @@ const handler: PlanApplyHandler = {
       return result;
     }
     // Offline: plugins.txt rewrite, no file hide (needs broker)
-    const profile = (args.profile as string) ?? "Default";
     const pluginsPath = join(resolveProfileDir(ctx, profile), "plugins.txt");
     const text = await readFile(pluginsPath, "utf8");
     const lines = text.split(/\r?\n/).map((l) => {
