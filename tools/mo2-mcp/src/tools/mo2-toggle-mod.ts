@@ -14,6 +14,7 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { atomicWriteText } from "../atomic.js";
 import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir } from "../path-helpers.js";
+import { assertActiveProfile } from "../profile-guard.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -51,7 +52,9 @@ const handler: PlanApplyHandler = {
   },
   async applyMutation(plan, ctx) {
     const args = plan.args;
+    const profile = (args.profile as string) ?? "Default";
     if (ctx.pipeClient) {
+      await assertActiveProfile(ctx, profile);
       const resp = await ctx.pipeClient.call("mods.set_active", {
         names: [args.name],
         active: args.enabled,
@@ -59,7 +62,6 @@ const handler: PlanApplyHandler = {
       if (!resp.ok) throw new Error(resp.error?.message ?? "broker error");
       return resp.result as Record<string, unknown>;
     }
-    const profile = (args.profile as string) ?? "Default";
     const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
     const text = await readFile(modlistPath, "utf8");
     const lines = text.split(/\r?\n/);

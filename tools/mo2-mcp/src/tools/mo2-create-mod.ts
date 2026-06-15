@@ -10,6 +10,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir } from "../path-helpers.js";
+import { assertActiveProfile } from "../profile-guard.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -52,6 +53,7 @@ const handler: PlanApplyHandler = {
   async applyMutation(plan, ctx) {
     if (!ctx.pipeClient) throw new Error("live_mo2_required_for_create_mod");
     const profile = (plan.args.profile as string | undefined) ?? "Default";
+    await assertActiveProfile(ctx, profile);
     const targetPri = await _targetPriority(ctx.config.mo2Root, profile, plan.args.above);
     const payload: { name: string; priority?: number } = { name: plan.args.name as string };
     if (targetPri !== undefined) payload.priority = targetPri;

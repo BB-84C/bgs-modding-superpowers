@@ -27,6 +27,7 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { atomicWriteText } from "../atomic.js";
 import { resolveModsDir, resolveProfileDir } from "../path-helpers.js";
 import { readMoIni } from "../mo-ini.js";
+import { assertActiveProfile } from "../profile-guard.js";
 
 const FomodChoiceSchema = z.object({
   page_name: z.string(),
@@ -112,6 +113,7 @@ const handler: PlanApplyHandler = {
     const stagingDir = join(ctx.config.mo2Root, ".mo2-mcp", "staging", installId);
 
     if (!ctx.sidecar) throw new Error("sidecar_required");
+    await assertActiveProfile(ctx, profile);
 
     // 1. Stage content into stagingDir.
     if (args.fomod_choices) {

@@ -17,6 +17,9 @@ async function _fixture(): Promise<{ root: string; ctx: ToolContext }> {
     "utf8",
   );
   await writeFile(join(root, "profiles", "Default", "modlist.txt"), "", "utf8");
+  await mkdir(join(root, "profiles", "BB84自用"), { recursive: true });
+  await writeFile(join(root, "profiles", "BB84自用", "plugins.txt"), "*Fallout4.esm\n*EnabledMod.esp\n", "utf8");
+  await writeFile(join(root, "profiles", "BB84自用", "modlist.txt"), "", "utf8");
   await writeFile(
     join(root, "ModOrganizer.ini"),
     "[General]\ngame=fallout4\n[Settings]\nbase_directory=" + root + "\n",
@@ -76,5 +79,28 @@ describe("mo2_toggle_plugin", () => {
         ctx,
       ),
     ).rejects.toThrow(/also_hide_file_requires_live_mo2/);
+  });
+
+  it("live apply blocks when requested profile is not the active MO2 profile", async () => {
+    const { ctx } = await _fixture();
+    ctx.pipeClient = {
+      call: async (method: string) => {
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+        throw new Error(`unexpected live mutation: ${method}`);
+      },
+      close: () => {},
+      discoverAndConnect: async () => {},
+      isConnected: () => true,
+    } as unknown as ToolContext["pipeClient"];
+    const tool = getTool("mo2_toggle_plugin")!;
+    const plan = (await tool.handler(
+      { mode: "plan", name: "EnabledMod.esp", enabled: false, profile: "BB84自用" },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+    await expect(tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )).rejects.toThrow(/cross_profile_live_mutation_blocked/);
   });
 });
