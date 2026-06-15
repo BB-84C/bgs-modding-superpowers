@@ -17,6 +17,12 @@ import {
 } from "./lease.js";
 import type { SnapshotManager } from "./snapshot.js";
 import type { ToolContext } from "./types.js";
+import {
+  acquireLeaseLock,
+  computeLeaseTargetHash,
+  LEASE_LOCK_TTL_MS,
+  releaseLeaseLock,
+} from "./lease-lock.js";
 
 export interface PlanRecord {
   planId: string;
@@ -25,24 +31,29 @@ export interface PlanRecord {
   diff: string;
   affectedFiles: string[];
   lease: Lease;
+  leaseLockTargetHash: string;
   snapshotId?: string;
   /** ms epoch */
   expiresAt: number;
 }
 
 /**
- * In-memory cache of pending plans. Expires after `defaultTtlMs` (15 min).
+ * In-memory cache of pending plans. Expires after `defaultTtlMs` (10 min).
  */
 export class PlanCache {
   private plans = new Map<string, PlanRecord>();
-  private defaultTtlMs = 15 * 60 * 1000;
+  private defaultTtlMs = LEASE_LOCK_TTL_MS;
 
   store(
-    plan: Omit<PlanRecord, "planId" | "expiresAt"> & { ttlMs?: number },
+    plan: Omit<PlanRecord, "planId" | "expiresAt"> & {
+      ttlMs?: number;
+      planId?: string;
+      expiresAt?: number;
+    },
   ): PlanRecord {
-    const planId = randomUUID();
-    const expiresAt = Date.now() + (plan.ttlMs ?? this.defaultTtlMs);
-    const { ttlMs: _ignored, ...rest } = plan;
+    const planId = plan.planId ?? randomUUID();
+    const expiresAt = plan.expiresAt ?? Date.now() + (plan.ttlMs ?? this.defaultTtlMs);
+    const { ttlMs: _ignored, planId: _planId, expiresAt: _expiresAt, ...rest } = plan;
     const rec: PlanRecord = { ...rest, planId, expiresAt };
     this.plans.set(planId, rec);
     return rec;
@@ -110,22 +121,87 @@ export interface PlanModeOk {
   };
 }
 
+export interface PlanModeError {
+  ok: false;
+  error: {
+    code: "lease_held";
+    message: string;
+    holder: {
+      tool: string;
+      tool_name: string;
+      mcp_pid: number;
+      created_at: string;
+    };
+  };
+}
+
+export type PlanModeResult = PlanModeOk | PlanModeError;
+
+async function releasePlanLockBestEffort(
+  ctx: ToolContext,
+  rec: PlanRecord,
+): Promise<void> {
+  try {
+    await releaseLeaseLock(ctx.config.mo2Root, rec.leaseLockTargetHash, rec.planId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[lease-lock] failed to release ${rec.planId}: ${message}\n`);
+  }
+}
+
 export async function runPlanMode(
   handler: PlanApplyHandler,
   args: Record<string, unknown>,
   ctx: ToolContext,
   cache: PlanCache,
   _snapshots: SnapshotManager,
-): Promise<PlanModeOk> {
+): Promise<PlanModeResult> {
   const built = await handler.buildPlan(args, ctx);
   const lease = await computeLease(built.targets);
-  const rec = cache.store({
-    tool: handler.toolName,
-    args,
-    diff: built.diff,
-    affectedFiles: built.affectedFiles,
-    lease,
+  const planId = randomUUID();
+  const expiresAt = Date.now() + LEASE_LOCK_TTL_MS;
+  const createdAt = new Date().toISOString();
+  const targetHash = computeLeaseTargetHash(built.targets);
+  const lock = await acquireLeaseLock(ctx.config.mo2Root, targetHash, {
+    plan_id: planId,
+    mcp_pid: process.pid,
+    mcp_session_id: ctx.sessionId,
+    lease_token: lease.token,
+    tool_name: handler.toolName,
+    created_at: createdAt,
+    expires_at: new Date(expiresAt).toISOString(),
   });
+  if (!lock.acquired) {
+    return {
+      ok: false,
+      error: {
+        code: "lease_held",
+        message: `Target is already locked by ${lock.holder.tool_name} in MCP process ${lock.holder.mcp_pid}`,
+        holder: {
+          tool: lock.holder.tool_name,
+          tool_name: lock.holder.tool_name,
+          mcp_pid: lock.holder.mcp_pid,
+          created_at: lock.holder.created_at,
+        },
+      },
+    };
+  }
+  let rec: PlanRecord;
+  try {
+    rec = cache.store({
+      planId,
+      expiresAt,
+      tool: handler.toolName,
+      args,
+      diff: built.diff,
+      affectedFiles: built.affectedFiles,
+      lease,
+      leaseLockTargetHash: targetHash,
+    });
+  } catch (error) {
+    await releaseLeaseLock(ctx.config.mo2Root, targetHash, planId);
+    throw error;
+  }
   return {
     ok: true,
     result: {
@@ -167,6 +243,7 @@ export async function runApplyMode(
     };
   }
   if (rec.lease.token !== args.lease_token) {
+    await releasePlanLockBestEffort(ctx, rec);
     return {
       ok: false,
       error: {
@@ -177,6 +254,7 @@ export async function runApplyMode(
   }
   const v = await verifyLease(rec.lease);
   if (!v.valid) {
+    await releasePlanLockBestEffort(ctx, rec);
     return {
       ok: false,
       error: {
@@ -187,18 +265,22 @@ export async function runApplyMode(
     };
   }
 
-  const snapshot = await snapshots.snapshot(handler.toolName, rec.affectedFiles);
-  rec.snapshotId = snapshot.snapshotId;
-  const result = await handler.applyMutation(rec, ctx);
-  return {
-    ok: true,
-    result: {
-      mode: "apply",
-      plan_id: rec.planId,
-      snapshot_id: rec.snapshotId,
-      ...result,
-    },
-  };
+  try {
+    const snapshot = await snapshots.snapshot(handler.toolName, rec.affectedFiles);
+    rec.snapshotId = snapshot.snapshotId;
+    const result = await handler.applyMutation(rec, ctx);
+    return {
+      ok: true,
+      result: {
+        mode: "apply",
+        plan_id: rec.planId,
+        snapshot_id: rec.snapshotId,
+        ...result,
+      },
+    };
+  } finally {
+    await releasePlanLockBestEffort(ctx, rec);
+  }
 }
 
 /**
@@ -214,7 +296,7 @@ export async function routeToPlanApply(
   ctx: ToolContext,
   cache: PlanCache,
   snapshots: SnapshotManager,
-): Promise<PlanModeOk | ApplyResult> {
+): Promise<PlanModeResult | ApplyResult> {
   const mode = args.mode;
   if (mode === "plan") {
     return runPlanMode(handler, args, ctx, cache, snapshots);
