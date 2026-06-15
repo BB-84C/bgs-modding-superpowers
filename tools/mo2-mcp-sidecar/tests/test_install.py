@@ -153,6 +153,28 @@ _STAGE_FOMOD_XML = """<?xml version="1.0" encoding="UTF-8"?>
 </config>
 """
 
+_TRAVERSAL_DEST_FOMOD_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+  <moduleName>TraversalDest</moduleName>
+  <installSteps order="Explicit">
+    <installStep name="Choose">
+      <optionalFileGroups order="Explicit">
+        <group name="Variant" type="SelectExactlyOne">
+          <plugins order="Explicit">
+            <plugin name="Escape">
+              <description>Escapes staging</description>
+              <files><file source="payload.esp" destination="../escape.esp"/></files>
+              <typeDescriptor><type name="Recommended"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>
+"""
+
 
 @pytest.mark.skipif(not _fomod._PYFOMOD_AVAILABLE, reason="pyfomod not installed")
 def test_stage_fomod_from_directory_extracts_selected_only(tmp_path):
@@ -182,6 +204,33 @@ def test_stage_fomod_from_directory_extracts_selected_only(tmp_path):
     assert (staging / "light.esp").read_text() == "light-data"
     # Heavy should NOT be staged
     assert not (staging / "heavy.esp").exists()
+
+
+@pytest.mark.skipif(not _fomod._PYFOMOD_AVAILABLE, reason="pyfomod not installed")
+def test_stage_fomod_rejects_destination_parent_traversal(tmp_path):
+    """FOMOD destination paths must not escape staging_dir."""
+    fomod_root = tmp_path / "TraversalFomod"
+    fomod_dir = fomod_root / "fomod"
+    fomod_dir.mkdir(parents=True)
+    (fomod_dir / "ModuleConfig.xml").write_text(_TRAVERSAL_DEST_FOMOD_XML, encoding="utf-8")
+    (fomod_dir / "info.xml").write_text(
+        '<?xml version="1.0"?><fomod><Name>TraversalDest</Name></fomod>', encoding="utf-8")
+    (fomod_root / "payload.esp").write_text("payload", encoding="utf-8")
+    staging = tmp_path / "staging"
+
+    from mo2_mcp_sidecar.install import install_stage_fomod
+
+    with pytest.raises(ValueError, match="path_traversal_blocked"):
+        install_stage_fomod({
+            "archive_path": str(fomod_root),
+            "choices": [{"page_name": "Choose",
+                         "selected_options": [{"group_name": "Variant",
+                                               "option_name": "Escape"}]}],
+            "staging_dir": str(staging),
+        })
+
+    assert not (tmp_path / "escape.esp").exists()
+    assert not any(staging.rglob("*"))
 
 
 def test_stage_fomod_missing_archive_raises(tmp_path):

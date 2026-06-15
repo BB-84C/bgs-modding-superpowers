@@ -61,10 +61,10 @@ def _enumerate_via_engine(mod: Any, archive_order: Any) -> set[str] | None:
     not be exercised (e.g. mod has no on-disk root, or engine itself raised).
     """
     try:
-        from mo2_assets_engine.archive_order import (  # type: ignore[import-not-found]
+        from mo2_assets_engine.archive_order import (  # type: ignore[import-untyped]
             ArchiveLoadOrder,
         )
-        from mo2_assets_engine.mod_enumerator import (  # type: ignore[import-not-found]
+        from mo2_assets_engine.mod_enumerator import (  # type: ignore[import-untyped]
             enumerate_mod_files,
         )
     except ImportError:
@@ -90,9 +90,9 @@ def _mod_files_set(mod: Any, archive_order: Any) -> set[str]:
     on isinstance to keep both paths honest.
     """
     try:
-        from mo2_assets_engine.types import Mod as EngineMod  # type: ignore[import-not-found]
+        from mo2_assets_engine.types import Mod as EngineMod  # type: ignore[import-untyped]
     except ImportError:
-        EngineMod = None  # type: ignore[assignment]
+        EngineMod = None
 
     if EngineMod is not None and isinstance(mod, EngineMod):
         # Production path
@@ -106,7 +106,7 @@ def _mod_files_set(mod: Any, archive_order: Any) -> set[str]:
     return {_normalize(p) for p in mod_files}
 
 
-def install_conflict_preview(params: dict) -> dict:
+def install_conflict_preview(params: dict[str, Any]) -> dict[str, Any]:
     """Preview conflicts between staged install content and current profile's mods.
 
     Args:
@@ -129,6 +129,9 @@ def install_conflict_preview(params: dict) -> dict:
     staged_files = params.get("staged_files", [])
     target_priority = params.get("target_priority", "bottom")  # informational; not used for now
 
+    # Security audit: staged_files are only treated as logical relative names
+    # for set comparison below. This function never joins them to profile_dir
+    # or any other filesystem base, and it never writes staged content.
     staged_set = _normalize_staged_paths(staged_files)
     if not staged_set:
         return {"summary": "no staged files", "conflicts": [],
@@ -138,7 +141,7 @@ def install_conflict_preview(params: dict) -> dict:
     mods = world.mods if world.mods else []
     archive_order = getattr(world, "archive_order", None)
 
-    conflicts = []
+    conflicts: list[dict[str, Any]] = []
     for mod in mods:
         mod_set = _mod_files_set(mod, archive_order)
         if not mod_set:
@@ -161,7 +164,7 @@ def install_conflict_preview(params: dict) -> dict:
     }
 
 
-def install_stage_fomod(params: dict) -> dict:
+def install_stage_fomod(params: dict[str, Any]) -> dict[str, Any]:
     """Stage a FOMOD archive into a directory using user-supplied choices.
 
     Pipeline:
@@ -192,7 +195,7 @@ def install_stage_fomod(params: dict) -> dict:
     import shutil
     import tempfile
 
-    from .archive import archive_extract_all
+    from .archive import _validate_safe_member, archive_extract_all
     from .fomod import _PYFOMOD_AVAILABLE, fomod_resolve_files
 
     if not _PYFOMOD_AVAILABLE:
@@ -238,8 +241,8 @@ def install_stage_fomod(params: dict) -> dict:
             dst_rel = entry.get("destination", "")
             if not src_rel or not dst_rel:
                 continue
-            src_path = fomod_root / src_rel
-            dst_path = staging_dir / dst_rel
+            src_path = _validate_safe_member(src_rel, fomod_root)
+            dst_path = _validate_safe_member(dst_rel, staging_dir)
             if not src_path.exists():
                 # FOMOD may reference files not in the extracted set (e.g. NotUsable
                 # options) - silently skip rather than fail the whole stage.
