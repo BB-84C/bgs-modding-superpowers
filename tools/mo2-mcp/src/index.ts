@@ -36,6 +36,8 @@ import { getAllTools, getTool } from "./tool-registry.js";
 import { runRules, hasBlocking } from "./pipeline/rules.js";
 import { getAllRules } from "./pipeline/registry.js";
 import "./pipeline/rules/STOCK001-stock-game-deny.js"; // side-effect: register STOCK001
+import "./pipeline/rules/PATHSAFE001-path-traversal-deny.js"; // side-effect: register PATHSAFE001
+import "./pipeline/rules/NAMESAFE001-no-path-in-name.js"; // side-effect: register NAMESAFE001
 import "./tools/mo2-status.js"; // side-effect: register mo2_status
 import "./tools/mo2-machine-contract.js"; // side-effect: register mo2_machine_contract
 import "./tools/mo2-modlist.js"; // side-effect: register mo2_modlist
