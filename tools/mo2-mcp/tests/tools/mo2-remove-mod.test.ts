@@ -7,7 +7,7 @@ import { PlanCache } from "../../src/plan-apply.js";
 import { SnapshotManager } from "../../src/snapshot.js";
 import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
-import { releaseLeaseLock } from "../../src/lease-lock.js";
+import { releaseLeaseLocks } from "../../src/lease-lock.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -114,7 +114,7 @@ describe("mo2_remove_mod", () => {
     )) as { ok: boolean; result: { planId: string; diff: string; affected_files: string[] } };
     expect(withBackup.ok).toBe(true);
     const firstPlan = ctx.plans.get(withBackup.result.planId)!;
-    await releaseLeaseLock(ctx.config.mo2Root, firstPlan.leaseLockTargetHash, firstPlan.planId);
+    await releaseLeaseLocks(ctx.config.mo2Root, firstPlan.leaseLockTargetHashes, firstPlan.planId);
     ctx.plans.consume(firstPlan.planId);
     const withoutBackup = (await tool.handler(
       { mode: "plan", name: "Target", backup_first: false },

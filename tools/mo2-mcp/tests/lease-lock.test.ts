@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   acquireLeaseLock,
+  acquireLeasesForTargets,
   computeLeaseTargetHash,
   leaseLockPath,
   releaseLeaseLock,
+  releaseLeaseLocks,
   type LeaseLockMetadata,
 } from "../src/lease-lock.js";
 
@@ -174,5 +176,143 @@ describe("lease-lock", () => {
     }
     const raw = await readFile(lockPath, "utf8");
     expect(JSON.parse(raw).plan_id).toBe("plan-a");
+  });
+
+  it("blocks overlapping target sets even when the full target sets differ", async () => {
+    const root = await tempMo2Root();
+    const first = await acquireLeasesForTargets(
+      root,
+      [
+        { path: "A", kind: "text-file" },
+        { path: "B", kind: "text-file" },
+      ],
+      metadata({ plan_id: "plan-a" }),
+    );
+    expect(first.acquired).toBe(true);
+
+    const second = await acquireLeasesForTargets(
+      root,
+      [
+        { path: "B", kind: "text-file" },
+        { path: "C", kind: "text-file" },
+      ],
+      metadata({ plan_id: "plan-b", mcp_session_id: "session-b" }),
+    );
+
+    expect(second.acquired).toBe(false);
+    if (!second.acquired) expect(second.holders).toHaveLength(1);
+  });
+
+  it("allows disjoint target sets to acquire concurrently", async () => {
+    const root = await tempMo2Root();
+    const first = await acquireLeasesForTargets(
+      root,
+      [
+        { path: "A", kind: "text-file" },
+        { path: "B", kind: "text-file" },
+      ],
+      metadata({ plan_id: "plan-a" }),
+    );
+    const second = await acquireLeasesForTargets(
+      root,
+      [
+        { path: "C", kind: "text-file" },
+        { path: "D", kind: "text-file" },
+      ],
+      metadata({ plan_id: "plan-b", mcp_session_id: "session-b" }),
+    );
+
+    expect(first.acquired).toBe(true);
+    expect(second.acquired).toBe(true);
+  });
+
+  it("blocks subset overlap", async () => {
+    const root = await tempMo2Root();
+    const first = await acquireLeasesForTargets(
+      root,
+      [
+        { path: "A", kind: "text-file" },
+        { path: "B", kind: "text-file" },
+      ],
+      metadata({ plan_id: "plan-a" }),
+    );
+    expect(first.acquired).toBe(true);
+
+    const second = await acquireLeasesForTargets(
+      root,
+      [{ path: "B", kind: "text-file" }],
+      metadata({ plan_id: "plan-b", mcp_session_id: "session-b" }),
+    );
+
+    expect(second.acquired).toBe(false);
+  });
+
+  it("blocks superset overlap", async () => {
+    const root = await tempMo2Root();
+    const first = await acquireLeasesForTargets(
+      root,
+      [{ path: "B", kind: "text-file" }],
+      metadata({ plan_id: "plan-a" }),
+    );
+    expect(first.acquired).toBe(true);
+
+    const second = await acquireLeasesForTargets(
+      root,
+      [
+        { path: "A", kind: "text-file" },
+        { path: "B", kind: "text-file" },
+      ],
+      metadata({ plan_id: "plan-b", mcp_session_id: "session-b" }),
+    );
+
+    expect(second.acquired).toBe(false);
+  });
+
+  it("lets exactly one concurrent overlapping target-set acquire win", async () => {
+    const root = await tempMo2Root();
+    const results = await Promise.all([
+      acquireLeasesForTargets(
+        root,
+        [
+          { path: "A", kind: "text-file" },
+          { path: "B", kind: "text-file" },
+        ],
+        metadata({ plan_id: "plan-a" }),
+      ),
+      acquireLeasesForTargets(
+        root,
+        [
+          { path: "B", kind: "text-file" },
+          { path: "C", kind: "text-file" },
+        ],
+        metadata({ plan_id: "plan-b", mcp_session_id: "session-b" }),
+      ),
+    ]);
+
+    expect(results.filter((result) => result.acquired)).toHaveLength(1);
+    expect(results.filter((result) => !result.acquired)).toHaveLength(1);
+  });
+
+  it("releases all locks acquired for a target set", async () => {
+    const root = await tempMo2Root();
+    const acquired = await acquireLeasesForTargets(
+      root,
+      [
+        { path: "A", kind: "text-file" },
+        { path: "B", kind: "text-file" },
+      ],
+      metadata({ plan_id: "plan-a" }),
+    );
+    expect(acquired.acquired).toBe(true);
+    if (!acquired.acquired) throw new Error("expected acquisition");
+
+    await releaseLeaseLocks(root, acquired.targetHashes, "plan-a");
+    const reacquired = await acquireLeasesForTargets(
+      root,
+      [{ path: "B", kind: "text-file" }],
+      metadata({ plan_id: "plan-b" }),
+    );
+
+    expect(reacquired.acquired).toBe(true);
   });
 });

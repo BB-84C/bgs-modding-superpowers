@@ -18,10 +18,9 @@ import {
 import type { SnapshotManager } from "./snapshot.js";
 import type { ToolContext } from "./types.js";
 import {
-  acquireLeaseLock,
-  computeLeaseTargetHash,
+  acquireLeasesForTargets,
   LEASE_LOCK_TTL_MS,
-  releaseLeaseLock,
+  releaseLeaseLocks,
 } from "./lease-lock.js";
 
 export interface PlanRecord {
@@ -31,7 +30,7 @@ export interface PlanRecord {
   diff: string;
   affectedFiles: string[];
   lease: Lease;
-  leaseLockTargetHash: string;
+  leaseLockTargetHashes: string[];
   snapshotId?: string;
   /** ms epoch */
   expiresAt: number;
@@ -132,6 +131,12 @@ export interface PlanModeError {
       mcp_pid: number;
       created_at: string;
     };
+    holders: Array<{
+      tool: string;
+      tool_name: string;
+      mcp_pid: number;
+      created_at: string;
+    }>;
   };
 }
 
@@ -142,7 +147,7 @@ async function releasePlanLockBestEffort(
   rec: PlanRecord,
 ): Promise<void> {
   try {
-    await releaseLeaseLock(ctx.config.mo2Root, rec.leaseLockTargetHash, rec.planId);
+    await releaseLeaseLocks(ctx.config.mo2Root, rec.leaseLockTargetHashes, rec.planId);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`[lease-lock] failed to release ${rec.planId}: ${message}\n`);
@@ -161,8 +166,7 @@ export async function runPlanMode(
   const planId = randomUUID();
   const expiresAt = Date.now() + LEASE_LOCK_TTL_MS;
   const createdAt = new Date().toISOString();
-  const targetHash = computeLeaseTargetHash(built.targets);
-  const lock = await acquireLeaseLock(ctx.config.mo2Root, targetHash, {
+  const lock = await acquireLeasesForTargets(ctx.config.mo2Root, built.targets, {
     plan_id: planId,
     mcp_pid: process.pid,
     mcp_session_id: ctx.sessionId,
@@ -172,17 +176,20 @@ export async function runPlanMode(
     expires_at: new Date(expiresAt).toISOString(),
   });
   if (!lock.acquired) {
+    const holders = lock.holders.map((holder) => ({
+      tool: holder.tool_name,
+      tool_name: holder.tool_name,
+      mcp_pid: holder.mcp_pid,
+      created_at: holder.created_at,
+    }));
+    const firstHolder = holders[0];
     return {
       ok: false,
       error: {
         code: "lease_held",
-        message: `Target is already locked by ${lock.holder.tool_name} in MCP process ${lock.holder.mcp_pid}`,
-        holder: {
-          tool: lock.holder.tool_name,
-          tool_name: lock.holder.tool_name,
-          mcp_pid: lock.holder.mcp_pid,
-          created_at: lock.holder.created_at,
-        },
+        message: `Target is already locked by ${firstHolder.tool_name} in MCP process ${firstHolder.mcp_pid}`,
+        holder: firstHolder,
+        holders,
       },
     };
   }
@@ -196,10 +203,10 @@ export async function runPlanMode(
       diff: built.diff,
       affectedFiles: built.affectedFiles,
       lease,
-      leaseLockTargetHash: targetHash,
+      leaseLockTargetHashes: lock.targetHashes,
     });
   } catch (error) {
-    await releaseLeaseLock(ctx.config.mo2Root, targetHash, planId);
+    await releaseLeaseLocks(ctx.config.mo2Root, lock.targetHashes, planId);
     throw error;
   }
   return {

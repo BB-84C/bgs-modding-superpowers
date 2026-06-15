@@ -26,6 +26,15 @@ export type LeaseLockAcquireResult =
   | { acquired: true; lockPath: string }
   | { acquired: false; lockPath: string; holder: LeaseLockHolder };
 
+export type LeaseLocksAcquireResult =
+  | { acquired: true; lockPaths: string[]; targetHashes: string[] }
+  | {
+      acquired: false;
+      holders: LeaseLockHolder[];
+      acquiredLocks: string[];
+      targetHashes: string[];
+    };
+
 export interface LeaseLockAcquireOptions {
   isPidAlive?: (pid: number) => Promise<boolean>;
 }
@@ -34,6 +43,16 @@ export function computeLeaseTargetHash(targets: LeaseTarget[]): string {
   return createHash("sha256")
     .update(JSON.stringify(targets.map((target) => target.path).sort()))
     .digest("hex");
+}
+
+export function computeLeaseTargetPathHash(path: string): string {
+  return createHash("sha256").update(JSON.stringify(path)).digest("hex");
+}
+
+export function computeLeaseTargetHashes(targets: LeaseTarget[]): string[] {
+  return [...new Set(targets.map((target) => target.path))]
+    .sort()
+    .map((path) => computeLeaseTargetPathHash(path));
 }
 
 function leasesDir(mo2Root: string): string {
@@ -198,6 +217,34 @@ export async function acquireLeaseLock(
   return { acquired: true, lockPath: path };
 }
 
+export async function acquireLeasesForTargets(
+  mo2Root: string,
+  targets: LeaseTarget[],
+  metadata: LeaseLockMetadata,
+  options: LeaseLockAcquireOptions = {},
+): Promise<LeaseLocksAcquireResult> {
+  const targetHashes = computeLeaseTargetHashes(targets);
+  const acquiredHashes: string[] = [];
+  const lockPaths: string[] = [];
+
+  for (const targetHash of targetHashes) {
+    const acquired = await acquireLeaseLock(mo2Root, targetHash, metadata, options);
+    if (!acquired.acquired) {
+      await releaseLeaseLocks(mo2Root, acquiredHashes, metadata.plan_id);
+      return {
+        acquired: false,
+        holders: [acquired.holder],
+        acquiredLocks: acquiredHashes,
+        targetHashes,
+      };
+    }
+    acquiredHashes.push(targetHash);
+    lockPaths.push(acquired.lockPath);
+  }
+
+  return { acquired: true, lockPaths, targetHashes };
+}
+
 export async function releaseLeaseLock(
   mo2Root: string,
   targetHash: string,
@@ -208,4 +255,12 @@ export async function releaseLeaseLock(
   if (!existing) return;
   if (existing.plan_id !== planId) return;
   await removeLockIfPresent(path);
+}
+
+export async function releaseLeaseLocks(
+  mo2Root: string,
+  targetHashes: string[],
+  planId: string,
+): Promise<void> {
+  await Promise.all(targetHashes.map((targetHash) => releaseLeaseLock(mo2Root, targetHash, planId)));
 }

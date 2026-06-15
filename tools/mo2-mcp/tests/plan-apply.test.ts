@@ -13,9 +13,8 @@ import { SnapshotManager } from "../src/snapshot.js";
 import { AuditLogger } from "../src/audit.js";
 import type { ToolContext } from "../src/types.js";
 import {
-  acquireLeaseLock,
-  computeLeaseTargetHash,
-  releaseLeaseLock,
+  acquireLeasesForTargets,
+  releaseLeaseLocks,
 } from "../src/lease-lock.js";
 
 const stubCtx = {
@@ -42,7 +41,7 @@ describe("PlanCache", () => {
       diff: "d",
       affectedFiles: [],
       lease: { token: "t", components: [] },
-      leaseLockTargetHash: "h",
+      leaseLockTargetHashes: ["h"],
     });
     expect(c.get(rec.planId)?.tool).toBe("x");
   });
@@ -60,7 +59,7 @@ describe("PlanCache", () => {
       diff: "d",
       affectedFiles: [],
       lease: { token: "t", components: [] },
-      leaseLockTargetHash: "h",
+      leaseLockTargetHashes: ["h"],
     });
     expect(c.consume(rec.planId)).not.toBeNull();
     expect(c.get(rec.planId)).toBeNull();
@@ -74,7 +73,7 @@ describe("PlanCache", () => {
       diff: "d",
       affectedFiles: [],
       lease: { token: "t", components: [] },
-      leaseLockTargetHash: "h",
+      leaseLockTargetHashes: ["h"],
       ttlMs: -1, // already expired
     });
     expect(c.get(rec.planId)).toBeNull();
@@ -303,7 +302,6 @@ describe("runPlanMode + runApplyMode", () => {
       sessionId: "apply-failure-session",
     } satisfies ToolContext;
     const targets = [{ path: target, kind: "text-file" as const }];
-    const targetHash = computeLeaseTargetHash(targets);
     const cache = new PlanCache();
     const snaps = new SnapshotManager(join(root, ".snap"), "s");
     const handler: PlanApplyHandler = {
@@ -333,7 +331,7 @@ describe("runPlanMode + runApplyMode", () => {
       ),
     ).rejects.toThrow(/mutation boom/);
 
-    const reacquire = await acquireLeaseLock(root, targetHash, {
+    const reacquire = await acquireLeasesForTargets(root, targets, {
       plan_id: "replacement-plan",
       mcp_pid: process.pid,
       mcp_session_id: "replacement-session",
@@ -343,7 +341,7 @@ describe("runPlanMode + runApplyMode", () => {
       expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     });
     expect(reacquire.acquired).toBe(true);
-    await releaseLeaseLock(root, targetHash, "replacement-plan");
+    if (reacquire.acquired) await releaseLeaseLocks(root, reacquire.targetHashes, "replacement-plan");
   });
 
   it("plan fails with lease_held when another live process holds the target lock", async () => {
@@ -361,8 +359,7 @@ describe("runPlanMode + runApplyMode", () => {
       sessionId: "blocked-session",
     } satisfies ToolContext;
     const targets = [{ path: target, kind: "text-file" as const }];
-    const targetHash = computeLeaseTargetHash(targets);
-    await acquireLeaseLock(root, targetHash, {
+    const otherLock = await acquireLeasesForTargets(root, targets, {
       plan_id: "other-plan",
       mcp_pid: process.pid,
       mcp_session_id: "other-session",
@@ -371,6 +368,7 @@ describe("runPlanMode + runApplyMode", () => {
       created_at: new Date().toISOString(),
       expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     });
+    expect(otherLock.acquired).toBe(true);
     const cache = new PlanCache();
     const snaps = new SnapshotManager(join(root, ".snap"), "s");
     const handler: PlanApplyHandler = {
@@ -399,7 +397,7 @@ describe("runPlanMode + runApplyMode", () => {
       }
       expect(cache.size()).toBe(0);
     } finally {
-      await releaseLeaseLock(root, targetHash, "other-plan");
+      if (otherLock.acquired) await releaseLeaseLocks(root, otherLock.targetHashes, "other-plan");
     }
   });
 });
