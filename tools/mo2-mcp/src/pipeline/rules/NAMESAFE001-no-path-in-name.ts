@@ -10,7 +10,7 @@ import { registerRule } from "../registry.js";
 import { walkStringArgs } from "../arg-walk.js";
 import type { Rule } from "../../types.js";
 
-const NAME_KEY_PATTERN = /^(name|mod_name|profile|new_name|old_name|from_profile|source|target|title)$/i;
+const NAME_KEY_PATTERN = /^(name|mod_name|profile|new_profile|new_name|old_name|from_profile|source|target|title|above|target_separator|label)$/i;
 const FORBIDDEN_NAME_CHARS = /[<>:"|?*\\/]/;
 const CONTROL_CHARS = /[\x00-\x1f]/;
 

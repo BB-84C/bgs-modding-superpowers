@@ -69,10 +69,35 @@ describe("NAMESAFE001 no-path-in-name", () => {
     expect(findings[0]?.code).toBe("NAMESAFE001");
   });
 
+  it("rejects path syntax in mod_name fields", async () => {
+    const slashFindings = await findingsFor({ mod_name: "bad/nested" });
+    const traversalFindings = await findingsFor({ mod_name: "../escape" });
+
+    expect(slashFindings[0]?.code).toBe("NAMESAFE001");
+    expect(traversalFindings[0]?.code).toBe("NAMESAFE001");
+  });
+
+  it("rejects path syntax in audited name-shaped tool fields", async () => {
+    const newProfileFindings = await findingsFor({ new_profile: "bad/nested" });
+    const aboveFindings = await findingsFor({ above: "../Separator" });
+    const targetSeparatorFindings = await findingsFor({ target_separator: "Bad\\Separator" });
+    const labelFindings = await findingsFor({ label: "bad/backup" });
+
+    expect(newProfileFindings[0]?.code).toBe("NAMESAFE001");
+    expect(aboveFindings[0]?.code).toBe("NAMESAFE001");
+    expect(targetSeparatorFindings[0]?.code).toBe("NAMESAFE001");
+    expect(labelFindings[0]?.code).toBe("NAMESAFE001");
+  });
+
   it("accepts legitimate name-shaped values", async () => {
     const findings = await findingsFor({
       name: "MyMod",
+      mod_name: "Good Mod",
       profile: "Default",
+      new_profile: "Profile B",
+      above: "Separator One",
+      target_separator: "Quest Mods",
+      label: "before cleanup",
       title: "xEdit Automation Serve",
     });
 
