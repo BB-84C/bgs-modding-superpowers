@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mo2-mcp-sidecar"
+version = "0.1.0"
+description = "Long-lived JSON-RPC sidecar for MO2 MCP TS server. Wraps mo2_assets_engine + pyfomod."
+requires-python = ">=3.11"
+dependencies = [
+    "pyfomod>=1.1.0",
+    "py7zr>=0.21",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov", "ruff", "mypy"]
+
+[project.scripts]
+mo2-mcp-sidecar = "mo2_mcp_sidecar.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+strict = true
+python_version = "3.11"

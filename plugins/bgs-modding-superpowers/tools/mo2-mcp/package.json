@@ -1,0 +1,16 @@
+{
+  "name": "mo2-mcp",
+  "version": "0.1.0",
+  "description": "Unified MO2 MCP server",
+  "type": "module",
+  "bin": {
+    "mo2-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "lint": "eslint src tests --ext .ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.6.0",
+    "zod": "^3.23.0"
+  }
+}

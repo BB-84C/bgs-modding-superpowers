@@ -11,6 +11,12 @@
       "args": [
         "./tools/bgs-kb-mcp/dist/index.js"
       ]
+    },
+    "mo2": {
+      "command": "node",
+      "args": [
+        "./tools/mo2-mcp/dist/index.js"
+      ]
     }
   }
 }
