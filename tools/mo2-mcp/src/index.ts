@@ -136,7 +136,7 @@ async function main(): Promise<void> {
   const pipe = new PipeClient();
   if (detection.online) {
     try {
-      await pipe.discoverAndConnect(mo2Root);
+      await pipe.discoverAndConnect(mo2Root, 5000, { expectedPid: detection.pid });
     } catch {
       // Offline mode — broker tools return not_connected
     }

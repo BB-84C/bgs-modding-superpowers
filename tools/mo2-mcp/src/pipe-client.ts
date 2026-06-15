@@ -10,7 +10,7 @@
  * <MO2_Root>/plugins/Mo2AgentControl/bootstrap/runtime/endpoint.json.
  */
 import { connect } from "node:net";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface BrokerResponse {
@@ -27,7 +27,11 @@ export class PipeClient {
    * Discover the broker pipe via endpoint.json, then smoke-test with
    * system.ping. Throws if discovery or ping fails.
    */
-  async discoverAndConnect(mo2Root: string, timeoutMs = 5000): Promise<void> {
+  async discoverAndConnect(
+    mo2Root: string,
+    timeoutMs = 5000,
+    options: { expectedPid?: number } = {},
+  ): Promise<void> {
     const endpointPath = join(
       mo2Root,
       "plugins",
@@ -41,10 +45,22 @@ export class PipeClient {
     if (!endpoint.endpoint) {
       throw new Error(`endpoint.json has no 'endpoint' field: ${endpointPath}`);
     }
-    this.pipeName = endpoint.endpoint;
+    const candidates = await pipeCandidates(endpoint.endpoint, options.expectedPid);
+    const errors: string[] = [];
+    for (const candidate of candidates) {
+      this.pipeName = candidate;
+      try {
+        await this.call("system.ping", {}, timeoutMs);
+        this.connectedOnce = true;
+        return;
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        errors.push(`${toPipePath(candidate)}: ${message}`);
+      }
+    }
 
-    await this.call("system.ping", {}, timeoutMs);
-    this.connectedOnce = true;
+    this.pipeName = undefined;
+    throw new Error(`broker pipe discovery failed; tried ${errors.join("; ")}`);
   }
 
   /**
@@ -118,6 +134,9 @@ export class PipeClient {
       });
 
       socket.once("error", (err) => {
+        if (isPipeCloseAfterResponseError(err)) {
+          return;
+        }
         finishReject(err);
       });
     });
@@ -135,4 +154,40 @@ export class PipeClient {
 function toPipePath(name: string): string {
   const stripped = name.replace(/^\\\\\.\\pipe\\/i, "");
   return `\\\\.\\pipe\\${stripped}`;
+}
+
+function isPipeCloseAfterResponseError(err: NodeJS.ErrnoException): boolean {
+  return err.code === "EPIPE" || err.code === "ECONNRESET";
+}
+
+function pipeNameOnly(name: string): string {
+  return name.replace(/^\\\\\.\\pipe\\/i, "");
+}
+
+async function pipeCandidates(endpoint: string, expectedPid?: number): Promise<string[]> {
+  const endpointName = pipeNameOnly(endpoint);
+  const candidates = [endpointName];
+  const prefix = endpointName.replace(/\d+$/, "");
+  if (prefix && prefix !== endpointName) {
+    if (expectedPid !== undefined) candidates.push(`${prefix}${expectedPid}`);
+
+    // Runtime files can be stale after MO2 crash/relaunch: endpoint.json may
+    // still name the previous process pipe even though the live broker has
+    // already published a new named pipe.  Fall back only when the pipe set is
+    // unambiguous (or when the caller supplied the current detection PID), so
+    // multiple live MO2 instances do not cross-connect accidentally.
+    try {
+      const liveNames = (await readdir("\\\\.\\pipe\\"))
+        .filter((name) => name.startsWith(prefix) && name !== endpointName);
+      if (expectedPid !== undefined) {
+        candidates.push(...liveNames.filter((name) => name === `${prefix}${expectedPid}`));
+      } else if (liveNames.length === 1) {
+        candidates.push(liveNames[0]);
+      }
+    } catch {
+      // Named-pipe directory enumeration is Windows-only best-effort fallback.
+    }
+  }
+
+  return [...new Set(candidates)];
 }
