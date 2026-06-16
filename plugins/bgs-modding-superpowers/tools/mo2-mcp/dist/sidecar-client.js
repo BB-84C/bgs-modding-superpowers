@@ -15,7 +15,21 @@ export class SidecarClient {
     pending = new Map();
     nextId = 1;
     ready = false;
+    lastStartOptions;
+    restartAttempts = 0;
+    maxRestarts = 3;
+    stopping = false;
+    permanentFailed = false;
+    lastExitReason;
     async start(opts) {
+        this.lastStartOptions = { ...opts };
+        this.restartAttempts = 0;
+        this.stopping = false;
+        this.permanentFailed = false;
+        this.lastExitReason = undefined;
+        return this.launch(opts);
+    }
+    async launch(opts) {
         const python = opts.pythonPath ?? "python";
         const args = [
             "-m",
@@ -28,14 +42,15 @@ export class SidecarClient {
         if (opts.profileDir) {
             args.push("--profile-dir", opts.profileDir);
         }
-        this.proc = spawn(python, args, { stdio: ["pipe", "pipe", "pipe"] });
-        this.proc.stdout.on("data", (chunk) => this.onData(chunk.toString("utf8")));
-        this.proc.stderr.on("data", (chunk) => {
+        const proc = spawn(python, args, { stdio: ["pipe", "pipe", "pipe"] });
+        this.proc = proc;
+        this.buffer = "";
+        this.ready = false;
+        proc.stdout.on("data", (chunk) => this.onData(chunk.toString("utf8")));
+        proc.stderr.on("data", (chunk) => {
             process.stderr.write(`[sidecar] ${chunk.toString("utf8")}`);
         });
-        this.proc.on("exit", () => {
-            this.ready = false;
-        });
+        proc.on("exit", (code, signal) => this.onExit(proc, code, signal));
         return new Promise((resolve, reject) => {
             let settled = false;
             const finishResolve = () => {
@@ -55,10 +70,10 @@ export class SidecarClient {
             const timer = setTimeout(() => {
                 finishReject(new Error("sidecar startup timeout (30s)"));
             }, 30000);
-            this.proc.once("error", (err) => {
+            proc.once("error", (err) => {
                 finishReject(err);
             });
-            this.proc.once("exit", (code) => {
+            proc.once("exit", (code) => {
                 if (!this.ready) {
                     finishReject(new Error(`sidecar exited before ready (code=${code})`));
                 }
@@ -73,6 +88,25 @@ export class SidecarClient {
                 setTimeout(checkReady, 50);
             };
             checkReady();
+        });
+    }
+    onExit(proc, code, signal) {
+        if (this.proc === proc) {
+            this.ready = false;
+        }
+        this.lastExitReason = `code=${code}; signal=${signal}`;
+        if (this.stopping || !this.lastStartOptions)
+            return;
+        if (this.restartAttempts >= this.maxRestarts) {
+            this.permanentFailed = true;
+            return;
+        }
+        this.restartAttempts += 1;
+        void this.launch(this.lastStartOptions).catch((error) => {
+            this.lastExitReason = error instanceof Error ? error.message : String(error);
+            if (this.restartAttempts >= this.maxRestarts) {
+                this.permanentFailed = true;
+            }
         });
     }
     onData(chunk) {
@@ -102,8 +136,8 @@ export class SidecarClient {
         }
     }
     async call(method, params = {}, timeoutMs = 60000) {
-        if (!this.ready || !this.proc) {
-            throw new Error("sidecar_not_ready");
+        if (this.permanentFailed || !this.ready || !this.proc) {
+            throw new Error(this.lastExitReason ? `sidecar_not_ready: ${this.lastExitReason}` : "sidecar_not_ready");
         }
         const id = this.nextId++;
         const request = { jsonrpc: "2.0", id, method, params };
@@ -128,6 +162,7 @@ export class SidecarClient {
         return this.ready;
     }
     async stop() {
+        this.stopping = true;
         if (this.proc) {
             this.proc.stdin.end();
             await new Promise((resolve) => setTimeout(resolve, 100));
@@ -136,5 +171,6 @@ export class SidecarClient {
             }
         }
         this.ready = false;
+        this.proc = undefined;
     }
 }
