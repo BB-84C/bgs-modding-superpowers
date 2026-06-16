@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "Unified MO2 MCP server",
   "type": "module",
-  "bin": { "mo2-mcp": "./dist/index.js" },
+  "bin": {
+    "mo2-mcp": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
@@ -12,11 +14,12 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.6.0",
-    "zod": "^3.23.0"
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "typescript": "^5.5.0",
-    "vitest": "^2.0.0",
-    "@types/node": "^22.0.0"
+    "vitest": "^2.0.0"
   }
 }
