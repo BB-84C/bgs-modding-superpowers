@@ -32,6 +32,23 @@ export class SnapshotManager {
     private sessionId: string,
   ) {}
 
+  /** Find a manifest record by snapshotId across this session's snapshot dirs. */
+  async findManifest(snapshotId: string): Promise<SnapshotRecord | undefined> {
+    const sessionDir = join(this.snapshotRoot, this.sessionId);
+    const dirs = await readdir(sessionDir).catch(() => [] as string[]);
+    for (const entry of dirs) {
+      const manifestPath = join(sessionDir, entry, "manifest.json");
+      try {
+        const text = await readFile(manifestPath, "utf8");
+        const record = JSON.parse(text) as SnapshotRecord;
+        if (record.snapshotId === snapshotId) return record;
+      } catch {
+        // skip malformed
+      }
+    }
+    return undefined;
+  }
+
   /**
    * Snapshot a set of source files/directories into a new dir under the session.
    * Returns the SnapshotRecord with snapshotId; sources that do not exist yet

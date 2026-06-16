@@ -5,16 +5,18 @@ param(
   [ValidateSet("all", "live", "closed")] [string]$Mode = "all"
 )
 
-function Ensure-HarnessMo2Alive {
-  $harnessRoot = "D:\awesome-bgs-mod-master\.artifacts\mo2"
+function Ensure-Mo2Alive {
+  param([string]$Root)
   $existing = Get-Process -Name "ModOrganizer*" -ErrorAction SilentlyContinue |
-    Where-Object { $_.Path -like "$harnessRoot\*" }
+    Where-Object { $_.Path -like "$Root\*" }
   if (-not $existing) {
-    Write-Host "[acceptance] Starting harness MO2..."
-    Start-Process -FilePath "$harnessRoot\ModOrganizer.exe" -WorkingDirectory $harnessRoot
+    Write-Host "[acceptance] Starting MO2 at $Root..."
+    # Multiple MO2 launchers (different roots) can coexist; FO4 single-instance
+    # only constrains the game runtime, not MO2 GUI processes.
+    Start-Process -FilePath "$Root\ModOrganizer.exe" -WorkingDirectory $Root
     Start-Sleep -Seconds 25
   } else {
-    Write-Host "[acceptance] Harness MO2 already alive (PID $($existing.Id -join ','))"
+    Write-Host "[acceptance] MO2 at $Root already alive (PID $($existing.Id -join ','))"
   }
 }
 
@@ -44,7 +46,10 @@ try {
   if ($Mode -in @("all", "live")) {
     Write-Host ""
     Write-Host "=== Phase: LIVE suite ==="
-    Ensure-HarnessMo2Alive
+    # Live suite mixes realEnv (WL2) tests and harnessEnv (.artifacts/mo2) tests
+    # in the same vitest run -- both MO2 launchers must be alive simultaneously.
+    Ensure-Mo2Alive -Root $Mo2Root
+    Ensure-Mo2Alive -Root "D:\awesome-bgs-mod-master\.artifacts\mo2"
     npx vitest run tests/acceptance-live.test.ts
     $liveExit = $LASTEXITCODE
   }

@@ -170,6 +170,21 @@ export async function spawnMcp(env: Record<string, string>): Promise<McpHandle> 
   }, 60_000);
   proc.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} })}\n`);
 
+  // Wait for binding to settle before returning. The eager-bind code path
+  // in main() runs after server.connect(), so `initialize` may return before
+  // bind is complete. mo2_session({}) goes through dispatch's awaitSettled
+  // hook, so it resolves only after any in-flight bind finishes -- giving us
+  // a stable starting state for the rest of the test.
+  const sessionResp = await request("tools/call", { name: "mo2_session", arguments: {} }, 60_000);
+  const sessionText = sessionResp.result?.content?.[0]?.text;
+  if (typeof sessionText === "string") {
+    const parsed = JSON.parse(sessionText) as { ok: boolean; snapshot?: { state: string; pipeConnected?: boolean; sidecarReady?: boolean; mo2Root?: string; profile?: string; error?: { code: string; message: string } } };
+    const snap = parsed.snapshot;
+    if (snap && snap.state !== "bound") {
+      throw new Error(`MCP spawned but binding did not reach 'bound' (state=${snap.state}, error=${JSON.stringify(snap.error ?? null)}, pipeConnected=${snap.pipeConnected}, sidecarReady=${snap.sidecarReady}); stderr=${stderrBuffer}`);
+    }
+  }
+
   return {
     call: async (name: string, args: any): Promise<ToolResponse> => {
       const response = await request("tools/call", { name, arguments: args }, 180_000);

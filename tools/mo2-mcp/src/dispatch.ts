@@ -95,9 +95,14 @@ export async function dispatchToolCall({
 
   const validatedArgs = parseResult.data as Record<string, unknown>;
   // If a bind is currently in-flight (e.g. eager auto-bind triggered by env at
-  // startup), wait for it to settle before refusing — clients shouldn't have to
-  // poll mo2_session just because their first tool call raced the bind.
-  if (!isBindingExemptTool(tool.name) && ctx.binding && bindingSnapshot(ctx).state === "binding") {
+  // startup), wait for it to settle before dispatching — clients shouldn't have
+  // to poll mo2_session just because their first tool call raced the bind. We
+  // apply this to ALL tools including binding-exempt ones (mo2_status,
+  // mo2_machine_contract, mo2_session): mo2_status is meant to return the
+  // bound view when a bind is imminent, and mo2_session's own bind/unbind
+  // operations are serialized by BindingManager.bindQueue so chaining one
+  // after an in-flight bind is safe (it just appends to the queue).
+  if (ctx.binding && bindingSnapshot(ctx).state === "binding") {
     await ctx.binding.awaitSettled();
   }
   if (!isBindingExemptTool(tool.name) && bindingSnapshot(ctx).state !== "bound") {
