@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 import threading
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,7 @@ class WorldKey:
     profile_dir: str
     modlist_mtime_ns: int
     plugins_mtime_ns: int
+    archive_fingerprint: str
 
 
 @dataclass
@@ -72,7 +74,54 @@ class WorldCache:
             profile_dir=str(profile_dir),
             modlist_mtime_ns=modlist.stat().st_mtime_ns if modlist.exists() else 0,
             plugins_mtime_ns=plugins.stat().st_mtime_ns if plugins.exists() else 0,
+            archive_fingerprint=self._archive_fingerprint(modlist),
         )
+
+    def _archive_fingerprint(self, modlist: Path) -> str:
+        """Return a cheap content fingerprint for enabled mod archives.
+
+        The cache is primarily invalidated by profile files, but users can swap
+        .ba2/.bsa files in an enabled mod without touching modlist.txt.  Include
+        archive relative path, size, and mtime_ns so those replacements rebuild
+        the world on the next asset query.
+        """
+        digest = hashlib.sha256()
+        for mod_name in self._enabled_mod_names(modlist):
+            mod_root = self.mods_root / mod_name
+            if not mod_root.exists() or not mod_root.is_dir():
+                continue
+            archive_entries: list[tuple[str, int, int]] = []
+            for archive in mod_root.rglob("*"):
+                if not archive.is_file() or archive.suffix.lower() not in (".ba2", ".bsa"):
+                    continue
+                try:
+                    stat = archive.stat()
+                except OSError:
+                    continue
+                archive_entries.append((archive.relative_to(mod_root).as_posix(), stat.st_size, stat.st_mtime_ns))
+            for rel_path, size, mtime_ns in sorted(archive_entries):
+                digest.update(mod_name.encode("utf-8", errors="surrogateescape"))
+                digest.update(b"\0")
+                digest.update(rel_path.encode("utf-8", errors="surrogateescape"))
+                digest.update(b"\0")
+                digest.update(str(size).encode("ascii"))
+                digest.update(b"\0")
+                digest.update(str(mtime_ns).encode("ascii"))
+                digest.update(b"\0")
+        return digest.hexdigest()
+
+    @staticmethod
+    def _enabled_mod_names(modlist: Path) -> list[str]:
+        if not modlist.exists():
+            return []
+        out: list[str] = []
+        for raw_line in modlist.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or len(line) < 2:
+                continue
+            if line[0] == "+":
+                out.append(line[1:])
+        return out
 
     def _get_lock(self, key_str: str) -> threading.Lock:
         with self._registry_lock:

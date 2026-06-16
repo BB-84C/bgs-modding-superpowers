@@ -55,6 +55,24 @@ def test_cache_invalidates_on_mtime_change(tmp_path, fake_world_factory):
     assert fake_world_factory["calls"] == 2
 
 
+def test_cache_invalidates_when_enabled_mod_archive_changes(tmp_path, fake_world_factory):
+    profile = _make_profile(tmp_path)
+    mods_dir = tmp_path / "mods"
+    archive_dir = mods_dir / "ModA"
+    archive_dir.mkdir(parents=True)
+    archive = archive_dir / "ModA - Main.ba2"
+    archive.write_bytes(b"before")
+    cache = WorldCache(mods_root=mods_dir, game="FALLOUT4")
+
+    w1 = cache.get(profile)
+    time.sleep(0.05)  # mtime resolution headroom on Windows NTFS
+    archive.write_bytes(b"after")
+    w2 = cache.get(profile)
+
+    assert w1 is not w2
+    assert fake_world_factory["calls"] == 2
+
+
 def test_invalidate_method_clears_cache(tmp_path, fake_world_factory):
     profile = _make_profile(tmp_path)
     cache = WorldCache(mods_root=tmp_path / "mods", game="FALLOUT4")
