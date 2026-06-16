@@ -41,6 +41,35 @@ function readBootstrap() {
   }
 }
 
+// mo2-mcp's index.ts hard-requires BGS_MO2_ROOT at startup; if missing it
+// writes "BGS_MO2_ROOT not set\n" to stderr and process.exit(1). That kills
+// stdio before MCP handshake completes, which OpenCode surfaces as
+//   "mo2 MCP error -32000: Connection closed".
+// detectMo2Root resolves a sensible default before we register the server:
+//   1. explicit process.env.BGS_MO2_ROOT wins (lets the user override)
+//   2. <PLUGIN_ROOT>/.artifacts/mo2 covers dev work in the awesome-bgs-mod-master
+//      repo (the canonical low-noise harness MO2)
+//   3. process.cwd() covers vendor-clone users running OpenCode at their own
+//      MO2 project root (the workspace cwd contains ModOrganizer.exe).
+// If none of those resolves, we skip registering mo2 entirely instead of
+// letting it crash on startup; the user can set BGS_MO2_ROOT and restart
+// OpenCode to bring it online.
+function detectMo2Root() {
+  if (process.env.BGS_MO2_ROOT) return process.env.BGS_MO2_ROOT;
+  const candidates = [
+    path.join(PLUGIN_ROOT, '.artifacts', 'mo2'),
+    process.cwd(),
+  ];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(path.join(c, 'ModOrganizer.exe'))) return c;
+    } catch {
+      // ignore stat failures; try next candidate
+    }
+  }
+  return undefined;
+}
+
 export const BgsModdingSuperpowersPlugin = async () => {
   const bootstrap = readBootstrap();
 
@@ -89,13 +118,23 @@ export const BgsModdingSuperpowersPlugin = async () => {
       // Python broker over named pipe + the bundled Python sidecar over JSON-RPC. The
       // first call lazily spins up the sidecar Python process; 240s timeout matches the
       // xedit lane for consistency, but warm calls return in tens of ms.
-      config.mcp.mo2 ??= {
-        type: 'local',
-        command: ['node', MO2_MCP_ENTRY],
-        enabled: true,
-        environment: {},
-        timeout: 240000,
-      };
+      //
+      // Registration is gated on detectMo2Root() finding a real MO2 install — without
+      // BGS_MO2_ROOT mo2-mcp would crash at startup ("Connection closed -32000"), so we
+      // simply do not register when no candidate resolves. Set BGS_MO2_ROOT explicitly
+      // and restart OpenCode to bring mo2 online in that case.
+      if (config.mcp.mo2 === undefined) {
+        const detectedMo2Root = detectMo2Root();
+        if (detectedMo2Root) {
+          config.mcp.mo2 = {
+            type: 'local',
+            command: ['node', MO2_MCP_ENTRY],
+            enabled: true,
+            environment: { BGS_MO2_ROOT: detectedMo2Root },
+            timeout: 240000,
+          };
+        }
+      }
     },
 
     // (d) Inject the bootstrap skill body into the first user message of each session.
