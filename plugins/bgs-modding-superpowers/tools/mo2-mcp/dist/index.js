@@ -86,19 +86,23 @@ async function main() {
     const server = new Server({ name: "mo2-mcp", version: "0.1.0" }, { capabilities: { tools: {} } });
     // tools/list returns JSON Schema, not Zod schema. The registered tools
     // carry Zod schemas (which dispatch.ts uses for safeParse on every tool
-    // call), so convert here. Without this, OpenCode reports
-    //   "mo2 Failed to get tools"
-    // because MCP clients try to validate the inputSchema as JSON Schema
-    // and Zod's internal `_def` shape is not a valid JSON Schema document.
+    // call), so convert here. MCP requires the top-level inputSchema to be a
+    // JSON Schema object with type==="object" -- but Zod discriminated unions
+    // convert to top-level {anyOf:[...]} or {oneOf:[...]}, which strict
+    // clients (OpenCode) reject as "Failed to get tools". Wrap any non-object
+    // top-level shape in {type:"object", ...wrapped_keyword} so the result
+    // always satisfies the MCP contract while preserving the union semantics
+    // for clients that do unwrap them.
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
         tools: getAllTools().map((t) => {
-            const schema = t.inputSchema instanceof ZodType
+            const rawSchema = t.inputSchema instanceof ZodType
                 ? zodToJsonSchema(t.inputSchema, { target: "openApi3" })
                 : t.inputSchema;
+            const inputSchema = normalizeMcpInputSchema(rawSchema);
             return {
                 name: t.name,
                 description: t.description,
-                inputSchema: schema,
+                inputSchema,
             };
         }),
     }));
@@ -143,3 +147,33 @@ main().catch((e) => {
     process.stderr.write(`mo2-mcp fatal: ${e}\n`);
     process.exit(1);
 });
+/**
+ * Ensure the inputSchema returned via tools/list always has type==="object"
+ * at the top level. Zod discriminated unions produce {anyOf:[...]} (or
+ * {oneOf}/{allOf}) -- valid JSON Schema, but MCP's tool-call wire format
+ * needs an object container so the args object can be schema-validated.
+ *
+ * If the top-level shape already has type==="object", pass it through. Else
+ * wrap it as { type:"object", <keyword>:..., properties:{}, additionalProperties:true }
+ * so the schema still describes the union for clients that look inside.
+ */
+function normalizeMcpInputSchema(schema) {
+    if (schema && typeof schema === "object" && schema.type === "object")
+        return schema;
+    for (const kw of ["anyOf", "oneOf", "allOf"]) {
+        if (kw in schema) {
+            return {
+                type: "object",
+                properties: {},
+                additionalProperties: true,
+                [kw]: schema[kw],
+            };
+        }
+    }
+    // Fall through: anything we don't recognize, wrap permissively.
+    return {
+        type: "object",
+        properties: {},
+        additionalProperties: true,
+    };
+}
