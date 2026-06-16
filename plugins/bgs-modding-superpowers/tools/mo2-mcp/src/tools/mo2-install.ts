@@ -29,6 +29,7 @@ import { resolveModsDir, resolveProfileDir } from "../path-helpers.js";
 import { readMoIni } from "../mo-ini.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { invalidateWorld } from "./state-sync.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const FomodChoiceSchema = z.object({
   page_name: z.string(),
@@ -63,7 +64,8 @@ async function _copyDirectoryContents(sourceDir: string, destDir: string): Promi
 const handler: PlanApplyHandler = {
   toolName: "mo2_install",
   async buildPlan(args, ctx) {
-    if (!ctx.sidecar) {
+    const bound = requireBoundContext(ctx);
+    if (!bound.sidecar) {
       throw new Error("sidecar_required_for_install");
     }
     const archivePath = args.archive_path as string;
@@ -79,7 +81,7 @@ const handler: PlanApplyHandler = {
     let isFomod = false;
     let fomodTree: unknown = null;
     try {
-      fomodTree = await ctx.sidecar.call("fomod.parse_choices", { archive_path: archivePath });
+      fomodTree = await bound.sidecar.call("fomod.parse_choices", { archive_path: archivePath });
       isFomod = true;
     } catch (e) {
       if (e instanceof Error && !/not_a_fomod|info\.xml/i.test(e.message)) {
@@ -111,20 +113,21 @@ const handler: PlanApplyHandler = {
     const modsDir = await resolveModsDir(ctx);
     const destPath = join(modsDir, modName);
     const installId = randomUUID();
-    const stagingDir = join(ctx.config.mo2Root, ".mo2-mcp", "staging", installId);
+    const bound = requireBoundContext(ctx);
+    const stagingDir = join(bound.config.mo2Root, ".mo2-mcp", "staging", installId);
 
-    if (!ctx.sidecar) throw new Error("sidecar_required");
+    if (!bound.sidecar) throw new Error("sidecar_required");
     await assertActiveProfile(ctx, profile);
 
     // 1. Stage content into stagingDir.
     if (args.fomod_choices) {
-      await ctx.sidecar.call("install.stage_fomod", {
+      await bound.sidecar.call("install.stage_fomod", {
         archive_path: archivePath,
         choices: args.fomod_choices,
         staging_dir: stagingDir,
       });
     } else {
-      await ctx.sidecar.call("archive.extract_all", {
+      await bound.sidecar.call("archive.extract_all", {
         archive_path: archivePath,
         dest: stagingDir,
       });
@@ -134,8 +137,8 @@ const handler: PlanApplyHandler = {
     // staged contents into that broker-returned path. Offline path owns the
     // destination directory creation and keeps the clobber guard before rename.
     let finalDestPath = destPath;
-    if (ctx.pipeClient) {
-      const resp = await ctx.pipeClient.call("installation.create_mod_from_directory", {
+    if (bound.pipeClient) {
+      const resp = await bound.pipeClient.call("installation.create_mod_from_directory", {
         name: modName,
         source_dir: stagingDir,
       });
@@ -167,7 +170,7 @@ const handler: PlanApplyHandler = {
     }
 
     // 3. Write meta.ini (oracle §4.3 fields).
-    const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
+    const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
     const meta = [
       "[General]",
       `gameName=${ini.general.game ?? ""}`,

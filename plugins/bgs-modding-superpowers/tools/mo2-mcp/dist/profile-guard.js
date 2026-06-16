@@ -1,7 +1,9 @@
+import { requireBoundContext } from "./binding.js";
 export async function assertActiveProfile(ctx, requestedProfile) {
-    if (!ctx.pipeClient)
+    const pipeClient = requireBoundContext(ctx).pipeClient;
+    if (!pipeClient)
         return;
-    const response = await ctx.pipeClient.call("profile.active", {});
+    const response = await pipeClient.call("profile.active", {});
     if (!response.ok) {
         throw new Error(response.error?.message ?? "profile.active broker error");
     }

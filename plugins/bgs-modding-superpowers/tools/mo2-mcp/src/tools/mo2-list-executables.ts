@@ -8,6 +8,7 @@ import { z } from "zod";
 import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { readMoIni } from "../mo-ini.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const inputSchema = z.object({});
 
@@ -18,7 +19,8 @@ registerTool({
     "List configured customExecutables from ModOrganizer.ini (title, binary, arguments, workingDirectory, steamAppID, ownicon, hide, ...).",
   inputSchema,
   handler: async (_args, ctx) => {
-    const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
+    const bound = requireBoundContext(ctx);
+    const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
     return {
       ok: true,
       result: {

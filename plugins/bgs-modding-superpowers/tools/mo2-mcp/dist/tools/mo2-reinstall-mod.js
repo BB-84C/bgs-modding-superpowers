@@ -12,6 +12,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
 import { invalidateWorld } from "./state-sync.js";
+import { requireBoundContext } from "../binding.js";
 const FomodChoiceSchema = z.object({
     page_name: z.string(),
     selected_options: z.array(z.object({ group_name: z.string(), option_name: z.string() })),
@@ -34,24 +35,26 @@ function _extractInstallationFile(resp) {
     return installFile;
 }
 async function _readInstallSource(args, ctx) {
-    if (!ctx.pipeClient)
+    const bound = requireBoundContext(ctx);
+    if (!bound.pipeClient)
         throw new Error("live_mo2_required_for_reinstall");
     const name = args.name;
-    const meta = await ctx.pipeClient.call("mods.meta_read", { name });
+    const meta = await bound.pipeClient.call("mods.meta_read", { name });
     const installFile = _extractInstallationFile(meta);
-    const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
-    const downloadsDir = ini.settings.downloadDirectory ?? join(ctx.config.mo2Root, "downloads");
-    const modsDir = ini.settings.modDirectory ?? join(ctx.config.mo2Root, "mods");
+    const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
+    const downloadsDir = ini.settings.downloadDirectory ?? join(bound.config.mo2Root, "downloads");
+    const modsDir = ini.settings.modDirectory ?? join(bound.config.mo2Root, "mods");
     const archivePath = join(downloadsDir, installFile);
     if (!existsSync(archivePath))
         throw new Error(`archive_not_in_downloads: ${installFile}`);
     return { installFile, archivePath, modPath: join(modsDir, name) };
 }
 async function _detectFomod(ctx, archivePath) {
-    if (!ctx.sidecar)
+    const sidecar = requireBoundContext(ctx).sidecar;
+    if (!sidecar)
         return false;
     try {
-        await ctx.sidecar.call("fomod.parse_choices", { archive_path: archivePath });
+        await sidecar.call("fomod.parse_choices", { archive_path: archivePath });
         return true;
     }
     catch (e) {
@@ -72,7 +75,8 @@ const handler = {
         };
     },
     async applyMutation(plan, ctx) {
-        if (!ctx.pipeClient)
+        const pipeClient = requireBoundContext(ctx).pipeClient;
+        if (!pipeClient)
             throw new Error("live_mo2_required_for_reinstall");
         const name = plan.args.name;
         const { installFile, archivePath } = await _readInstallSource(plan.args, ctx);
@@ -80,7 +84,7 @@ const handler = {
         if (isFomod && !plan.args.fomod_choices) {
             throw new Error("fomod_choices_required_for_reinstall");
         }
-        const resp = await ctx.pipeClient.call("installation.install_local_archive", {
+        const resp = await pipeClient.call("installation.install_local_archive", {
             archive_path: archivePath,
             name_suggestion: name,
         });

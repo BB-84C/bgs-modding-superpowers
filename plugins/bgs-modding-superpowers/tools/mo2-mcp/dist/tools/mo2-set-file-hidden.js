@@ -13,6 +13,7 @@ import { routeToPlanApply } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
 import { readProfile } from "../profile-reader.js";
 import { invalidateWorld } from "./state-sync.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("plan"), virtual_path: z.string(), hidden: z.boolean() }),
     z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
@@ -32,9 +33,10 @@ function _candidateRels(virtualPath) {
     return Array.from(new Set(expanded));
 }
 async function _resolveOffline(ctx, virtualPath) {
-    const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
-    const modsDir = ini.settings.modDirectory ?? join(ctx.config.mo2Root, "mods");
-    const profile = await readProfile(join(ctx.config.mo2Root, "profiles", "Default"));
+    const bound = requireBoundContext(ctx);
+    const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
+    const modsDir = ini.settings.modDirectory ?? join(bound.config.mo2Root, "mods");
+    const profile = await readProfile(join(bound.config.mo2Root, "profiles", "Default"));
     const enabled = profile.mods
         .filter((mod) => mod.enabled && !mod.isSeparator)
         .sort((a, b) => b.priority - a.priority);
@@ -53,8 +55,9 @@ async function _resolveOffline(ctx, virtualPath) {
 }
 async function _resolveRealPath(args, ctx, plan) {
     const virtualPath = args.virtual_path;
-    if (ctx.pipeClient) {
-        const resp = await ctx.pipeClient.call("organizer.resolve_path", { filename: virtualPath });
+    const pipeClient = requireBoundContext(ctx).pipeClient;
+    if (pipeClient) {
+        const resp = await pipeClient.call("organizer.resolve_path", { filename: virtualPath });
         if (!resp.ok)
             throw new Error(resp.error?.message ?? "organizer.resolve_path failed");
         const resolved = resp.result?.resolved;

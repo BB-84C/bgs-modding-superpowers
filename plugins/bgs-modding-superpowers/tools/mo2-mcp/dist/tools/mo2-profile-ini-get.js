@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { readMoIni } from "../mo-ini.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.object({
     profile: z.string().default("Default"),
     ini_name: z.enum(["game", "prefs", "custom"]),
@@ -39,9 +40,10 @@ registerTool({
     description: "Read profile-local game INI (<game>.ini, <game>Prefs.ini, or <game>Custom.ini). Returns sections, a specific section, or a specific key. Falls back to %DOCUMENTS% if profile-local INIs absent.",
     inputSchema,
     handler: async (args, ctx) => {
+        const bound = requireBoundContext(ctx);
         const profile = args.profile ?? "Default";
         const iniName = args.ini_name;
-        const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
+        const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
         const game = ini.general.game;
         if (!game) {
             return {
@@ -55,7 +57,7 @@ registerTool({
             custom: `${game}Custom.ini`,
         };
         const fileName = fileMap[iniName];
-        const localPath = join(ctx.config.mo2Root, "profiles", profile, fileName);
+        const localPath = join(bound.config.mo2Root, "profiles", profile, fileName);
         let text;
         let source;
         try {

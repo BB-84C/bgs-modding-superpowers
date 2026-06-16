@@ -11,6 +11,7 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { readMoIni, type MoIniCustomExecutable } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
 import { detectMo2Running } from "../detection.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const ExecutableEntrySchema = z.object({
   title: z.string(),
@@ -145,8 +146,9 @@ function _withDefaults(entry: ExecutableEntry): MoIniCustomExecutable {
 const handler: PlanApplyHandler = {
   toolName: "mo2_configure_executable",
   async buildPlan(args, ctx) {
-    await _assertMo2Closed(ctx.config.mo2Root);
-    const iniPath = join(ctx.config.mo2Root, "ModOrganizer.ini");
+    const bound = requireBoundContext(ctx);
+    await _assertMo2Closed(bound.config.mo2Root);
+    const iniPath = join(bound.config.mo2Root, "ModOrganizer.ini");
     const ini = await readMoIni(iniPath);
     let diff: string;
     if (args.action === "add") {
@@ -175,7 +177,8 @@ const handler: PlanApplyHandler = {
     };
   },
   async applyMutation(plan, ctx) {
-    const iniPath = join(ctx.config.mo2Root, "ModOrganizer.ini");
+    const bound = requireBoundContext(ctx);
+    const iniPath = join(bound.config.mo2Root, "ModOrganizer.ini");
     const ini = await readMoIni(iniPath);
     let entries: MoIniCustomExecutable[] = ini.customExecutables.map((entry) => ({ ...entry }));
     if (plan.args.action === "add") {

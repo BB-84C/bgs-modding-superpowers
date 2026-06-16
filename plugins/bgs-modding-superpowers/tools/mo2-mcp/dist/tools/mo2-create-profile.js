@@ -11,6 +11,7 @@ import { mkdir, writeFile, copyFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
+import { requireBoundContext } from "../binding.js";
 const ProfileSettingSchema = z.enum(["MODS", "SAVEGAMES", "CONFIGURATION", "PREFER_DEFAULTS"]);
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
@@ -38,12 +39,13 @@ async function _copyProfileTextAndIni(profilesRoot, fromProfile, newDir) {
 const handler = {
     toolName: "mo2_create_profile",
     async buildPlan(args, ctx) {
+        const bound = requireBoundContext(ctx);
         const name = args.name;
-        const profilesRoot = join(ctx.config.mo2Root, "profiles");
+        const profilesRoot = join(bound.config.mo2Root, "profiles");
         const newDir = join(profilesRoot, name);
         if (existsSync(newDir))
             throw new Error(`profile_exists: ${name}`);
-        const path = ctx.pipeClient ? "online" : "offline";
+        const path = bound.pipeClient ? "online" : "offline";
         return {
             diff: `Create profile ${name} via ${path} path${args.from_profile ? `, clone modlist from ${String(args.from_profile)}` : ""}`,
             affectedFiles: [newDir],
@@ -51,19 +53,20 @@ const handler = {
         };
     },
     async applyMutation(plan, ctx) {
+        const bound = requireBoundContext(ctx);
         const name = plan.args.name;
-        const profilesRoot = join(ctx.config.mo2Root, "profiles");
+        const profilesRoot = join(bound.config.mo2Root, "profiles");
         const newDir = join(profilesRoot, name);
         await mkdir(newDir, { recursive: true });
         await writeFile(join(newDir, "modlist.txt"), "", "utf8");
         await writeFile(join(newDir, "archives.txt"), "", "utf8");
-        let source = ctx.pipeClient
+        let source = bound.pipeClient
             ? "online_initialized"
             : "offline_created";
         let warning;
-        if (ctx.pipeClient) {
+        if (bound.pipeClient) {
             try {
-                const resp = await ctx.pipeClient.call("profile.initialize", {
+                const resp = await bound.pipeClient.call("profile.initialize", {
                     profile_dir: newDir,
                     settings: plan.args.settings ?? ["MODS", "CONFIGURATION"],
                 });

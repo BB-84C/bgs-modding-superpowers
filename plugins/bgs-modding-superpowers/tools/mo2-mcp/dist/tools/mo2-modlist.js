@@ -9,6 +9,7 @@ import { z } from "zod";
 import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { readProfile } from "../profile-reader.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.object({
     profile: z.string().default("Default"),
     enrich: z.boolean().default(false),
@@ -19,8 +20,9 @@ registerTool({
     description: "Read modlist.txt. Returns mods with name/priority/enabled/is_separator. Native TS read (offline-fast). If enrich=true and MO2 is live, adds live_priority via broker.",
     inputSchema,
     handler: async (args, ctx) => {
+        const bound = requireBoundContext(ctx);
         const profile = args.profile ?? "Default";
-        const profileDir = join(ctx.config.mo2Root, "profiles", profile);
+        const profileDir = join(bound.config.mo2Root, "profiles", profile);
         const p = await readProfile(profileDir);
         let mods = p.mods.map((m) => ({
             name: m.name,
@@ -28,9 +30,9 @@ registerTool({
             enabled: m.enabled,
             is_separator: m.isSeparator,
         }));
-        if (args.enrich && ctx.pipeClient) {
+        if (args.enrich && bound.pipeClient) {
             try {
-                const resp = await ctx.pipeClient.call("mods.list", {});
+                const resp = await bound.pipeClient.call("mods.list", {});
                 if (resp.ok && resp.result && typeof resp.result === "object") {
                     const liveMods = resp.result.mods ?? [];
                     const liveMap = new Map(liveMods.map((m) => [m.name, m]));

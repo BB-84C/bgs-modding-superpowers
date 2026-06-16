@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { registerRule } from "../registry.js";
 import { walkStringArgs } from "../arg-walk.js";
 import { readMoIni } from "../../mo-ini.js";
+import { requireBoundContext, bindingSnapshot } from "../../binding.js";
 const gameDataRootByMo2Root = new Map();
 function normalizePathish(value) {
     return value.replace(/\\/g, "/").replace(/\/+$/g, "").toLowerCase();
@@ -56,7 +57,10 @@ export const stockGameDenyRule = {
     severity: "CRITICAL",
     appliesTo: () => true,
     evaluate: async (ctx, args, _toolName) => {
-        const gameDataRoot = await gameDataRootFor(ctx.config.mo2Root);
+        if (bindingSnapshot(ctx).state !== "bound")
+            return null;
+        const bound = requireBoundContext(ctx);
+        const gameDataRoot = await gameDataRootFor(bound.config.mo2Root);
         for (const arg of walkStringArgs(args)) {
             if (gameDataRoot && containsPathRoot(arg.value, gameDataRoot)) {
                 return {
@@ -71,7 +75,7 @@ export const stockGameDenyRule = {
                     },
                 };
             }
-            const pattern = userDenyPatternFor(arg.value, ctx.config.deny);
+            const pattern = userDenyPatternFor(arg.value, bound.config.deny);
             if (pattern) {
                 return {
                     code: "STOCK001",

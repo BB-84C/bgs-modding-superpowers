@@ -10,6 +10,7 @@ import { getTool } from "../../tool-registry.js";
 import { registerRule } from "../registry.js";
 import type { Config } from "../../config.js";
 import type { Rule } from "../../types.js";
+import { requireBoundContext, bindingSnapshot } from "../../binding.js";
 
 type ToolTier = "T1" | "T2" | "T3";
 type PermissionCeiling = Config["permissionCeiling"];
@@ -31,11 +32,12 @@ export const permissionCeilingRule: Rule = {
   severity: "CRITICAL",
   appliesTo: (toolName) => getTool(toolName) !== undefined,
   evaluate: async (ctx, _args, toolName) => {
+    if (bindingSnapshot(ctx).state !== "bound") return null;
     const tool = getTool(toolName);
     if (!tool) return null;
 
     const required = REQUIRED_BY_TIER[tool.tier];
-    const configured = ctx.config.permissionCeiling;
+    const configured = requireBoundContext(ctx).config.permissionCeiling;
     if (CEILING_RANK[configured] >= CEILING_RANK[required]) return null;
 
     return {

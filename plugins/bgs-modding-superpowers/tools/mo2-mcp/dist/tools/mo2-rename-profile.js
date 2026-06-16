@@ -14,6 +14,7 @@ import { routeToPlanApply } from "../plan-apply.js";
 import { detectMo2Running } from "../detection.js";
 import { readMoIni } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("plan"), old_name: z.string(), new_name: z.string() }),
     z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
@@ -48,17 +49,18 @@ function rewriteSelectedProfileLine(text, oldName, newName) {
 const handler = {
     toolName: "mo2_rename_profile",
     async buildPlan(args, ctx) {
-        await assertMo2Closed(ctx.config.mo2Root);
+        const bound = requireBoundContext(ctx);
+        await assertMo2Closed(bound.config.mo2Root);
         const oldName = args.old_name;
         const newName = args.new_name;
-        const profilesRoot = join(ctx.config.mo2Root, "profiles");
+        const profilesRoot = join(bound.config.mo2Root, "profiles");
         const oldDir = join(profilesRoot, oldName);
         const newDir = join(profilesRoot, newName);
         if (!existsSync(oldDir))
             throw new Error("profile_not_found");
         if (existsSync(newDir))
             throw new Error("target_exists");
-        const iniPath = join(ctx.config.mo2Root, "ModOrganizer.ini");
+        const iniPath = join(bound.config.mo2Root, "ModOrganizer.ini");
         const ini = await readMoIni(iniPath);
         const needsIniUpdate = selectedProfileMatches(ini.general.selectedProfile, oldName);
         return {
@@ -68,11 +70,12 @@ const handler = {
         };
     },
     async applyMutation(plan, ctx) {
+        const bound = requireBoundContext(ctx);
         const oldName = plan.args.old_name;
         const newName = plan.args.new_name;
-        const profilesRoot = join(ctx.config.mo2Root, "profiles");
+        const profilesRoot = join(bound.config.mo2Root, "profiles");
         await rename(join(profilesRoot, oldName), join(profilesRoot, newName));
-        const iniPath = join(ctx.config.mo2Root, "ModOrganizer.ini");
+        const iniPath = join(bound.config.mo2Root, "ModOrganizer.ini");
         const text = await readFile(iniPath, "utf8");
         const rewritten = rewriteSelectedProfileLine(text, oldName, newName);
         if (rewritten.updated) {

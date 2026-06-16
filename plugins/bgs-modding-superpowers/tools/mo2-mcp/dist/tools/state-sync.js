@@ -1,4 +1,5 @@
 import { resolveProfileDir } from "../path-helpers.js";
+import { requireBoundContext } from "../binding.js";
 /**
  * Sidecar World cache invalidation after mod-mutation operations.
  *
@@ -11,9 +12,10 @@ import { resolveProfileDir } from "../path-helpers.js";
  * post-mutation filesystem state.
  */
 export async function invalidateWorld(ctx, profiles = ["Default"]) {
-    if (!ctx.sidecar)
+    const sidecar = requireBoundContext(ctx).sidecar;
+    if (!sidecar)
         return;
     for (const profile of Array.from(new Set(profiles))) {
-        await ctx.sidecar.call("world.invalidate", { profile_dir: resolveProfileDir(ctx, profile) });
+        await sidecar.call("world.invalidate", { profile_dir: resolveProfileDir(ctx, profile) });
     }
 }

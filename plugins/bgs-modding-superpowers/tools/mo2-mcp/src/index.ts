@@ -2,14 +2,10 @@
  * MO2 MCP server bootstrap.
  *
  * Sequence:
- *   1. Parse env (BGS_MO2_ROOT required)
- *   2. Load .mo2-mcp.json config
- *   3. If permission_ceiling=read-only: probe-test write to MO2_Root → must fail
- *   4. Read ModOrganizer.ini for game/paths
- *   5. Spawn Python sidecar with --game (P-B7)
- *   6. Detect MO2 running (3-tier ladder); connect named pipe if online
- *   7. Wire ToolContext with plans + snapshots + audit (P-F9)
- *   8. Start MCP stdio server, register tools/list + tools/call handlers
+ *   1. Build an unbound BindingManager (lazy MO2 root/session selection)
+ *   2. Wire ToolContext with binding + plans + snapshots + audit (P-F9)
+ *   3. Start MCP stdio server, register tools/list + tools/call handlers
+ *   4. Best-effort eager auto-bind if BGS_MO2_ROOT is present
  *
  * Tools register via side-effect imports (S3+ adds them); S2 registers ZERO
  * tools — server boots clean and tools/list returns [].
@@ -21,14 +17,10 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { randomUUID } from "node:crypto";
-import { writeFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Lifecycle } from "./lifecycle.js";
-import { loadConfig } from "./config.js";
-import { readMoIni } from "./mo-ini.js";
-import { detectMo2Running } from "./detection.js";
-import { PipeClient } from "./pipe-client.js";
-import { SidecarClient, type SidecarGame } from "./sidecar-client.js";
+import { BindingManager } from "./binding.js";
 import { AuditLogger } from "./audit.js";
 import { SnapshotManager } from "./snapshot.js";
 import { PlanCache } from "./plan-apply.js";
@@ -39,6 +31,7 @@ import "./pipeline/rules/STOCK001-stock-game-deny.js"; // side-effect: register 
 import "./pipeline/rules/PATHSAFE001-path-traversal-deny.js"; // side-effect: register PATHSAFE001
 import "./pipeline/rules/NAMESAFE001-no-path-in-name.js"; // side-effect: register NAMESAFE001
 import "./pipeline/rules/CEILING001-permission-ceiling.js"; // side-effect: register CEILING001
+import "./tools/mo2-session.js"; // side-effect: register mo2_session
 import "./tools/mo2-status.js"; // side-effect: register mo2_status
 import "./tools/mo2-machine-contract.js"; // side-effect: register mo2_machine_contract
 import "./tools/mo2-modlist.js"; // side-effect: register mo2_modlist
@@ -76,81 +69,19 @@ import "./tools/mo2-clone-profile.js"; // side-effect: register mo2_clone_profil
 import "./tools/mo2-rename-profile.js"; // side-effect: register mo2_rename_profile
 import type { ToolContext } from "./types.js";
 
-const GAME_MAP: Record<string, SidecarGame> = {
-  fallout4: "FALLOUT4",
-  skyrimSE: "SKYRIM_SE",
-  skyrimLE: "SKYRIM_LE",
-  starfield: "STARFIELD",
-  oblivion: "OBLIVION",
-  falloutNV: "FALLOUT_NV",
-};
-
 async function main(): Promise<void> {
   const sessionId = randomUUID();
   const lifecycle = new Lifecycle();
   lifecycle.markStarting();
-
-  const mo2Root = process.env.BGS_MO2_ROOT;
-  if (!mo2Root) {
-    process.stderr.write("BGS_MO2_ROOT not set\n");
-    process.exit(1);
-  }
-
-  const config = await loadConfig({ mo2Root });
-
-  // Read-only ceiling probe (charrdge :ro defense-in-depth pattern)
-  if (config.permissionCeiling === "read-only") {
-    const probePath = join(mo2Root, ".mo2-mcp", "probe");
-    try {
-      await writeFile(probePath, "probe");
-      await unlink(probePath);
-      process.stderr.write(
-        "read-only ceiling configured but probe-write succeeded; refusing to start\n",
-      );
-      process.exit(2);
-    } catch {
-      // Expected: probe-write failed → host actually enforces read-only
-    }
-  }
-
-  const ini = await readMoIni(join(mo2Root, "ModOrganizer.ini"));
-  const profileName = config.allowedProfiles[0];
-  const profileDir = join(mo2Root, "profiles", profileName);
-
-  // Spawn sidecar (P-B7 --game propagation)
-  const game = GAME_MAP[ini.general.game ?? "fallout4"] ?? "FALLOUT4";
-  const sidecar = new SidecarClient();
-  try {
-    await sidecar.start({
-      modsRoot: ini.settings.modDirectory ?? join(mo2Root, "mods"),
-      profileDir,
-      game,
-    });
-  } catch (e) {
-    process.stderr.write(`[mo2-mcp] sidecar failed to start: ${e}\n`);
-    // Continue — asset tools will return sidecar_not_ready
-  }
-
-  // MO2 detection ladder
-  const detection = await detectMo2Running({ mo2Root, profileDir });
-  const pipe = new PipeClient();
-  if (detection.online) {
-    try {
-      await pipe.discoverAndConnect(mo2Root, 5000, { expectedPid: detection.pid ?? undefined });
-    } catch {
-      // Offline mode — broker tools return not_connected
-    }
-  }
-
-  const audit = new AuditLogger(config.auditRoot, sessionId);
-  const snapshots = new SnapshotManager(config.snapshotRoot, sessionId);
+  const binding = new BindingManager();
+  const runtimeRoot = join(tmpdir(), "mo2-mcp-runtime");
+  const audit = new AuditLogger(join(runtimeRoot, "audit"), sessionId);
+  const snapshots = new SnapshotManager(join(runtimeRoot, "snapshots"), sessionId);
   const plans = new PlanCache();
   const rules = getAllRules();
 
   const ctx: ToolContext = {
-    config,
-    pipeClient: pipe.isConnected() ? pipe : undefined,
-    sidecar: sidecar.isReady() ? sidecar : undefined,
+    binding,
     sessionId,
     plans,
     snapshots,
@@ -181,12 +112,32 @@ async function main(): Promise<void> {
 
   lifecycle.markReady({
     sidecarPid: undefined,
-    brokerPipeName: pipe.isConnected() ? "connected" : undefined,
+    brokerPipeName: binding.getSnapshot().pipeConnected ? "connected" : undefined,
   });
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  process.stderr.write(`mo2-mcp ready (session ${sessionId})\n`);
+
+  // Eager auto-bind: if BGS_MO2_ROOT is set, do the bind BEFORE writing the
+  // "ready" log so clients can treat the ready signal as "tools are usable
+  // immediately". We await + try/catch so a failed bind never blocks server
+  // startup — the server still becomes ready in unbound/failed state and the
+  // agent can recover via mo2_session({ mo2Root, ... }).
+  if (process.env.BGS_MO2_ROOT) {
+    const eagerRoot = process.env.BGS_MO2_ROOT;
+    try {
+      const snapshot = await binding.bind({ mo2Root: eagerRoot });
+      process.stderr.write(
+        `[mo2-mcp] eager bind ${snapshot.state} (${snapshot.mo2Root ?? eagerRoot})` +
+          (snapshot.error ? `: ${snapshot.error.message}` : "") +
+          "\n",
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`[mo2-mcp] eager bind failed (${eagerRoot}): ${message}\n`);
+    }
+  }
+  process.stderr.write(`mo2-mcp ready (session ${sessionId}, binding=${binding.getSnapshot().state})\n`);
 }
 
 main().catch((e) => {

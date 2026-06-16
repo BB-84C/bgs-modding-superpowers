@@ -8,6 +8,7 @@
  */
 import { getTool } from "../../tool-registry.js";
 import { registerRule } from "../registry.js";
+import { requireBoundContext, bindingSnapshot } from "../../binding.js";
 const CEILING_RANK = {
     "read-only": 0,
     "metadata-editable": 1,
@@ -23,11 +24,13 @@ export const permissionCeilingRule = {
     severity: "CRITICAL",
     appliesTo: (toolName) => getTool(toolName) !== undefined,
     evaluate: async (ctx, _args, toolName) => {
+        if (bindingSnapshot(ctx).state !== "bound")
+            return null;
         const tool = getTool(toolName);
         if (!tool)
             return null;
         const required = REQUIRED_BY_TIER[tool.tier];
-        const configured = ctx.config.permissionCeiling;
+        const configured = requireBoundContext(ctx).config.permissionCeiling;
         if (CEILING_RANK[configured] >= CEILING_RANK[required])
             return null;
         return {

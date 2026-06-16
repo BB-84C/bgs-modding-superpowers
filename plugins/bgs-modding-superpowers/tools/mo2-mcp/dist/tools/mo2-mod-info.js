@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { registerTool } from "../tool-registry.js";
 import { readMoIni } from "../mo-ini.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.object({
     name: z.string(),
 });
@@ -35,9 +36,10 @@ registerTool({
     description: "Single mod detail: meta.ini parsed sections, file count, archive count (BA2/BSA), absolute path.",
     inputSchema,
     handler: async (args, ctx) => {
+        const bound = requireBoundContext(ctx);
         const name = args.name;
-        const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
-        const modsDir = ini.settings.modDirectory ?? join(ctx.config.mo2Root, "mods");
+        const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
+        const modsDir = ini.settings.modDirectory ?? join(bound.config.mo2Root, "mods");
         const modPath = join(modsDir, name);
         try {
             await stat(modPath);

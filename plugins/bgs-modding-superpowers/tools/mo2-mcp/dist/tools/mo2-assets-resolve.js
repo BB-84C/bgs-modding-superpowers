@@ -6,6 +6,7 @@
 import { z } from "zod";
 import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.object({
     profile: z.string().default("Default"),
     virtual_path: z.string(),
@@ -16,15 +17,16 @@ registerTool({
     description: "Resolve a virtual path (e.g. 'Data/textures/foo.dds') to winner mod + provider chain via sidecar.",
     inputSchema,
     handler: async (args, ctx) => {
-        if (!ctx.sidecar) {
+        const bound = requireBoundContext(ctx);
+        if (!bound.sidecar) {
             return {
                 ok: false,
                 error: { code: "sidecar_not_ready", message: "Python sidecar not available" },
             };
         }
         const profile = args.profile ?? "Default";
-        const profileDir = join(ctx.config.mo2Root, "profiles", profile);
-        const result = await ctx.sidecar.call("assets.resolve_file", {
+        const profileDir = join(bound.config.mo2Root, "profiles", profile);
+        const result = await bound.sidecar.call("assets.resolve_file", {
             profile_dir: profileDir,
             virtual_path: args.virtual_path,
         });

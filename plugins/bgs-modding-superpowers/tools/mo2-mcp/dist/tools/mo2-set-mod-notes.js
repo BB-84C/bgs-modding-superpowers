@@ -11,6 +11,7 @@ import { routeToPlanApply } from "../plan-apply.js";
 import { atomicWriteText } from "../atomic.js";
 import { resolveModMetaPath } from "../path-helpers.js";
 import { upsertIniValue } from "../ini-helpers.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("plan"), name: z.string(), notes: z.string() }),
     z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
@@ -28,8 +29,9 @@ const handler = {
     async applyMutation(plan, ctx) {
         const args = plan.args;
         const metaPath = await resolveModMetaPath(args.name, ctx);
-        if (ctx.pipeClient) {
-            const resp = await ctx.pipeClient.call("mods.meta_write", {
+        const pipeClient = requireBoundContext(ctx).pipeClient;
+        if (pipeClient) {
+            const resp = await pipeClient.call("mods.meta_write", {
                 name: args.name,
                 updates: { General: { notes: `"${args.notes}"` } },
             });

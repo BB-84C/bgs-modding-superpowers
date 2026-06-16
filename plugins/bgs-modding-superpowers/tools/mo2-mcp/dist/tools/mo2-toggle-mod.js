@@ -15,6 +15,7 @@ import { atomicWriteText } from "../atomic.js";
 import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("plan"),
@@ -49,11 +50,12 @@ const handler = {
         };
     },
     async applyMutation(plan, ctx) {
+        const bound = requireBoundContext(ctx);
         const args = plan.args;
         const profile = args.profile ?? "Default";
-        if (ctx.pipeClient) {
+        if (bound.pipeClient) {
             await assertActiveProfile(ctx, profile);
-            const resp = await ctx.pipeClient.call("mods.set_active", {
+            const resp = await bound.pipeClient.call("mods.set_active", {
                 names: [args.name],
                 active: args.enabled,
             });

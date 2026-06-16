@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { resolveProfileDir } from "../path-helpers.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("plan"),
@@ -22,7 +23,7 @@ function _timestampLabel() {
     return new Date().toISOString().replace(/[:.]/g, "-");
 }
 function _backupDir(ctx, profile, label) {
-    return join(ctx.config.mo2Root, ".mo2-mcp", "profile-backups", `${profile}_${label}`);
+    return join(requireBoundContext(ctx).config.mo2Root, ".mo2-mcp", "profile-backups", `${profile}_${label}`);
 }
 const handler = {
     toolName: "mo2_backup_profile",

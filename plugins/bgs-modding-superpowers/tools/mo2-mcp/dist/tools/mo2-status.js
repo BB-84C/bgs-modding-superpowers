@@ -10,15 +10,17 @@ import { registerTool } from "../tool-registry.js";
 import { detectMo2Running } from "../detection.js";
 import { readProfile } from "../profile-reader.js";
 import { readMoIni } from "../mo-ini.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 const inputSchema = z.object({ profile: z.string().optional() });
 function nonEmpty(value) {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 function resolveActiveProfile(args, ctx, ini) {
+    const bound = requireBoundContext(ctx);
     return (nonEmpty(args.profile) ??
         nonEmpty(process.env.BGS_MO2_PROFILE) ??
         nonEmpty(ini.general.selectedProfile) ??
-        nonEmpty(ctx.config.allowedProfiles[0]) ??
+        nonEmpty(bound.config.allowedProfiles[0]) ??
         null);
 }
 registerTool({
@@ -27,7 +29,16 @@ registerTool({
     description: "Report MO2 instance state: paths, game, active profile, MO2-running detection (3-tier ladder), mod/plugin counts, MCP permission ceiling, broker+sidecar connectivity.",
     inputSchema,
     handler: async (args, ctx) => {
-        const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
+        if (bindingSnapshot(ctx).state !== "bound") {
+            return {
+                ok: true,
+                bound: false,
+                snapshot: bindingSnapshot(ctx),
+                hint: "call mo2_session({ mo2Root }) to bind",
+            };
+        }
+        const bound = requireBoundContext(ctx);
+        const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
         const profileName = resolveActiveProfile(args, ctx, ini);
         if (!profileName) {
             return {
@@ -39,9 +50,9 @@ registerTool({
                 },
             };
         }
-        const profileDir = join(ctx.config.mo2Root, "profiles", profileName);
+        const profileDir = join(bound.config.mo2Root, "profiles", profileName);
         const detection = await detectMo2Running({
-            mo2Root: ctx.config.mo2Root,
+            mo2Root: bound.config.mo2Root,
             profileDir,
         });
         let profile;
@@ -59,13 +70,13 @@ registerTool({
         return {
             ok: true,
             result: {
-                mo2_root: ctx.config.mo2Root,
+                mo2_root: bound.config.mo2Root,
                 game: ini.general.game,
                 game_name: ini.general.gameName,
                 game_path: ini.general.gamePath,
                 profile: profile.name ?? profileName,
-                permission_ceiling: ctx.config.permissionCeiling,
-                deny_patterns: ctx.config.deny.length,
+                permission_ceiling: bound.config.permissionCeiling,
+                deny_patterns: bound.config.deny.length,
                 detection: {
                     process_running: detection.processRunning,
                     shared_memory_present: detection.sharedMemoryPresent,
@@ -79,8 +90,8 @@ registerTool({
                     plugins_total: profile.plugins.length,
                     plugins_enabled: profile.plugins.filter((p) => p.enabled).length,
                 },
-                broker_connected: !!ctx.pipeClient,
-                sidecar_ready: !!ctx.sidecar,
+                broker_connected: !!bound.pipeClient,
+                sidecar_ready: !!bound.sidecar,
             },
             error: null,
         };

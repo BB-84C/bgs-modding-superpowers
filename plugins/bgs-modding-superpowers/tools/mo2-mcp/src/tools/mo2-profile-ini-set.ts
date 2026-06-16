@@ -13,6 +13,7 @@ import { atomicWriteText } from "../atomic.js";
 import { upsertIniValue } from "../ini-helpers.js";
 import { readMoIni } from "../mo-ini.js";
 import { detectMo2Running } from "../detection.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -29,23 +30,25 @@ const inputSchema = z.discriminatedUnion("mode", [
 async function _resolveIniPath(args: {
   profile: string;
   ini_name: "game" | "prefs" | "custom";
-}, ctx: { config: { mo2Root: string } }): Promise<string> {
-  const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
+}, ctx: { binding: { requireBound: () => { config: { mo2Root: string } } } }): Promise<string> {
+  const mo2Root = requireBoundContext(ctx).config.mo2Root;
+  const ini = await readMoIni(join(mo2Root, "ModOrganizer.ini"));
   const game = ini.general.game ?? "fallout4";
   const fileMap = {
     game: `${game}.ini`,
     prefs: `${game}Prefs.ini`,
     custom: `${game}Custom.ini`,
   };
-  return join(ctx.config.mo2Root, "profiles", args.profile, fileMap[args.ini_name]);
+  return join(mo2Root, "profiles", args.profile, fileMap[args.ini_name]);
 }
 
 const handler: PlanApplyHandler = {
   toolName: "mo2_profile_ini_set",
   async buildPlan(args, ctx) {
+    const bound = requireBoundContext(ctx);
     const profile = (args.profile as string) ?? "Default";
-    const profileDir = join(ctx.config.mo2Root, "profiles", profile);
-    const det = await detectMo2Running({ mo2Root: ctx.config.mo2Root, profileDir });
+    const profileDir = join(bound.config.mo2Root, "profiles", profile);
+    const det = await detectMo2Running({ mo2Root: bound.config.mo2Root, profileDir });
     if (det.profileLockHeld) {
       throw new Error(
         "mo2_holds_profile_files: close MO2 first or use mo2_switch_profile",

@@ -10,6 +10,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { computeLease, verifyLease, } from "./lease.js";
+import { requireBoundContext } from "./binding.js";
 import { acquireLeasesForTargets, LEASE_LOCK_TTL_MS, releaseLeaseLocks, } from "./lease-lock.js";
 /**
  * In-memory cache of pending plans. Expires after `defaultTtlMs` (10 min).
@@ -54,7 +55,7 @@ export class PlanCache {
 }
 async function releasePlanLockBestEffort(ctx, rec) {
     try {
-        await releaseLeaseLocks(ctx.config.mo2Root, rec.leaseLockTargetHashes, rec.planId);
+        await releaseLeaseLocks(requireBoundContext(ctx).config.mo2Root, rec.leaseLockTargetHashes, rec.planId);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -67,7 +68,7 @@ export async function runPlanMode(handler, args, ctx, cache, _snapshots) {
     const planId = randomUUID();
     const expiresAt = Date.now() + LEASE_LOCK_TTL_MS;
     const createdAt = new Date().toISOString();
-    const lock = await acquireLeasesForTargets(ctx.config.mo2Root, built.targets, {
+    const lock = await acquireLeasesForTargets(requireBoundContext(ctx).config.mo2Root, built.targets, {
         plan_id: planId,
         mcp_pid: process.pid,
         mcp_session_id: ctx.sessionId,
@@ -108,7 +109,7 @@ export async function runPlanMode(handler, args, ctx, cache, _snapshots) {
         });
     }
     catch (error) {
-        await releaseLeaseLocks(ctx.config.mo2Root, lock.targetHashes, planId);
+        await releaseLeaseLocks(requireBoundContext(ctx).config.mo2Root, lock.targetHashes, planId);
         throw error;
     }
     return {

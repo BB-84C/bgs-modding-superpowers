@@ -11,6 +11,7 @@ import { readdir } from "node:fs/promises";
 import { registerTool } from "../tool-registry.js";
 import { readMoIni } from "../mo-ini.js";
 import { readProfile } from "../profile-reader.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.object({
     profile: z.string().default("Default"),
     pattern: z.string(),
@@ -36,12 +37,13 @@ registerTool({
     description: "Glob/regex file search across enabled mod trees. Bounded by max_results (default 1000). pattern='**/*.esp' for glob, 'regex:^foo' for regex. Returns mod-prefixed paths + truncated flag.",
     inputSchema,
     handler: async (args, ctx) => {
+        const bound = requireBoundContext(ctx);
         const profile = args.profile ?? "Default";
         const pattern = args.pattern;
         const maxResults = args.max_results ?? 1000;
-        const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
-        const modsDir = ini.settings.modDirectory ?? join(ctx.config.mo2Root, "mods");
-        const p = await readProfile(join(ctx.config.mo2Root, "profiles", profile));
+        const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
+        const modsDir = ini.settings.modDirectory ?? join(bound.config.mo2Root, "mods");
+        const p = await readProfile(join(bound.config.mo2Root, "profiles", profile));
         const enabled = p.mods.filter((m) => m.enabled && !m.isSeparator);
         const isRegex = pattern.startsWith("regex:");
         const matcher = isRegex ? new RegExp(pattern.slice(6), "i") : globToRegex(pattern);

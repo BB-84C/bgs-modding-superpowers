@@ -18,6 +18,8 @@ import { atomicWriteText } from "../atomic.js";
 import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
+import type { ToolContext } from "../types.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const ModeSchema = z.enum([
   "top",
@@ -42,10 +44,11 @@ const inputSchema = z.discriminatedUnion("mode", [
 
 async function _computeTargetPriority(
   args: Record<string, unknown>,
-  ctx: { config: { mo2Root: string }; sidecar?: unknown },
+  ctx: ToolContext,
   profile: string,
 ): Promise<number> {
-  const p = await readProfile(join(ctx.config.mo2Root, "profiles", profile));
+  const bound = requireBoundContext(ctx);
+  const p = await readProfile(join(bound.config.mo2Root, "profiles", profile));
   const nonSep = p.mods.filter((m) => !m.isSeparator);
   const mode = args.target_mode as string;
   switch (mode) {
@@ -62,12 +65,12 @@ async function _computeTargetPriority(
     }
     case "above_first_conflict":
     case "below_last_conflict": {
-      const sidecar = (ctx as { sidecar?: { call: (m: string, p: unknown) => Promise<unknown> } }).sidecar;
+      const sidecar = bound.sidecar;
       if (!sidecar) {
         throw new Error("sidecar_required_for_conflict_mode");
       }
       const conflicts = (await sidecar.call("assets.conflicts", {
-        profile_dir: join(ctx.config.mo2Root, "profiles", profile),
+        profile_dir: join(bound.config.mo2Root, "profiles", profile),
         max_results: 5000,
       })) as { conflicts?: Array<{ providers?: string[] }> };
       const conflictMods = (conflicts.conflicts ?? [])
@@ -99,13 +102,14 @@ const handler: PlanApplyHandler = {
     };
   },
   async applyMutation(plan, ctx) {
+    const bound = requireBoundContext(ctx);
     const args = plan.args;
     const profile = (args.profile as string) ?? "Default";
 
-    if (ctx.pipeClient) {
+    if (bound.pipeClient) {
       await assertActiveProfile(ctx, profile);
       const targetPri = await _computeTargetPriority(args, ctx, profile);
-      const resp = await ctx.pipeClient.call("mods.set_priority", {
+      const resp = await bound.pipeClient.call("mods.set_priority", {
         name: args.name,
         priority: targetPri,
       });

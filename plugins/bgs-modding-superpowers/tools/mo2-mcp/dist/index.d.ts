@@ -2,6 +2,7 @@ import "./pipeline/rules/STOCK001-stock-game-deny.js";
 import "./pipeline/rules/PATHSAFE001-path-traversal-deny.js";
 import "./pipeline/rules/NAMESAFE001-no-path-in-name.js";
 import "./pipeline/rules/CEILING001-permission-ceiling.js";
+import "./tools/mo2-session.js";
 import "./tools/mo2-status.js";
 import "./tools/mo2-machine-contract.js";
 import "./tools/mo2-modlist.js";

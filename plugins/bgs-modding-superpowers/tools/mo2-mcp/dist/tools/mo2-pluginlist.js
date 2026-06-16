@@ -9,6 +9,7 @@ import { z } from "zod";
 import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { readProfile } from "../profile-reader.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.object({
     profile: z.string().default("Default"),
     enrich: z.boolean().default(false),
@@ -19,13 +20,14 @@ registerTool({
     description: "Read plugins.txt. Returns plugins with name + enabled (* = enabled per MO2/FO4 convention). Optional broker enrich adds masters/load_order/origin/flags.",
     inputSchema,
     handler: async (args, ctx) => {
+        const bound = requireBoundContext(ctx);
         const profile = args.profile ?? "Default";
-        const profileDir = join(ctx.config.mo2Root, "profiles", profile);
+        const profileDir = join(bound.config.mo2Root, "profiles", profile);
         const p = await readProfile(profileDir);
         let plugins = p.plugins.map((pl) => ({ ...pl }));
-        if (args.enrich && ctx.pipeClient) {
+        if (args.enrich && bound.pipeClient) {
             try {
-                const resp = await ctx.pipeClient.call("plugins.list", {});
+                const resp = await bound.pipeClient.call("plugins.list", {});
                 if (resp.ok && resp.result && typeof resp.result === "object") {
                     const livePlugins = resp.result.plugins ?? [];
                     const liveMap = new Map();

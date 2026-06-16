@@ -16,6 +16,7 @@ import { routeToPlanApply } from "../plan-apply.js";
 import { atomicWriteText } from "../atomic.js";
 import { resolveModsDir, resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("plan"),
@@ -35,11 +36,12 @@ const handler = {
             { path: pluginsPath, kind: "text-file" },
         ];
         const affected = [pluginsPath];
+        const bound = requireBoundContext(ctx);
         if (args.also_hide_file) {
-            if (!ctx.pipeClient) {
+            if (!bound.pipeClient) {
                 throw new Error("also_hide_file_requires_live_mo2: pipe needed to find owning mod via organizer.get_file_origins");
             }
-            const origin = await ctx.pipeClient.call("organizer.get_file_origins", {
+            const origin = await bound.pipeClient.call("organizer.get_file_origins", {
                 filename: args.name,
             });
             const owners = origin.result?.origins ?? [];
@@ -59,13 +61,14 @@ const handler = {
         };
     },
     async applyMutation(plan, ctx) {
+        const bound = requireBoundContext(ctx);
         const args = plan.args;
         const profile = args.profile ?? "Default";
-        if (ctx.pipeClient) {
+        if (bound.pipeClient) {
             await assertActiveProfile(ctx, profile);
             // PluginState::Active=2, Inactive=1 in mobase
             const stateInt = args.enabled ? 2 : 1;
-            const resp = await ctx.pipeClient.call("plugins.set_state", {
+            const resp = await bound.pipeClient.call("plugins.set_state", {
                 name: args.name,
                 state: stateInt,
             });
@@ -87,7 +90,7 @@ const handler = {
                 catch (e) {
                     result.file_rename_failed = e instanceof Error ? e.message : String(e);
                 }
-                await ctx.pipeClient.call("organizer.refresh", { save_changes: false }).catch(() => { });
+                await bound.pipeClient.call("organizer.refresh", { save_changes: false }).catch(() => { });
             }
             return result;
         }

@@ -8,6 +8,7 @@ import { z } from "zod";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.object({
     date_from: z.string().optional(), // YYYY-MM-DD
     date_to: z.string().optional(),
@@ -24,8 +25,9 @@ registerTool({
     description: "Query MCP audit log. Filters: date_from/date_to (YYYY-MM-DD), tool, decision, plan_id. Bounded by max_results (default 500). Returns records array + count + truncated.",
     inputSchema,
     handler: async (args, ctx) => {
+        const bound = requireBoundContext(ctx);
         const maxResults = args.max_results ?? 500;
-        const files = await readdir(ctx.config.auditRoot).catch(() => []);
+        const files = await readdir(bound.config.auditRoot).catch(() => []);
         const matched = [];
         let truncated = false;
         for (const f of files) {
@@ -41,7 +43,7 @@ registerTool({
                 continue;
             let text;
             try {
-                text = await readFile(join(ctx.config.auditRoot, f), "utf8");
+                text = await readFile(join(bound.config.auditRoot, f), "utf8");
             }
             catch {
                 continue;

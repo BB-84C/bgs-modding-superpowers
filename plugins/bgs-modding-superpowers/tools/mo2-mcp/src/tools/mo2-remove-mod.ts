@@ -13,6 +13,7 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { resolveModsDir } from "../path-helpers.js";
 import { atomicWriteText } from "../atomic.js";
 import { invalidateWorld } from "./state-sync.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("plan"), name: z.string(), backup_first: z.boolean().default(true) }),
@@ -97,9 +98,10 @@ const handler: PlanApplyHandler = {
       await cp(modPath, join(modsDir, backupName), { recursive: true });
     }
 
-    if (ctx.pipeClient) {
-      const affectedProfiles = await _profilesReferencingMod(ctx.config.mo2Root, name);
-      const resp = await ctx.pipeClient.call("mods.remove", { name }) as {
+    const bound = requireBoundContext(ctx);
+    if (bound.pipeClient) {
+      const affectedProfiles = await _profilesReferencingMod(bound.config.mo2Root, name);
+      const resp = await bound.pipeClient.call("mods.remove", { name }) as {
         ok: boolean;
         result?: Record<string, unknown>;
         error?: { message?: string } | null;
@@ -111,14 +113,14 @@ const handler: PlanApplyHandler = {
         // + immediate remove round-trips in acceptance). Fall back to the same
         // filesystem removal path as offline mode when the folder exists on disk.
         await rm(modPath, { recursive: true, force: true });
-        profilesUpdated = await _scrubAllProfileModlists(ctx.config.mo2Root, name);
+        profilesUpdated = await _scrubAllProfileModlists(bound.config.mo2Root, name);
         await invalidateWorld(ctx, profilesUpdated.length ? profilesUpdated : affectedProfiles.length ? affectedProfiles : ["Default"]);
       } else {
         throw new Error(resp.error?.message ?? "mods.remove failed");
       }
     } else {
       await rm(modPath, { recursive: true, force: true });
-      profilesUpdated = await _scrubAllProfileModlists(ctx.config.mo2Root, name);
+      profilesUpdated = await _scrubAllProfileModlists(bound.config.mo2Root, name);
       await invalidateWorld(ctx, profilesUpdated.length ? profilesUpdated : ["Default"]);
     }
 

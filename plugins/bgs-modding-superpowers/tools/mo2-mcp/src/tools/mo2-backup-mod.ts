@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { resolveModsDir } from "../path-helpers.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("plan"), name: z.string() }),
@@ -42,9 +43,10 @@ const handler: PlanApplyHandler = {
     while (existsSync(join(modsDir, `${plan.args.name}backup${i}`))) i++;
     const backupPath = join(modsDir, `${plan.args.name}backup${i}`);
     await cp(sourceMod, backupPath, { recursive: true });
-    if (ctx.pipeClient) {
+    const pipeClient = requireBoundContext(ctx).pipeClient;
+    if (pipeClient) {
       // Refresh MO2 so it picks up the new backup mod (auto-tags FLAG_BACKUP)
-      await ctx.pipeClient.call("organizer.refresh", { save_changes: false }).catch(() => {});
+      await pipeClient.call("organizer.refresh", { save_changes: false }).catch(() => {});
     }
     return { backup_name: `${plan.args.name}backup${i}`, backup_path: backupPath };
   },

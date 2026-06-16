@@ -13,6 +13,7 @@ import { routeToPlanApply } from "../plan-apply.js";
 import { resolveModsDir } from "../path-helpers.js";
 import { atomicWriteText } from "../atomic.js";
 import { invalidateWorld } from "./state-sync.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("plan"), name: z.string(), backup_first: z.boolean().default(true) }),
     z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
@@ -93,9 +94,10 @@ const handler = {
             backupName = await _nextBackupName(modsDir, name);
             await cp(modPath, join(modsDir, backupName), { recursive: true });
         }
-        if (ctx.pipeClient) {
-            const affectedProfiles = await _profilesReferencingMod(ctx.config.mo2Root, name);
-            const resp = await ctx.pipeClient.call("mods.remove", { name });
+        const bound = requireBoundContext(ctx);
+        if (bound.pipeClient) {
+            const affectedProfiles = await _profilesReferencingMod(bound.config.mo2Root, name);
+            const resp = await bound.pipeClient.call("mods.remove", { name });
             if (resp.ok) {
                 await invalidateWorld(ctx, affectedProfiles.length ? affectedProfiles : ["Default"]);
             }
@@ -104,7 +106,7 @@ const handler = {
                 // + immediate remove round-trips in acceptance). Fall back to the same
                 // filesystem removal path as offline mode when the folder exists on disk.
                 await rm(modPath, { recursive: true, force: true });
-                profilesUpdated = await _scrubAllProfileModlists(ctx.config.mo2Root, name);
+                profilesUpdated = await _scrubAllProfileModlists(bound.config.mo2Root, name);
                 await invalidateWorld(ctx, profilesUpdated.length ? profilesUpdated : affectedProfiles.length ? affectedProfiles : ["Default"]);
             }
             else {
@@ -113,7 +115,7 @@ const handler = {
         }
         else {
             await rm(modPath, { recursive: true, force: true });
-            profilesUpdated = await _scrubAllProfileModlists(ctx.config.mo2Root, name);
+            profilesUpdated = await _scrubAllProfileModlists(bound.config.mo2Root, name);
             await invalidateWorld(ctx, profilesUpdated.length ? profilesUpdated : ["Default"]);
         }
         return { removed: name, backup_name: backupName, profiles_updated: profilesUpdated };

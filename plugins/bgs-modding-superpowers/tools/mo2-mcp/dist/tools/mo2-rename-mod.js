@@ -14,6 +14,7 @@ import { routeToPlanApply } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
 import { invalidateWorld } from "./state-sync.js";
+import { requireBoundContext } from "../binding.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("plan"), old_name: z.string(), new_name: z.string() }),
     z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
@@ -58,10 +59,11 @@ function _rewriteModlist(text, oldName, newName) {
 const handler = {
     toolName: "mo2_rename_mod",
     async buildPlan(args, ctx) {
+        const bound = requireBoundContext(ctx);
         const oldName = args.old_name;
         const newName = args.new_name;
-        const affected = await _affectedModlists(ctx.config.mo2Root, oldName);
-        const modsDir = await _resolveModsDir(ctx.config.mo2Root);
+        const affected = await _affectedModlists(bound.config.mo2Root, oldName);
+        const modsDir = await _resolveModsDir(bound.config.mo2Root);
         const modDir = join(modsDir, oldName);
         return {
             diff: `Rename ${oldName} → ${newName} across ${affected.length} profiles + mod dir`,
@@ -73,6 +75,7 @@ const handler = {
         };
     },
     async applyMutation(plan, ctx) {
+        const bound = requireBoundContext(ctx);
         // Live and offline paths share the same fs-level work: rename the mod
         // directory and rewrite every profile's modlist.txt. We previously routed
         // live mode through broker mods.rename, but that required organizer.refresh
@@ -82,9 +85,9 @@ const handler = {
         // fs logic + invalidate the sidecar World cache.
         const oldName = plan.args.old_name;
         const newName = plan.args.new_name;
-        const modsDir = await _resolveModsDir(ctx.config.mo2Root);
+        const modsDir = await _resolveModsDir(bound.config.mo2Root);
         await rename(join(modsDir, oldName), join(modsDir, newName));
-        const profilesRoot = join(ctx.config.mo2Root, "profiles");
+        const profilesRoot = join(bound.config.mo2Root, "profiles");
         const profiles = await readdir(profilesRoot).catch(() => []);
         const updated = [];
         for (const profile of profiles) {
@@ -101,7 +104,7 @@ const handler = {
                 // Skip non-profile dirs or unreadable modlists.
             }
         }
-        if (ctx.pipeClient) {
+        if (bound.pipeClient) {
             await invalidateWorld(ctx, updated.length ? updated : ["Default"]);
         }
         return { renamed_dir: true, profiles_updated: updated };

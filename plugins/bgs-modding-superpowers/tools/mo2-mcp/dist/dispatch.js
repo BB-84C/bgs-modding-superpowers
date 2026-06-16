@@ -2,8 +2,23 @@
 import { getTool } from "./tool-registry.js";
 import { hashArgs } from "./audit.js";
 import { runRules, hasBlocking } from "./pipeline/rules.js";
+import { BindingRequiredError, bindingSnapshot } from "./binding.js";
 function jsonText(value) {
     return { type: "text", text: JSON.stringify(value) };
+}
+function isBindingExemptTool(toolName) {
+    return toolName === "mo2_session" || toolName === "mo2_status" || toolName === "mo2_machine_contract";
+}
+function notBoundEnvelope(ctx) {
+    return {
+        ok: false,
+        error: {
+            code: "not_bound",
+            message: "MO2 MCP is not bound to an MO2 root.",
+            snapshot: bindingSnapshot(ctx),
+            hint: "call mo2_session({ mo2Root }) to bind",
+        },
+    };
 }
 export async function dispatchToolCall({ toolName, rawArgs, ctx, rules, }) {
     const t0 = Date.now();
@@ -55,6 +70,26 @@ export async function dispatchToolCall({ toolName, rawArgs, ctx, rules, }) {
         };
     }
     const validatedArgs = parseResult.data;
+    // If a bind is currently in-flight (e.g. eager auto-bind triggered by env at
+    // startup), wait for it to settle before refusing — clients shouldn't have to
+    // poll mo2_session just because their first tool call raced the bind.
+    if (!isBindingExemptTool(tool.name) && ctx.binding && bindingSnapshot(ctx).state === "binding") {
+        await ctx.binding.awaitSettled();
+    }
+    if (!isBindingExemptTool(tool.name) && bindingSnapshot(ctx).state !== "bound") {
+        const env = notBoundEnvelope(ctx);
+        await ctx.audit.log({
+            ts: new Date().toISOString(),
+            sessionId: ctx.sessionId,
+            tool: tool.name,
+            argsHash: hashArgs(argsForParse),
+            decision: "refused",
+            durationMs: Date.now() - t0,
+            error: { code: env.error.code, message: env.error.message },
+            details: { snapshot: env.error.snapshot },
+        });
+        return { content: [jsonText(env)] };
+    }
     const findings = await runRules(rules, tool.name, ctx, validatedArgs);
     if (hasBlocking(findings)) {
         const blocking = findings.find((f) => f.decision === "block");
@@ -96,6 +131,20 @@ export async function dispatchToolCall({ toolName, rawArgs, ctx, rules, }) {
         return { content: [jsonText(result)] };
     }
     catch (e) {
+        if (e instanceof BindingRequiredError) {
+            const env = notBoundEnvelope(ctx);
+            await ctx.audit.log({
+                ts: new Date().toISOString(),
+                sessionId: ctx.sessionId,
+                tool: tool.name,
+                argsHash: hashArgs(argsForParse),
+                decision: "refused",
+                durationMs: Date.now() - t0,
+                error: { code: env.error.code, message: env.error.message },
+                details: { snapshot: e.snapshot },
+            });
+            return { content: [jsonText(env)] };
+        }
         const msg = e instanceof Error ? e.message : String(e);
         await ctx.audit.log({
             ts: new Date().toISOString(),
