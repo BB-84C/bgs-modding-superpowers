@@ -128,6 +128,10 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
 
+## 2026-06-16 — MO2 MCP v1.1.x LOW polish deferrals
+
+- **D / TOCTOU narrowing deferred to v1.2.** Current v1.1.x still relies on content-hash leases plus the `.mo2-mcp/leases/` cross-process lock, which narrows but does not mathematically eliminate the window between `verifyLease()` and the actual target write. v1.2 should evaluate a real file-level advisory-lock substrate (`LockFileEx` on Windows, `flock` on POSIX) rather than shelling out per write. Acceptance should include a two-writer race fixture proving one writer blocks while the other holds the target file lock.
+
 
 ## 2026-06-13 — Archive/loose-file helpers shipped (Plan A engine+CLI + Plan B MO2 IPluginTool GUI)
 
