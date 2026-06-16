@@ -131,6 +131,7 @@ def test_installation_create_mod_from_directory_success(monkeypatch):
     r = result["result"]
     assert r["name"] == "NewStaged"
     assert r["absolute_path"] == "/path/to/mods/NewStaged"
+    organizer.refresh.assert_called_once_with()
 
 
 def test_installation_create_mod_from_directory_collision(monkeypatch):

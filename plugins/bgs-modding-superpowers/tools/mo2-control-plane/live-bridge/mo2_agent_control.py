@@ -1196,15 +1196,18 @@ def _handle_mods_create(organizer, pump, payload):
         # but does not guarantee the directory exists until the next save cycle;
         # downstream MCP tools (mo2_remove_mod buildPlan, mo2_assets_resolve,
         # etc.) check the filesystem and would race against the broker if the
-        # folder were only in-memory. absolute_path is also surfaced so the
-        # MCP layer does not need to re-resolve mod_directory.
+        # folder were only in-memory.
         absolute_path = new_mod.absolutePath()
         try:
             os.makedirs(absolute_path, exist_ok=True)
         except OSError:
-            # Tolerate races / readonly mounts; downstream callers will surface
-            # any real filesystem error when they try to use the path.
             pass
+
+        # Mirror MO2 GUI createEmptyMod flow: refresh the organizer *inside the
+        # same main-thread turn* so ModInfo::s_ModsByName is rebuilt before the
+        # next broker call tries modList().getMod(name). Doing this as a second
+        # IPC round-trip from TS left room for Qt delayed writes and model drift.
+        organizer.refresh()
 
         result = {
             "name": actual_name,
@@ -1789,11 +1792,17 @@ def _handle_installation_create_mod_from_directory(organizer, pump, payload):
         new_mod = organizer.createMod(GuessedString(sanitized))
         if new_mod is None:
             return ("error", ErrorCode.INTERNAL_ERROR, "createMod returned None")
+        absolute_path = new_mod.absolutePath()
+        try:
+            os.makedirs(absolute_path, exist_ok=True)
+        except OSError:
+            pass
+        organizer.refresh()
         return (
             "ok",
             {
                 "name": new_mod.name(),
-                "absolute_path": new_mod.absolutePath(),
+                "absolute_path": absolute_path,
             },
         )
 

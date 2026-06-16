@@ -69,10 +69,27 @@ def fomod_parse_choices(params: dict) -> dict:
     if not archive_path.exists():
         raise FileNotFoundError(f"archive not found: {archive_path}")
 
+    import shutil
+    import tempfile
+    from .archive import archive_extract_all
+
+    scratch_dir: Path | None = None
+    parse_root = archive_path
+    if archive_path.is_file():
+        scratch_dir = Path(tempfile.mkdtemp(prefix="fomod-parse-"))
+        archive_extract_all({
+            "archive_path": str(archive_path),
+            "dest": str(scratch_dir),
+        })
+        parse_root = scratch_dir
+
     try:
-        root = pyfomod.parse(str(archive_path))
+        root = pyfomod.parse(str(parse_root))
     except Exception as exc:
         raise RuntimeError(f"not_a_fomod: {exc}")
+    finally:
+        if scratch_dir is not None:
+            shutil.rmtree(scratch_dir, ignore_errors=True)
 
     pages = []
     for page in getattr(root, "pages", []) or []:

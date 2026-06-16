@@ -425,6 +425,7 @@ def test_mods_create_basic(monkeypatch, tmp_path):
     assert readback["priority"] == 5
     assert readback["absolute_path"] == str(mod_path)
     assert mod_path.is_dir()
+    organizer.refresh.assert_called_once_with()
 
 
 def test_mods_create_with_target_priority(monkeypatch):
@@ -455,6 +456,7 @@ def test_mods_create_with_target_priority(monkeypatch):
     assert result["ok"] is True
     assert result["result"]["priority"] == 3
     assert result["result"]["requested_priority"] == 3
+    organizer.refresh.assert_called_once_with()
     organizer.modDataChanged.assert_called_once_with(new_mod)
 
 

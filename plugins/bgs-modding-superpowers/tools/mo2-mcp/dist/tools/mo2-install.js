@@ -176,10 +176,13 @@ const handler = {
         const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
         const existing = await readFile(modlistPath, "utf8").catch(() => "");
         const newLine = `+${modName}`;
-        const updated = args.target_priority === "top"
-            ? `${newLine}\n${existing}`
-            : `${existing}${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}${newLine}\n`;
-        await atomicWriteText(modlistPath, updated);
+        const lines = existing.length === 0 ? [] : existing.split(/\r?\n/).filter((line) => line.length > 0);
+        if (!lines.includes(newLine)) {
+            const updated = args.target_priority === "top"
+                ? `${newLine}\n${existing}`
+                : `${existing}${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}${newLine}\n`;
+            await atomicWriteText(modlistPath, updated);
+        }
         // 5. Invalidate sidecar World cache so subsequent asset reads see the new mod.
         await invalidateWorld(ctx, [profile]);
         return {
