@@ -13,6 +13,8 @@ export declare class SnapshotManager {
     private snapshotRoot;
     private sessionId;
     constructor(snapshotRoot: string, sessionId: string);
+    /** Find a manifest record by snapshotId across this session's snapshot dirs. */
+    findManifest(snapshotId: string): Promise<SnapshotRecord | undefined>;
     /**
      * Snapshot a set of source files/directories into a new dir under the session.
      * Returns the SnapshotRecord with snapshotId; sources that do not exist yet

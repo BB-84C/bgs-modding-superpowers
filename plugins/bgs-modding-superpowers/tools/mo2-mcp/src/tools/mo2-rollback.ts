@@ -3,13 +3,16 @@
  *
  * Plan returns manifest summary; apply runs SnapshotManager.restore() which
  * cp's backup files back over the source paths.
+ *
+ * Uses ctx.snapshots (the SnapshotManager constructed at server startup) for
+ * both the manifest lookup and the actual restore — that instance owns the
+ * canonical snapshotRoot (currently tmpdir/mo2-mcp-runtime/snapshots), which
+ * is independent of bound.config.snapshotRoot after the v1.2-pre lazy-bind
+ * refactor (server starts before any mo2Root is known).
  */
 import { z } from "zod";
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
-import { SnapshotManager } from "../snapshot.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
@@ -20,37 +23,19 @@ const inputSchema = z.discriminatedUnion("mode", [
 const handler: PlanApplyHandler = {
   toolName: "mo2_rollback",
   async buildPlan(args, ctx) {
-    const bound = requireBoundContext(ctx);
+    requireBoundContext(ctx); // enforce bound state, but use ctx.snapshots not config.snapshotRoot
     const snapshotId = args.snapshot_id as string;
-    const sessionDir = join(bound.config.snapshotRoot, ctx.sessionId);
-    const dirs = await readdir(sessionDir).catch(() => [] as string[]);
-    for (const d of dirs) {
-      const manifestPath = join(sessionDir, d, "manifest.json");
-      try {
-        const text = await readFile(manifestPath, "utf8");
-        const manifest = JSON.parse(text) as {
-          snapshotId: string;
-          tool: string;
-          ts: string;
-          files: Array<{ source: string }>;
-        };
-        if (manifest.snapshotId === snapshotId) {
-          return {
-            diff: `Restore ${manifest.files.length} files from snapshot ${snapshotId} (tool=${manifest.tool}, ts=${manifest.ts})`,
-            affectedFiles: manifest.files.map((f) => f.source),
-            targets: manifest.files.map((f) => ({ path: f.source, kind: "text-file" as const })),
-          };
-        }
-      } catch {
-        // skip malformed
-      }
-    }
-    throw new Error(`snapshot_not_found: ${snapshotId}`);
+    const manifest = await ctx.snapshots.findManifest(snapshotId);
+    if (!manifest) throw new Error(`snapshot_not_found: ${snapshotId}`);
+    return {
+      diff: `Restore ${manifest.files.length} files from snapshot ${snapshotId} (tool=${manifest.tool}, ts=${manifest.ts})`,
+      affectedFiles: manifest.files.map((f) => f.source),
+      targets: manifest.files.map((f) => ({ path: f.source, kind: "text-file" as const })),
+    };
   },
   async applyMutation(plan, ctx) {
-    const bound = requireBoundContext(ctx);
-    const sm = new SnapshotManager(bound.config.snapshotRoot, ctx.sessionId);
-    const result = await sm.restore(plan.args.snapshot_id as string);
+    requireBoundContext(ctx);
+    const result = await ctx.snapshots.restore(plan.args.snapshot_id as string);
     return result as unknown as Record<string, unknown>;
   },
 };
@@ -64,3 +49,6 @@ registerTool({
   handler: (args, ctx) =>
     routeToPlanApply(handler, args, ctx, ctx.plans, ctx.snapshots) as Promise<unknown>,
 });
+
+// referenced for compat warning silence
+void bindingSnapshot;

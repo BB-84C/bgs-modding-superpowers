@@ -123,10 +123,13 @@ async function main(): Promise<void> {
   // immediately". We await + try/catch so a failed bind never blocks server
   // startup — the server still becomes ready in unbound/failed state and the
   // agent can recover via mo2_session({ mo2Root, ... }).
+  // BGS_MO2_PROFILE is also honored so the eager bind targets the right
+  // profile when an install has multiple profiles (e.g. BB84自用 vs Default).
   if (process.env.BGS_MO2_ROOT) {
     const eagerRoot = process.env.BGS_MO2_ROOT;
+    const eagerProfile = process.env.BGS_MO2_PROFILE;
     try {
-      const snapshot = await binding.bind({ mo2Root: eagerRoot });
+      const snapshot = await binding.bind({ mo2Root: eagerRoot, profile: eagerProfile });
       process.stderr.write(
         `[mo2-mcp] eager bind ${snapshot.state} (${snapshot.mo2Root ?? eagerRoot})` +
           (snapshot.error ? `: ${snapshot.error.message}` : "") +
