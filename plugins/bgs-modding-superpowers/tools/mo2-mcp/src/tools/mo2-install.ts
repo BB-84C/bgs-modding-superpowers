@@ -28,6 +28,7 @@ import { atomicWriteText } from "../atomic.js";
 import { resolveModsDir, resolveProfileDir } from "../path-helpers.js";
 import { readMoIni } from "../mo-ini.js";
 import { assertActiveProfile } from "../profile-guard.js";
+import { refreshOrganizerAndInvalidateWorld } from "./state-sync.js";
 
 const FomodChoiceSchema = z.object({
   page_name: z.string(),
@@ -190,13 +191,8 @@ const handler: PlanApplyHandler = {
       : `${existing}${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}${newLine}\n`;
     await atomicWriteText(modlistPath, updated);
 
-    // 5. Optional refresh + invalidate.
-    if (ctx.pipeClient) {
-      await ctx.pipeClient.call("organizer.refresh", { save_changes: true }).catch(() => {});
-    }
-    await ctx.sidecar.call("world.invalidate", {
-      profile_dir: resolveProfileDir(ctx, profile),
-    }).catch(() => {});
+    // 5. Refresh MO2 model + invalidate sidecar after all fs/model writes.
+    await refreshOrganizerAndInvalidateWorld(ctx, [profile], { saveChanges: true });
 
     return {
       mod_name: modName,

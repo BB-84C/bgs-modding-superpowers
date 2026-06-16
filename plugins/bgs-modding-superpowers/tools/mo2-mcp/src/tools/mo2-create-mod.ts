@@ -11,6 +11,7 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
+import { refreshOrganizerAndInvalidateWorld } from "./state-sync.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -60,9 +61,7 @@ const handler: PlanApplyHandler = {
 
     const resp = await ctx.pipeClient.call("mods.create", payload);
     if (!resp.ok) throw new Error(resp.error?.message ?? "broker error");
-    if (ctx.sidecar) {
-      await ctx.sidecar.call("world.invalidate", { profile_dir: resolveProfileDir(ctx, profile) });
-    }
+    await refreshOrganizerAndInvalidateWorld(ctx, [profile]);
     return resp.result as Record<string, unknown>;
   },
 };

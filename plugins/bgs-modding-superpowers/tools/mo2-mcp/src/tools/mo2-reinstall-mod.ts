@@ -11,8 +11,8 @@ import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
-import { resolveProfileDir } from "../path-helpers.js";
 import type { ToolContext } from "../types.js";
+import { refreshOrganizerAndInvalidateWorld } from "./state-sync.js";
 
 const FomodChoiceSchema = z.object({
   page_name: z.string(),
@@ -106,11 +106,7 @@ const handler: PlanApplyHandler = {
     }) as { ok: boolean; result?: Record<string, unknown>; error?: { message?: string } | null };
     if (!resp.ok) throw new Error(resp.error?.message ?? "installation.install_local_archive failed");
 
-    if (ctx.sidecar) {
-      await ctx.sidecar.call("world.invalidate", {
-        profile_dir: resolveProfileDir(ctx, "Default"),
-      });
-    }
+    await refreshOrganizerAndInvalidateWorld(ctx, ["Default"], { saveChanges: true });
 
     return { reinstalled: name, archive: installFile, fomod_used: isFomod };
   },

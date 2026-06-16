@@ -12,8 +12,8 @@ import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
-import { resolveProfileDir } from "../path-helpers.js";
 import { atomicWriteText } from "../atomic.js";
+import { refreshOrganizer, refreshOrganizerAndInvalidateWorld } from "./state-sync.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("plan"), old_name: z.string(), new_name: z.string() }),
     z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
@@ -76,12 +76,14 @@ const handler = {
         const oldName = plan.args.old_name;
         const newName = plan.args.new_name;
         if (ctx.pipeClient) {
+            const affectedProfiles = (await _affectedModlists(ctx.config.mo2Root, oldName))
+                .map((entry) => entry.profile)
+                .sort();
+            await refreshOrganizer(ctx);
             const resp = await ctx.pipeClient.call("mods.rename", { old_name: oldName, new_name: newName });
             if (!resp.ok)
                 throw new Error(resp.error?.message ?? "broker error");
-            if (ctx.sidecar) {
-                await ctx.sidecar.call("world.invalidate", { profile_dir: resolveProfileDir(ctx, "Default") });
-            }
+            await refreshOrganizerAndInvalidateWorld(ctx, affectedProfiles.length ? affectedProfiles : ["Default"]);
             return resp.result;
         }
         const modsDir = await _resolveModsDir(ctx.config.mo2Root);

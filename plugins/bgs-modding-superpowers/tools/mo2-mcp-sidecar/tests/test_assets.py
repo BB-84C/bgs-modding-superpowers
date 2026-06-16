@@ -103,3 +103,26 @@ def test_build_entries_by_mod_reuses_world_archive_order(monkeypatch):
         "F-M2 regression: discover_archives_for_plugins called despite "
         "w.archive_order being non-None"
     )
+
+
+def test_assets_resolve_file_exposes_winning_owner_mod_at_top_level(tmp_path):
+    """AT19 expects result.winner.owner_mod, not nested winner.winner.owner_mod."""
+    from mo2_mcp_sidecar.world import WorldCache
+
+    mods = tmp_path / "mods"
+    profile = tmp_path / "profiles" / "Default"
+    (mods / "High" / "textures" / "acceptance").mkdir(parents=True)
+    (mods / "Low" / "textures" / "acceptance").mkdir(parents=True)
+    (mods / "High" / "textures" / "acceptance" / "at19.dds").write_text("high", encoding="utf-8")
+    (mods / "Low" / "textures" / "acceptance" / "at19.dds").write_text("low", encoding="utf-8")
+    profile.mkdir(parents=True)
+    (profile / "modlist.txt").write_text("+High\n+Low\n", encoding="utf-8")
+    (profile / "plugins.txt").write_text("", encoding="utf-8")
+    assets.init_assets(WorldCache(mods_root=mods, game="FALLOUT4"))
+
+    result = assets.assets_resolve_file({
+        "profile_dir": str(profile),
+        "virtual_path": "textures/acceptance/at19.dds",
+    })
+
+    assert result["winner"]["owner_mod"] == "High"
