@@ -84,7 +84,7 @@ async function _fixture(allowedProfiles = ["Default", "ProfileB"]): Promise<{ ro
   const ctx: ToolContext = {
     config: {
       mo2Root: root,
-      permissionCeiling: "metadata-editable",
+      permissionCeiling: "full-control",
       allowedProfiles,
       deny: [],
       snapshotRoot: join(root, ".mo2-mcp", "snapshots"),

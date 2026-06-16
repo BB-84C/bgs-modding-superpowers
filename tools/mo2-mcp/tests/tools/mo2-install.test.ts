@@ -34,7 +34,7 @@ async function _fixture(sidecarBuilder?: (root: string) => MockSidecar): Promise
   const ctx: ToolContext = {
     config: {
       mo2Root: root,
-      permissionCeiling: "metadata-editable",
+      permissionCeiling: "full-control",
       allowedProfiles: ["Default"],
       deny: [],
       snapshotRoot: join(root, ".mo2-mcp", "snapshots"),

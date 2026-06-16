@@ -49,7 +49,7 @@ async function fixture(options: { selectedLine?: string; targetExists?: boolean;
   const ctx: ToolContext = {
     config: {
       mo2Root: root,
-      permissionCeiling: "metadata-editable",
+      permissionCeiling: "full-control",
       allowedProfiles: ["Default"],
       deny: [],
       snapshotRoot: join(root, ".mo2-mcp", "snapshots"),
