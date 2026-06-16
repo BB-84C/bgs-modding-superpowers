@@ -13,6 +13,8 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import { ZodType } from "zod";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -82,12 +84,23 @@ async function main() {
         audit,
     };
     const server = new Server({ name: "mo2-mcp", version: "0.1.0" }, { capabilities: { tools: {} } });
+    // tools/list returns JSON Schema, not Zod schema. The registered tools
+    // carry Zod schemas (which dispatch.ts uses for safeParse on every tool
+    // call), so convert here. Without this, OpenCode reports
+    //   "mo2 Failed to get tools"
+    // because MCP clients try to validate the inputSchema as JSON Schema
+    // and Zod's internal `_def` shape is not a valid JSON Schema document.
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
-        tools: getAllTools().map((t) => ({
-            name: t.name,
-            description: t.description,
-            inputSchema: t.inputSchema, // Zod → JSON Schema
-        })),
+        tools: getAllTools().map((t) => {
+            const schema = t.inputSchema instanceof ZodType
+                ? zodToJsonSchema(t.inputSchema, { target: "openApi3" })
+                : t.inputSchema;
+            return {
+                name: t.name,
+                description: t.description,
+                inputSchema: schema,
+            };
+        }),
     }));
     server.setRequestHandler(CallToolRequestSchema, async (req) => {
         return dispatchToolCall({
