@@ -6,8 +6,16 @@ const mockState = vi.hoisted(() => ({
 }));
 
 vi.mock("node:fs/promises", () => ({
-  readFile: vi.fn(async () => JSON.stringify({ endpoint: "mo2-control-plane-56864" })),
+  readFile: vi.fn(async () => JSON.stringify({ endpoint: "mo2-control-plane-56864", pid: 56864 })),
   readdir: vi.fn(async () => ["mo2-control-plane-84640"]),
+}));
+
+vi.mock("node:child_process", () => ({
+  execFile: vi.fn((_file: string, _args: string[], maybeCallback: any, maybeCallback2?: any) => {
+    const callback = typeof maybeCallback === "function" ? maybeCallback : maybeCallback2;
+    callback(null, { stdout: "[]", stderr: "" });
+    return {};
+  }),
 }));
 
 vi.mock("node:net", () => ({
@@ -58,13 +66,22 @@ describe("PipeClient broker connect", () => {
     mockState.connections = [];
   });
 
-  it("falls back to the single live broker pipe when endpoint.json points at a stale pipe", async () => {
+  it("rejects stale endpoint discovery instead of falling back to an unscoped live broker pipe", async () => {
     const client = new PipeClient();
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number | NodeJS.Signals, signal?: NodeJS.Signals | number) => {
+      if (pid === 56864 && signal === 0) {
+        throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+      }
+      return true;
+    }) as typeof process.kill);
 
-    await client.discoverAndConnect("D:/MO2", 1000);
+    try {
+      await expect(client.discoverAndConnect("D:/MO2", 1000)).rejects.toThrow(/endpoint_stale_no_matching_mo2_at_root/);
+    } finally {
+      killSpy.mockRestore();
+    }
 
-    expect(client.isConnected()).toBe(true);
-    expect(mockState.connections).toContain("\\\\.\\pipe\\mo2-control-plane-56864");
-    expect(mockState.connections).toContain("\\\\.\\pipe\\mo2-control-plane-84640");
+    expect(client.isConnected()).toBe(false);
+    expect(mockState.connections).not.toContain("\\\\.\\pipe\\mo2-control-plane-84640");
   });
 });

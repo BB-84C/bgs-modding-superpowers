@@ -1,13 +1,13 @@
 /**
- * MO2-running detection ladder (3 tiers, Windows-only).
+ * MO2-running detection ladder (Windows-only).
  *
- * Per oracle Open Q5 + S1 librarian-alpha §3.11:
- *   tier 1 (cheap):  process list — ModOrganizer.exe present?
- *   tier 2 (strong): shared-memory probe — mod_organizer_instance_<N> exists?
- *   tier 3 (proof):  profile file exclusive lock — confirms MO2 owns this profile
+ *   Signal A: process list scoped to the configured MO2 root.
+ *   Signal B: shared-memory probe for mod_organizer_instance_<game_id>.
+ *   Signal C: profile file exclusive-lock probe.
  *
- * Each tier is optional; higher tier failures fall through. Caller decides
- * confidence threshold via the returned booleans + `online` flag (tier 1+2).
+ * Signal B is deliberately reported as "unknown" for now.  The MO2 singleton
+ * name depends on the internal game id, and guessing it would recreate the same
+ * unscoped false-positive class that this detector exists to prevent.
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -16,64 +16,33 @@ const execFileP = promisify(execFile);
 
 export interface DetectionResult {
   processRunning: boolean;
-  sharedMemoryPresent: boolean;
+  sharedMemoryPresent: boolean | "unknown";
   profileLockHeld: boolean;
-  pid?: number;
-  /** True when both tier 1 + tier 2 pass — high-confidence MO2 alive. */
+  pid: number | null;
+  confidence: "high" | "medium" | "low";
+  /** Back-compat broker gate: true when a root-scoped MO2 process is present. */
   online: boolean;
 }
 
 export interface DetectionOptions {
   mo2Root: string;
-  /** Optional profile dir; tier 3 lock check is skipped if absent. */
+  /** Optional profile dir; signal C lock check is skipped if absent. */
   profileDir?: string;
 }
 
+export interface Mo2ProcessInfo {
+  pid: number;
+  path: string | null;
+}
+
 export async function detectMo2Running(opts: DetectionOptions): Promise<DetectionResult> {
-  let processRunning = false;
-  let pid: number | undefined;
-  let sharedMemoryPresent = false;
+  const processes = await listMo2ProcessesAtRoot(opts.mo2Root);
+  const processRunning = processes.length > 0;
+  const pid = processes[0]?.pid ?? null;
+  // TODO: implement the MO2 singleton shared-memory probe once the internal
+  // game-id mapping is derived from ModOrganizer.ini rather than guessed.
+  const sharedMemoryPresent: "unknown" = "unknown";
   let profileLockHeld = false;
-
-  try {
-    const { stdout } = await execFileP("tasklist", [
-      "/FI",
-      "IMAGENAME eq ModOrganizer.exe",
-      "/FO",
-      "CSV",
-      "/NH",
-    ]);
-    const match = stdout.toString().match(/"ModOrganizer\.exe","(\d+)"/);
-    if (match) {
-      pid = Number.parseInt(match[1], 10);
-      processRunning = true;
-    }
-  } catch {
-    // tasklist failed or no usable result; keep tier 1 false.
-  }
-
-  if (processRunning) {
-    try {
-      const psScript = `
-        $found = $false
-        for ($i = 1; $i -le 10; $i++) {
-          $name = "mod_organizer_instance_$i"
-          try {
-            $mmf = [System.IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting($name)
-            $mmf.Dispose()
-            Write-Output $name
-            $found = $true
-            break
-          } catch {}
-        }
-        if (-not $found) { Write-Output 'none' }
-      `;
-      const { stdout } = await execFileP("pwsh", ["-NoProfile", "-Command", psScript]);
-      sharedMemoryPresent = stdout.toString().trim().startsWith("mod_organizer_instance_");
-    } catch {
-      // PowerShell missing or shared-memory probe failed; keep tier 2 false.
-    }
-  }
 
   if (processRunning && opts.profileDir) {
     try {
@@ -88,7 +57,7 @@ export async function detectMo2Running(opts: DetectionOptions): Promise<Detectio
       const { stdout } = await execFileP("pwsh", ["-NoProfile", "-Command", psScript]);
       profileLockHeld = stdout.toString().trim() === "locked";
     } catch {
-      // Unknown profile-lock state; keep tier 3 false.
+      // Unknown profile-lock state; keep signal C false.
     }
   }
 
@@ -97,6 +66,56 @@ export async function detectMo2Running(opts: DetectionOptions): Promise<Detectio
     sharedMemoryPresent,
     profileLockHeld,
     pid,
-    online: processRunning && sharedMemoryPresent,
+    confidence: detectionConfidence(processRunning, sharedMemoryPresent, profileLockHeld),
+    online: processRunning,
   };
+}
+
+export async function listMo2ProcessesAtRoot(mo2Root: string): Promise<Mo2ProcessInfo[]> {
+  try {
+    const psScript = `
+      Get-Process -Name "ModOrganizer*" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path } |
+        Select-Object -Property Id,Path |
+        ConvertTo-Json -Compress
+    `;
+    const { stdout } = await execFileP("pwsh", ["-NoProfile", "-Command", psScript]);
+    const rows = parsePowerShellJson(stdout.toString());
+    return rows
+      .map((row) => ({ pid: Number(row.Id), path: typeof row.Path === "string" ? row.Path : null }))
+      .filter((row): row is Mo2ProcessInfo => Number.isInteger(row.pid) && row.pid > 0 && isPathUnderRoot(row.path, mo2Root));
+  } catch {
+    // Without executable paths we cannot safely scope a process to mo2Root, so
+    // fail closed instead of falling back to unscoped tasklist matching.
+    return [];
+  }
+}
+
+function parsePowerShellJson(text: string): Array<Record<string, unknown>> {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const parsed = JSON.parse(trimmed) as Record<string, unknown> | Array<Record<string, unknown>>;
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+function isPathUnderRoot(path: string | null, mo2Root: string): boolean {
+  if (!path) return false;
+  const root = normalizeWindowsPath(mo2Root);
+  const candidate = normalizeWindowsPath(path);
+  return candidate === root || candidate.startsWith(`${root}\\`);
+}
+
+function normalizeWindowsPath(path: string): string {
+  return path.replace(/\//g, "\\").replace(/\\+$/g, "").toLowerCase();
+}
+
+function detectionConfidence(
+  processRunning: boolean,
+  sharedMemoryPresent: boolean | "unknown",
+  profileLockHeld: boolean,
+): "high" | "medium" | "low" {
+  const positiveSignals = [processRunning, sharedMemoryPresent === true, profileLockHeld].filter(Boolean).length;
+  if (positiveSignals >= 3) return "high";
+  if (positiveSignals >= 2) return "medium";
+  return "low";
 }
