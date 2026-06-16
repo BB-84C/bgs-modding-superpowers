@@ -1,5 +1,6 @@
 import type { ToolContext } from "../types.js";
 import { resolveProfileDir } from "../path-helpers.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 /**
  * Sidecar World cache invalidation after mod-mutation operations.
@@ -16,8 +17,9 @@ export async function invalidateWorld(
   ctx: ToolContext,
   profiles: string[] = ["Default"],
 ): Promise<void> {
-  if (!ctx.sidecar) return;
+  const sidecar = requireBoundContext(ctx).sidecar;
+  if (!sidecar) return;
   for (const profile of Array.from(new Set(profiles))) {
-    await ctx.sidecar.call("world.invalidate", { profile_dir: resolveProfileDir(ctx, profile) });
+    await sidecar.call("world.invalidate", { profile_dir: resolveProfileDir(ctx, profile) });
   }
 }

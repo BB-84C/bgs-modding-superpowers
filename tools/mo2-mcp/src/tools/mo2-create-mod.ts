@@ -13,6 +13,7 @@ import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir, resolveModsDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { invalidateWorld } from "./state-sync.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -39,9 +40,10 @@ async function _targetPriority(
 const handler: PlanApplyHandler = {
   toolName: "mo2_create_mod",
   async buildPlan(args, ctx) {
-    if (!ctx.pipeClient) throw new Error("live_mo2_required_for_create_mod");
+    const bound = requireBoundContext(ctx);
+    if (!bound.pipeClient) throw new Error("live_mo2_required_for_create_mod");
     const profile = (args.profile as string | undefined) ?? "Default";
-    const targetPri = await _targetPriority(ctx.config.mo2Root, profile, args.above);
+    const targetPri = await _targetPriority(bound.config.mo2Root, profile, args.above);
     const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
     const aboveText = typeof args.above === "string"
       ? ` above ${args.above} (pri=${String(targetPri)})`
@@ -53,14 +55,15 @@ const handler: PlanApplyHandler = {
     };
   },
   async applyMutation(plan, ctx) {
-    if (!ctx.pipeClient) throw new Error("live_mo2_required_for_create_mod");
+    const bound = requireBoundContext(ctx);
+    if (!bound.pipeClient) throw new Error("live_mo2_required_for_create_mod");
     const profile = (plan.args.profile as string | undefined) ?? "Default";
     await assertActiveProfile(ctx, profile);
-    const targetPri = await _targetPriority(ctx.config.mo2Root, profile, plan.args.above);
+    const targetPri = await _targetPriority(bound.config.mo2Root, profile, plan.args.above);
     const payload: { name: string; priority?: number } = { name: plan.args.name as string };
     if (targetPri !== undefined) payload.priority = targetPri;
 
-    const resp = await ctx.pipeClient.call("mods.create", payload);
+    const resp = await bound.pipeClient.call("mods.create", payload);
     if (!resp.ok) throw new Error(resp.error?.message ?? "broker error");
     // Defensive: ensure mod folder exists on disk. broker mods.create may leave
     // the folder unmaterialized until MO2's next save cycle; downstream tools

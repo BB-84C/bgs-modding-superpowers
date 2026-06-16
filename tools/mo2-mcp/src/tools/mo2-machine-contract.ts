@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { registerTool } from "../tool-registry.js";
 import { readMoIni } from "../mo-ini.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const inputSchema = z.object({
   only_enabled: z.boolean().default(false),
@@ -23,10 +24,18 @@ registerTool({
     "Paths-only snapshot (charrdge pattern): returns absolute paths the agent can read natively without further MCP calls. Saves token budget on large modpacks.",
   inputSchema,
   handler: async (_args, ctx) => {
-    const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
-    const profileName = ctx.config.allowedProfiles[0];
-    const profileDir = join(ctx.config.mo2Root, "profiles", profileName);
-    const modsDir = ini.settings.modDirectory ?? join(ctx.config.mo2Root, "mods");
+    if (bindingSnapshot(ctx).state !== "bound") {
+      return {
+        ok: true,
+        result: { bound: false, hint: "call mo2_session({ mo2Root }) to bind" },
+        error: null,
+      };
+    }
+    const bound = requireBoundContext(ctx);
+    const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
+    const profileName = bound.config.allowedProfiles[0];
+    const profileDir = join(bound.config.mo2Root, "profiles", profileName);
+    const modsDir = ini.settings.modDirectory ?? join(bound.config.mo2Root, "mods");
 
     const allMods = await readdir(modsDir, { withFileTypes: true }).catch(() => []);
     const archiveSearchRoots = allMods
@@ -57,7 +66,7 @@ registerTool({
             ? join(profileDir, `${ini.general.game}Prefs.ini`)
             : null,
         },
-        mod_organizer_ini: join(ctx.config.mo2Root, "ModOrganizer.ini"),
+        mod_organizer_ini: join(bound.config.mo2Root, "ModOrganizer.ini"),
         archive_search_roots: archiveSearchRoots,
       },
       error: null,

@@ -88,25 +88,35 @@ describe("mo2-mcp smoke", () => {
       const parsed = JSON.parse(toolsListLine!);
       expect(parsed.id).toBe(2);
       expect(parsed.result).toBeDefined();
-      expect(parsed.result.tools.map((tool: { name: string }) => tool.name)).toEqual([
+      // Smoke check that the published surface stays at the post-v1 cardinality
+      // and that the load-bearing tools are present. Avoid a strict ordered list
+      // so adding a new tool in a future batch does not require touching the smoke.
+      const names = parsed.result.tools.map((tool: { name: string }) => tool.name);
+      // v1.1.x shipped 34 mo2_* tools; v1.2-pre adds mo2_session as the 35th.
+      expect(names.length).toBeGreaterThanOrEqual(35);
+      const required = [
+        "mo2_session",
         "mo2_status",
         "mo2_machine_contract",
         "mo2_modlist",
         "mo2_pluginlist",
-        "mo2_mod_info",
-        "mo2_profile_ini_get",
-        "mo2_set_mod_notes",
-        "mo2_edit_meta",
-        "mo2_profile_ini_set",
-        "mo2_backup_mod",
-        "mo2_backup_profile",
+        "mo2_install",
         "mo2_toggle_mod",
         "mo2_toggle_plugin",
-        "mo2_send_mod_to",
-        "mo2_rollback",
-        "mo2_restore_profile",
-        "mo2_install",
-      ]);
+        "mo2_switch_profile",
+        "mo2_create_mod",
+        "mo2_create_separator",
+        "mo2_rename_mod",
+        "mo2_reinstall_mod",
+        "mo2_remove_mod",
+        "mo2_set_file_hidden",
+        "mo2_create_profile",
+        "mo2_clone_profile",
+        "mo2_rename_profile",
+      ];
+      for (const tool of required) {
+        expect(names).toContain(tool);
+      }
     } finally {
       void ready;
       proc.stdin.end();

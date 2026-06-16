@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { SnapshotManager } from "../snapshot.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("plan"), snapshot_id: z.string() }),
@@ -19,8 +20,9 @@ const inputSchema = z.discriminatedUnion("mode", [
 const handler: PlanApplyHandler = {
   toolName: "mo2_rollback",
   async buildPlan(args, ctx) {
+    const bound = requireBoundContext(ctx);
     const snapshotId = args.snapshot_id as string;
-    const sessionDir = join(ctx.config.snapshotRoot, ctx.sessionId);
+    const sessionDir = join(bound.config.snapshotRoot, ctx.sessionId);
     const dirs = await readdir(sessionDir).catch(() => [] as string[]);
     for (const d of dirs) {
       const manifestPath = join(sessionDir, d, "manifest.json");
@@ -46,7 +48,8 @@ const handler: PlanApplyHandler = {
     throw new Error(`snapshot_not_found: ${snapshotId}`);
   },
   async applyMutation(plan, ctx) {
-    const sm = new SnapshotManager(ctx.config.snapshotRoot, ctx.sessionId);
+    const bound = requireBoundContext(ctx);
+    const sm = new SnapshotManager(bound.config.snapshotRoot, ctx.sessionId);
     const result = await sm.restore(plan.args.snapshot_id as string);
     return result as unknown as Record<string, unknown>;
   },

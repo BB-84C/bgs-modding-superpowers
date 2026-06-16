@@ -16,6 +16,7 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import { registerTool } from "../tool-registry.js";
 import type { ToolContext } from "../types.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("plan"), new_profile: z.string() }),
@@ -77,19 +78,21 @@ async function _waitForFreshEndpoint(mo2Root: string): Promise<string> {
 }
 
 async function _shutdownCurrentPipe(ctx: ToolContext): Promise<void> {
-  if (!ctx.pipeClient) return;
-  const resp = await ctx.pipeClient.call("system.shutdown", {}, 10000);
+  const bound = requireBoundContext(ctx);
+  if (!bound.pipeClient) return;
+  const resp = await bound.pipeClient.call("system.shutdown", {}, 10000);
   if (!resp.ok) throw new Error(`shutdown_failed: ${resp.error?.message ?? "broker error"}`);
-  ctx.pipeClient.close();
+  bound.pipeClient.close();
 }
 
 const handler: PlanApplyHandler = {
   toolName: "mo2_switch_profile",
   async buildPlan(args, ctx) {
+    const bound = requireBoundContext(ctx);
     const newProfile = args.new_profile as string;
     const newProfileDir = resolveProfileDir(ctx, newProfile);
     if (!existsSync(newProfileDir)) throw new Error(`profile_not_found: ${newProfile}`);
-    if (!ctx.config.allowedProfiles.includes(newProfile)) {
+    if (!bound.config.allowedProfiles.includes(newProfile)) {
       throw new Error(`profile_not_allowed: ${newProfile}`);
     }
     return {
@@ -99,24 +102,25 @@ const handler: PlanApplyHandler = {
     };
   },
   async applyMutation(plan, ctx) {
+    const bound = requireBoundContext(ctx);
     const newProfile = plan.args.new_profile as string;
     await _shutdownCurrentPipe(ctx);
-    await _waitForMo2Gone(ctx.config.mo2Root);
+    await _waitForMo2Gone(bound.config.mo2Root);
 
     const child = spawn(
-      join(ctx.config.mo2Root, "ModOrganizer.exe"),
+      join(bound.config.mo2Root, "ModOrganizer.exe"),
       ["-p", newProfile],
       { detached: true, stdio: "ignore" },
     );
     child.unref();
 
-    const newPipe = await _waitForFreshEndpoint(ctx.config.mo2Root);
+    const newPipe = await _waitForFreshEndpoint(bound.config.mo2Root);
     const newClient = new PipeClient();
-    await newClient.discoverAndConnect(ctx.config.mo2Root);
-    (ctx as { pipeClient?: PipeClient }).pipeClient = newClient;
+    await newClient.discoverAndConnect(bound.config.mo2Root);
+    bound.pipeClient = newClient;
 
-    if (ctx.sidecar) {
-      await ctx.sidecar.call("world.invalidate", {
+    if (bound.sidecar) {
+      await bound.sidecar.call("world.invalidate", {
         profile_dir: resolveProfileDir(ctx, newProfile),
       });
     }

@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { resolveProfileDir } from "../path-helpers.js";
+import type { ToolContext } from "../types.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -21,8 +23,8 @@ const inputSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
 ]);
 
-function _backupDir(ctx: { config: { mo2Root: string } }, profile: string, label: string): string {
-  return join(ctx.config.mo2Root, ".mo2-mcp", "profile-backups", `${profile}_${label}`);
+function _backupDir(ctx: { binding: ToolContext["binding"] }, profile: string, label: string): string {
+  return join(requireBoundContext(ctx).config.mo2Root, ".mo2-mcp", "profile-backups", `${profile}_${label}`);
 }
 
 const handler: PlanApplyHandler = {

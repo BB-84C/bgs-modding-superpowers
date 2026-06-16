@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -47,7 +48,8 @@ function _numberHandle(result: unknown): number {
 const handler: PlanApplyHandler = {
   toolName: "mo2_run_tool",
   async buildPlan(args, ctx) {
-    const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
+    const bound = requireBoundContext(ctx);
+    const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
     const exe = ini.customExecutables.find((entry) => entry.title === args.title);
     if (!exe) {
       throw new Error(
@@ -63,13 +65,14 @@ const handler: PlanApplyHandler = {
     };
   },
   async applyMutation(plan, ctx) {
+    const bound = requireBoundContext(ctx);
     const args = plan.args;
     const title = args.title as string;
     const wait = (args.wait as boolean | undefined) ?? false;
     const profile = (args.profile as string | undefined) ?? "Default";
 
-    if (ctx.pipeClient) {
-      const started = await ctx.pipeClient.call("organizer.start_application", {
+    if (bound.pipeClient) {
+      const started = await bound.pipeClient.call("organizer.start_application", {
         executable: title,
         args: [],
         cwd: "",
@@ -80,7 +83,7 @@ const handler: PlanApplyHandler = {
       if (!started.ok) throw new Error(started.error?.message ?? "broker error");
       const handle = _numberHandle(started.result);
       if (wait) {
-        const waited = await ctx.pipeClient.call("organizer.wait_for_application", {
+        const waited = await bound.pipeClient.call("organizer.wait_for_application", {
           handle,
           refresh: true,
         });
@@ -96,7 +99,7 @@ const handler: PlanApplyHandler = {
     }
 
     const child = spawn(
-      join(ctx.config.mo2Root, "ModOrganizer.exe"),
+      join(bound.config.mo2Root, "ModOrganizer.exe"),
       ["-p", profile, "run", "-e", title],
       { detached: !wait, stdio: "ignore" },
     );

@@ -11,6 +11,7 @@ import { extname, join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { detectMo2Running } from "../detection.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -46,10 +47,11 @@ async function copyDir(src: string, dst: string, skipDirs: Set<string>): Promise
 const handler: PlanApplyHandler = {
   toolName: "mo2_clone_profile",
   async buildPlan(args, ctx) {
-    await assertMo2Closed(ctx.config.mo2Root);
+    const bound = requireBoundContext(ctx);
+    await assertMo2Closed(bound.config.mo2Root);
     const source = args.source as string;
     const target = args.target as string;
-    const profilesRoot = join(ctx.config.mo2Root, "profiles");
+    const profilesRoot = join(bound.config.mo2Root, "profiles");
     const srcDir = join(profilesRoot, source);
     const dstDir = join(profilesRoot, target);
     if (!existsSync(srcDir)) throw new Error("source_profile_not_found");
@@ -61,10 +63,11 @@ const handler: PlanApplyHandler = {
     };
   },
   async applyMutation(plan, ctx) {
+    const bound = requireBoundContext(ctx);
     const source = plan.args.source as string;
     const target = plan.args.target as string;
     const includeSaves = (plan.args.include_saves as boolean | undefined) ?? false;
-    const profilesRoot = join(ctx.config.mo2Root, "profiles");
+    const profilesRoot = join(bound.config.mo2Root, "profiles");
     const srcDir = join(profilesRoot, source);
     const dstDir = join(profilesRoot, target);
     const skipDirs = new Set(["logs", "crashDumps"]);

@@ -17,6 +17,7 @@ import {
 } from "./lease.js";
 import type { SnapshotManager } from "./snapshot.js";
 import type { ToolContext } from "./types.js";
+import { requireBoundContext, bindingSnapshot } from "./binding.js";
 import {
   acquireLeasesForTargets,
   LEASE_LOCK_TTL_MS,
@@ -148,7 +149,7 @@ async function releasePlanLockBestEffort(
   rec: PlanRecord,
 ): Promise<void> {
   try {
-    await releaseLeaseLocks(ctx.config.mo2Root, rec.leaseLockTargetHashes, rec.planId);
+    await releaseLeaseLocks(requireBoundContext(ctx).config.mo2Root, rec.leaseLockTargetHashes, rec.planId);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`[lease-lock] failed to release ${rec.planId}: ${message}\n`);
@@ -167,7 +168,7 @@ export async function runPlanMode(
   const planId = randomUUID();
   const expiresAt = Date.now() + LEASE_LOCK_TTL_MS;
   const createdAt = new Date().toISOString();
-  const lock = await acquireLeasesForTargets(ctx.config.mo2Root, built.targets, {
+  const lock = await acquireLeasesForTargets(requireBoundContext(ctx).config.mo2Root, built.targets, {
     plan_id: planId,
     mcp_pid: process.pid,
     mcp_session_id: ctx.sessionId,
@@ -207,7 +208,7 @@ export async function runPlanMode(
       leaseLockTargetHashes: lock.targetHashes,
     });
   } catch (error) {
-    await releaseLeaseLocks(ctx.config.mo2Root, lock.targetHashes, planId);
+    await releaseLeaseLocks(requireBoundContext(ctx).config.mo2Root, lock.targetHashes, planId);
     throw error;
   }
   return {

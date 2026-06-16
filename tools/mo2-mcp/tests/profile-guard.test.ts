@@ -3,7 +3,12 @@ import { assertActiveProfile } from "../src/profile-guard.js";
 import type { ToolContext } from "../src/types.js";
 
 function ctxWithActiveProfile(activeProfile?: string): ToolContext {
+  // Legacy compat shape: ToolContext at runtime carries `binding`, but
+  // requireBoundContext also accepts an old-shape ctx with `config` +
+  // `pipeClient` for test fixtures that pre-date the lazy-bind refactor.
+  // This fixture goes through that compat path.
   return {
+    config: { mo2Root: "/test-mo2-root", allowedProfiles: ["Default"], permissionCeiling: "metadata-editable", deny: [], snapshotRoot: "/test-mo2-root/.mo2-mcp/snapshots", auditRoot: "/test-mo2-root/.mo2-mcp/audit" },
     pipeClient: activeProfile === undefined
       ? undefined
       : {
@@ -14,8 +19,8 @@ function ctxWithActiveProfile(activeProfile?: string): ToolContext {
           close: () => {},
           discoverAndConnect: async () => {},
           isConnected: () => true,
-        } as unknown as ToolContext["pipeClient"],
-  } as ToolContext;
+        },
+  } as unknown as ToolContext;
 }
 
 describe("assertActiveProfile", () => {

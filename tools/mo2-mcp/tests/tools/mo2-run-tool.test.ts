@@ -12,6 +12,10 @@ import type { ToolContext } from "../../src/types.js";
 
 vi.mock("node:child_process", () => ({
   spawn: vi.fn(),
+  // execFile is reached transitively through binding.ts -> detection.ts top-level
+  // `const execFileP = promisify(execFile)`. Stub it to silence the "No 'execFile'
+  // export is defined" hoist-time error; tests in this file never trigger detection.
+  execFile: vi.fn(),
 }));
 
 async function _fixture(): Promise<{ root: string; ctx: ToolContext }> {

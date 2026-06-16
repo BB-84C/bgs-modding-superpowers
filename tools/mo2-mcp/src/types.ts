@@ -2,8 +2,7 @@
  * Shared types used across MCP server modules.
  */
 import type { Config } from "./config.js";
-import type { PipeClient } from "./pipe-client.js";
-import type { SidecarClient } from "./sidecar-client.js";
+import type { BindingManager } from "./binding.js";
 import type { PlanCache } from "./plan-apply.js";
 import type { SnapshotManager } from "./snapshot.js";
 import type { AuditLogger } from "./audit.js";
@@ -23,9 +22,7 @@ export interface RuleFinding {
 }
 
 export interface ToolContext {
-  config: Config;
-  pipeClient?: PipeClient;
-  sidecar?: SidecarClient;
+  binding: BindingManager;
   sessionId: string;
   plans: PlanCache;
   snapshots: SnapshotManager;

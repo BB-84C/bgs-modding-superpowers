@@ -13,6 +13,7 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
 import type { ToolContext } from "../types.js";
 import { invalidateWorld } from "./state-sync.js";
+import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const FomodChoiceSchema = z.object({
   page_name: z.string(),
@@ -56,22 +57,24 @@ async function _readInstallSource(args: Record<string, unknown>, ctx: ToolContex
   archivePath: string;
   modPath: string;
 }> {
-  if (!ctx.pipeClient) throw new Error("live_mo2_required_for_reinstall");
+  const bound = requireBoundContext(ctx);
+  if (!bound.pipeClient) throw new Error("live_mo2_required_for_reinstall");
   const name = args.name as string;
-  const meta = await ctx.pipeClient.call("mods.meta_read", { name }) as MetaReadResponse;
+  const meta = await bound.pipeClient.call("mods.meta_read", { name }) as MetaReadResponse;
   const installFile = _extractInstallationFile(meta);
-  const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
-  const downloadsDir = ini.settings.downloadDirectory ?? join(ctx.config.mo2Root, "downloads");
-  const modsDir = ini.settings.modDirectory ?? join(ctx.config.mo2Root, "mods");
+  const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
+  const downloadsDir = ini.settings.downloadDirectory ?? join(bound.config.mo2Root, "downloads");
+  const modsDir = ini.settings.modDirectory ?? join(bound.config.mo2Root, "mods");
   const archivePath = join(downloadsDir, installFile);
   if (!existsSync(archivePath)) throw new Error(`archive_not_in_downloads: ${installFile}`);
   return { installFile, archivePath, modPath: join(modsDir, name) };
 }
 
 async function _detectFomod(ctx: ToolContext, archivePath: string): Promise<boolean> {
-  if (!ctx.sidecar) return false;
+  const sidecar = requireBoundContext(ctx).sidecar;
+  if (!sidecar) return false;
   try {
-    await ctx.sidecar.call("fomod.parse_choices", { archive_path: archivePath });
+    await sidecar.call("fomod.parse_choices", { archive_path: archivePath });
     return true;
   } catch (e) {
     if (e instanceof Error && /not_a_fomod|info\.xml/i.test(e.message)) return false;
@@ -91,7 +94,8 @@ const handler: PlanApplyHandler = {
     };
   },
   async applyMutation(plan, ctx) {
-    if (!ctx.pipeClient) throw new Error("live_mo2_required_for_reinstall");
+    const pipeClient = requireBoundContext(ctx).pipeClient;
+    if (!pipeClient) throw new Error("live_mo2_required_for_reinstall");
     const name = plan.args.name as string;
     const { installFile, archivePath } = await _readInstallSource(plan.args, ctx);
 
@@ -100,7 +104,7 @@ const handler: PlanApplyHandler = {
       throw new Error("fomod_choices_required_for_reinstall");
     }
 
-    const resp = await ctx.pipeClient.call("installation.install_local_archive", {
+    const resp = await pipeClient.call("installation.install_local_archive", {
       archive_path: archivePath,
       name_suggestion: name,
     }) as { ok: boolean; result?: Record<string, unknown>; error?: { message?: string } | null };
