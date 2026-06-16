@@ -131,6 +131,7 @@ Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01:
 ## 2026-06-16 — MO2 MCP v1.1.x LOW polish deferrals
 
 - **D / TOCTOU narrowing deferred to v1.2.** Current v1.1.x still relies on content-hash leases plus the `.mo2-mcp/leases/` cross-process lock, which narrows but does not mathematically eliminate the window between `verifyLease()` and the actual target write. v1.2 should evaluate a real file-level advisory-lock substrate (`LockFileEx` on Windows, `flock` on POSIX) rather than shelling out per write. Acceptance should include a two-writer race fixture proving one writer blocks while the other holds the target file lock.
+- **E / directory lease fingerprint upgrade deferred to v1.2.** Directory targets still use the current `{file_count,total_size}` fingerprint, which is cheap but cannot detect same-count/same-size content swaps. v1.2 should compare an upgraded directory digest `(relative_path,size,mtime_ms)` with a performance threshold: full digest for ordinary directories, explicit fallback for very large trees (candidate threshold: 5,000 files) so BodySlide-scale mods do not turn every plan into a costly scan.
 
 
 ## 2026-06-13 — Archive/loose-file helpers shipped (Plan A engine+CLI + Plan B MO2 IPluginTool GUI)
