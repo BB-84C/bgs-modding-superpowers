@@ -10,8 +10,9 @@
  * <MO2_Root>/plugins/Mo2AgentControl/bootstrap/runtime/endpoint.json.
  */
 import { connect } from "node:net";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { listMo2ProcessesAtRoot } from "./detection.js";
 export class PipeClient {
     pipeName;
     connectedOnce = false;
@@ -19,29 +20,47 @@ export class PipeClient {
      * Discover the broker pipe via endpoint.json, then smoke-test with
      * system.ping. Throws if discovery or ping fails.
      */
-    async discoverAndConnect(mo2Root, timeoutMs = 5000, options = {}) {
+    async discoverAndConnect(mo2Root, timeoutMs = 5000, _options = {}) {
         const endpointPath = join(mo2Root, "plugins", "Mo2AgentControl", "bootstrap", "runtime", "endpoint.json");
-        const text = await readFile(endpointPath, "utf8");
-        const endpoint = JSON.parse(text);
-        if (!endpoint.endpoint) {
-            throw new Error(`endpoint.json has no 'endpoint' field: ${endpointPath}`);
-        }
-        const candidates = await pipeCandidates(endpoint.endpoint, options.expectedPid);
         const errors = [];
-        for (const candidate of candidates) {
-            this.pipeName = candidate;
-            try {
-                await this.call("system.ping", {}, timeoutMs);
-                this.connectedOnce = true;
+        const endpoint = await readEndpoint(endpointPath, mo2Root);
+        const endpointPid = endpointPidFrom(endpoint);
+        if (endpointPid === undefined || isPidAlive(endpointPid)) {
+            if (await this.tryConnect(endpoint.endpoint, timeoutMs, errors))
                 return;
-            }
-            catch (e) {
-                const message = e instanceof Error ? e.message : String(e);
-                errors.push(`${toPipePath(candidate)}: ${message}`);
-            }
+            this.pipeName = undefined;
+            throw new Error(`broker pipe discovery failed; tried ${errors.join("; ")}`);
         }
+        const matchingProcesses = await listMo2ProcessesAtRoot(mo2Root);
+        if (matchingProcesses.length === 0) {
+            this.pipeName = undefined;
+            throw new Error(`endpoint_stale_no_matching_mo2_at_root: ${mo2Root}`);
+        }
+        const refreshed = await readEndpoint(endpointPath, mo2Root);
+        const refreshedPid = endpointPidFrom(refreshed);
+        if (refreshedPid !== undefined && !matchingProcesses.some((process) => process.pid === refreshedPid)) {
+            this.pipeName = undefined;
+            throw new Error(`endpoint_stale_no_matching_mo2_at_root: ${mo2Root}`);
+        }
+        if (await this.tryConnect(refreshed.endpoint, timeoutMs, errors))
+            return;
         this.pipeName = undefined;
         throw new Error(`broker pipe discovery failed; tried ${errors.join("; ")}`);
+    }
+    async tryConnect(endpoint, timeoutMs, errors) {
+        const candidate = pipeNameOnly(endpoint);
+        this.pipeName = candidate;
+        try {
+            await this.call("system.ping", {}, timeoutMs);
+            this.connectedOnce = true;
+            return true;
+        }
+        catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            errors.push(`${toPipePath(candidate)}: ${message}`);
+            this.pipeName = undefined;
+            return false;
+        }
     }
     /**
      * Send one JSON-RPC-shaped request, receive one response, socket closes.
@@ -128,31 +147,36 @@ function isPipeCloseAfterResponseError(err) {
 function pipeNameOnly(name) {
     return name.replace(/^\\\\\.\\pipe\\/i, "");
 }
-async function pipeCandidates(endpoint, expectedPid) {
-    const endpointName = pipeNameOnly(endpoint);
-    const candidates = [endpointName];
-    const prefix = endpointName.replace(/\d+$/, "");
-    if (prefix && prefix !== endpointName) {
-        if (expectedPid !== undefined)
-            candidates.push(`${prefix}${expectedPid}`);
-        // Runtime files can be stale after MO2 crash/relaunch: endpoint.json may
-        // still name the previous process pipe even though the live broker has
-        // already published a new named pipe.  Fall back only when the pipe set is
-        // unambiguous (or when the caller supplied the current detection PID), so
-        // multiple live MO2 instances do not cross-connect accidentally.
-        try {
-            const liveNames = (await readdir("\\\\.\\pipe\\"))
-                .filter((name) => name.startsWith(prefix) && name !== endpointName);
-            if (expectedPid !== undefined) {
-                candidates.push(...liveNames.filter((name) => name === `${prefix}${expectedPid}`));
-            }
-            else if (liveNames.length === 1) {
-                candidates.push(liveNames[0]);
-            }
-        }
-        catch {
-            // Named-pipe directory enumeration is Windows-only best-effort fallback.
-        }
+async function readEndpoint(endpointPath, mo2Root) {
+    let text;
+    try {
+        text = await readFile(endpointPath, "utf8");
     }
-    return [...new Set(candidates)];
+    catch {
+        throw new Error(`no_endpoint_found_at_root: ${mo2Root}`);
+    }
+    const endpoint = JSON.parse(text);
+    if (!endpoint.endpoint) {
+        throw new Error(`endpoint.json has no 'endpoint' field: ${endpointPath}`);
+    }
+    return { endpoint: endpoint.endpoint, pid: endpoint.pid };
+}
+function endpointPidFrom(endpoint) {
+    if (Number.isInteger(endpoint.pid) && endpoint.pid > 0)
+        return endpoint.pid;
+    const match = pipeNameOnly(endpoint.endpoint).match(/(\d+)$/);
+    if (!match)
+        return undefined;
+    const pid = Number.parseInt(match[1], 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+function isPidAlive(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch (error) {
+        const code = error.code;
+        return code !== "ESRCH";
+    }
 }
