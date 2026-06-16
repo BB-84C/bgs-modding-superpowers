@@ -12,7 +12,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { resolveModsDir } from "../path-helpers.js";
 import { atomicWriteText } from "../atomic.js";
-import { refreshOrganizer, refreshOrganizerAndInvalidateWorld, invalidateWorld } from "./state-sync.js";
+import { invalidateWorld } from "./state-sync.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("plan"), name: z.string(), backup_first: z.boolean().default(true) }),
     z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
@@ -95,11 +95,10 @@ const handler = {
         }
         if (ctx.pipeClient) {
             const affectedProfiles = await _profilesReferencingMod(ctx.config.mo2Root, name);
-            await refreshOrganizer(ctx);
             const resp = await ctx.pipeClient.call("mods.remove", { name });
             if (!resp.ok)
                 throw new Error(resp.error?.message ?? "mods.remove failed");
-            await refreshOrganizerAndInvalidateWorld(ctx, affectedProfiles.length ? affectedProfiles : ["Default"]);
+            await invalidateWorld(ctx, affectedProfiles.length ? affectedProfiles : ["Default"]);
         }
         else {
             await rm(modPath, { recursive: true, force: true });

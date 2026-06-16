@@ -13,7 +13,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
-import { refreshOrganizer, refreshOrganizerAndInvalidateWorld } from "./state-sync.js";
+import { invalidateWorld } from "./state-sync.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("plan"), old_name: z.string(), new_name: z.string() }),
@@ -77,18 +77,15 @@ const handler: PlanApplyHandler = {
     };
   },
   async applyMutation(plan, ctx) {
+    // Live and offline paths share the same fs-level work: rename the mod
+    // directory and rewrite every profile's modlist.txt. We previously routed
+    // live mode through broker mods.rename, but that required organizer.refresh
+    // beforehand (to make MO2 see fs-created mods) which destabilized MO2's
+    // internal model. The broker round-trip provided no semantic value beyond
+    // the fs work we do here, so the live path was collapsed to call the same
+    // fs logic + invalidate the sidecar World cache.
     const oldName = plan.args.old_name as string;
     const newName = plan.args.new_name as string;
-    if (ctx.pipeClient) {
-      const affectedProfiles = (await _affectedModlists(ctx.config.mo2Root, oldName))
-        .map((entry) => entry.profile)
-        .sort();
-      await refreshOrganizer(ctx);
-      const resp = await ctx.pipeClient.call("mods.rename", { old_name: oldName, new_name: newName });
-      if (!resp.ok) throw new Error(resp.error?.message ?? "broker error");
-      await refreshOrganizerAndInvalidateWorld(ctx, affectedProfiles.length ? affectedProfiles : ["Default"]);
-      return resp.result as Record<string, unknown>;
-    }
 
     const modsDir = await _resolveModsDir(ctx.config.mo2Root);
     await rename(join(modsDir, oldName), join(modsDir, newName));
@@ -108,6 +105,10 @@ const handler: PlanApplyHandler = {
       } catch {
         // Skip non-profile dirs or unreadable modlists.
       }
+    }
+
+    if (ctx.pipeClient) {
+      await invalidateWorld(ctx, updated.length ? updated : ["Default"]);
     }
     return { renamed_dir: true, profiles_updated: updated };
   },

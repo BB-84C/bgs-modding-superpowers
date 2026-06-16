@@ -6,12 +6,13 @@
  */
 import { z } from "zod";
 import { join } from "node:path";
+import { mkdir } from "node:fs/promises";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { readProfile } from "../profile-reader.js";
-import { resolveProfileDir } from "../path-helpers.js";
+import { resolveProfileDir, resolveModsDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
-import { refreshOrganizerAndInvalidateWorld } from "./state-sync.js";
+import { invalidateWorld } from "./state-sync.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -61,8 +62,19 @@ const handler: PlanApplyHandler = {
 
     const resp = await ctx.pipeClient.call("mods.create", payload);
     if (!resp.ok) throw new Error(resp.error?.message ?? "broker error");
-    await refreshOrganizerAndInvalidateWorld(ctx, [profile]);
-    return resp.result as Record<string, unknown>;
+    // Defensive: ensure mod folder exists on disk. broker mods.create may leave
+    // the folder unmaterialized until MO2's next save cycle; downstream tools
+    // (mo2_remove_mod buildPlan, etc.) check existsSync on the mod path and
+    // would otherwise throw mod_not_found. Use the broker-returned
+    // absolute_path when present; fall back to <modsDir>/<name>.
+    const result = (resp.result ?? {}) as Record<string, unknown>;
+    const modsDir = await resolveModsDir(ctx);
+    const absPath = typeof result.absolute_path === "string"
+      ? (result.absolute_path as string)
+      : join(modsDir, plan.args.name as string);
+    await mkdir(absPath, { recursive: true });
+    await invalidateWorld(ctx, [profile]);
+    return result;
   },
 };
 

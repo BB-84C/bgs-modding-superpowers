@@ -398,11 +398,13 @@ def test_mods_remove_failure_from_modlist(monkeypatch):
     assert result["error"]["code"] == "internal_error"
 
 
-def test_mods_create_basic(monkeypatch):
+def test_mods_create_basic(monkeypatch, tmp_path):
     bridge = _load_bridge(monkeypatch)
 
     new_mod = MagicMock()
     new_mod.name.return_value = "NewMod"
+    mod_path = tmp_path / "NewMod"
+    new_mod.absolutePath.return_value = str(mod_path)
     mod_list = MagicMock()
     mod_list.getMod.return_value = None
     mod_list.priority.return_value = 5
@@ -421,6 +423,8 @@ def test_mods_create_basic(monkeypatch):
     assert readback["name"] == "NewMod"
     assert readback["created"] is True
     assert readback["priority"] == 5
+    assert readback["absolute_path"] == str(mod_path)
+    assert mod_path.is_dir()
 
 
 def test_mods_create_with_target_priority(monkeypatch):

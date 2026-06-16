@@ -1,8 +1,13 @@
 import type { ToolContext } from "../types.js";
-export declare function refreshOrganizer(ctx: ToolContext, opts?: {
-    saveChanges?: boolean;
-}): Promise<void>;
+/**
+ * Sidecar World cache invalidation after mod-mutation operations.
+ *
+ * Previously this module also exposed `refreshOrganizer` / `refreshOrganizerAndInvalidateWorld`
+ * which invoked broker `organizer.refresh`.  That call was reverted because it caused
+ * MO2 to attempt mod-list rewrites against a transiently inconsistent in-memory model
+ * (user observed "failed to write mod list: invalid mod index: N" dialogs and modlist
+ * corruption).  MO2's own internal save/refresh cycle is sufficient; we only need to
+ * tell the sidecar to drop its World cache so subsequent assets reads pick up the
+ * post-mutation filesystem state.
+ */
 export declare function invalidateWorld(ctx: ToolContext, profiles?: string[]): Promise<void>;
-export declare function refreshOrganizerAndInvalidateWorld(ctx: ToolContext, profiles?: string[], opts?: {
-    saveChanges?: boolean;
-}): Promise<void>;

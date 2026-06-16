@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
-import { refreshOrganizerAndInvalidateWorld } from "./state-sync.js";
+import { invalidateWorld } from "./state-sync.js";
 const FomodChoiceSchema = z.object({
     page_name: z.string(),
     selected_options: z.array(z.object({ group_name: z.string(), option_name: z.string() })),
@@ -86,7 +86,7 @@ const handler = {
         });
         if (!resp.ok)
             throw new Error(resp.error?.message ?? "installation.install_local_archive failed");
-        await refreshOrganizerAndInvalidateWorld(ctx, ["Default"], { saveChanges: true });
+        await invalidateWorld(ctx, ["Default"]);
         return { reinstalled: name, archive: installFile, fomod_used: isFomod };
     },
 };

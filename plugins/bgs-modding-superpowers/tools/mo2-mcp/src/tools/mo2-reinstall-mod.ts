@@ -12,7 +12,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
 import type { ToolContext } from "../types.js";
-import { refreshOrganizerAndInvalidateWorld } from "./state-sync.js";
+import { invalidateWorld } from "./state-sync.js";
 
 const FomodChoiceSchema = z.object({
   page_name: z.string(),
@@ -106,7 +106,7 @@ const handler: PlanApplyHandler = {
     }) as { ok: boolean; result?: Record<string, unknown>; error?: { message?: string } | null };
     if (!resp.ok) throw new Error(resp.error?.message ?? "installation.install_local_archive failed");
 
-    await refreshOrganizerAndInvalidateWorld(ctx, ["Default"], { saveChanges: true });
+    await invalidateWorld(ctx, ["Default"]);
 
     return { reinstalled: name, archive: installFile, fomod_used: isFomod };
   },

@@ -12,7 +12,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
 import { readProfile } from "../profile-reader.js";
-import { invalidateWorld, refreshOrganizer } from "./state-sync.js";
+import { invalidateWorld } from "./state-sync.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("plan"), virtual_path: z.string(), hidden: z.boolean() }),
     z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
@@ -103,7 +103,6 @@ const handler = {
         if (state.noOp)
             return { no_op: true, path: realPath };
         await rename(realPath, state.newPath);
-        await refreshOrganizer(ctx);
         await invalidateWorld(ctx, ["Default"]);
         return { renamed_from: realPath, renamed_to: state.newPath, hidden };
     },
