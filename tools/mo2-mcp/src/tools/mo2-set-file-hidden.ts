@@ -73,7 +73,11 @@ async function _resolveRealPath(
     if (!resp.ok) throw new Error(resp.error?.message ?? "organizer.resolve_path failed");
     const resolved = resp.result?.resolved;
     if (resolved) return resolved;
-    throw new Error(`virtual_path_not_resolvable: ${virtualPath}`);
+    // Broker live resolve can legitimately miss files that were created by test
+    // fixtures or external fs writes after MO2 startup. Fall back to the
+    // offline scan before declaring the path unresolvable.
+    if (plan) return plan.affectedFiles[0];
+    return _resolveOffline(ctx, virtualPath);
   }
   // The offline plan already leased the exact file path. Prefer that stable
   // path at apply time so visible→hidden / hidden→visible transitions remain

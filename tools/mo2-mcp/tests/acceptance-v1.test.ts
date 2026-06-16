@@ -343,7 +343,12 @@ describe.skipIf(process.env.MO2_MCP_ACCEPTANCE !== "1")("v1 acceptance", () => {
   }, 60_000);
 
   it("AT16: create_mod + create_separator round-trip then remove_mod", async () => {
-    await withMcp(realEnv(), async (mcp) => {
+    // Uses harnessEnv (.artifacts/mo2) because this exercises broker round-trips
+    // that need the configured BGS_MO2_ROOT to match the live MO2 instance the
+    // pipe actually targets. realEnv (WL2) without a live broker there would
+    // make PipeClient fall back to harness, leaving the resulting mod at a path
+    // that the TS layer (computing modsDir from BGS_MO2_ROOT) can't see.
+    await withMcp(harnessEnv(), async (mcp) => {
       const modName = uniqueName("AT16-Mod");
       const sepName = uniqueName("AT16-Separator");
       try {
@@ -357,8 +362,8 @@ describe.skipIf(process.env.MO2_MCP_ACCEPTANCE !== "1")("v1 acceptance", () => {
         expectOk(removeSeparator.apply);
         await writeEvidence("AT16-create-remove-roundtrip", { createMod, createSeparator, removeMod, removeSeparator });
       } finally {
-        await rm(join(REAL_MO2_ROOT, "mods", modName), { recursive: true, force: true });
-        await rm(join(REAL_MO2_ROOT, "mods", `${sepName}_separator`), { recursive: true, force: true });
+        await rm(join(HARNESS_MO2_ROOT, "mods", modName), { recursive: true, force: true });
+        await rm(join(HARNESS_MO2_ROOT, "mods", `${sepName}_separator`), { recursive: true, force: true });
       }
     });
   }, 180_000);

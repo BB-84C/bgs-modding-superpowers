@@ -104,8 +104,18 @@ const handler: PlanApplyHandler = {
         result?: Record<string, unknown>;
         error?: { message?: string } | null;
       };
-      if (!resp.ok) throw new Error(resp.error?.message ?? "mods.remove failed");
-      await invalidateWorld(ctx, affectedProfiles.length ? affectedProfiles : ["Default"]);
+      if (resp.ok) {
+        await invalidateWorld(ctx, affectedProfiles.length ? affectedProfiles : ["Default"]);
+      } else if (/mod ['"]?.+['"]? not found/i.test(resp.error?.message ?? "") && existsSync(modPath)) {
+        // Live MO2's in-memory model can lag behind fs-created mods (e.g. createMod
+        // + immediate remove round-trips in acceptance). Fall back to the same
+        // filesystem removal path as offline mode when the folder exists on disk.
+        await rm(modPath, { recursive: true, force: true });
+        profilesUpdated = await _scrubAllProfileModlists(ctx.config.mo2Root, name);
+        await invalidateWorld(ctx, profilesUpdated.length ? profilesUpdated : affectedProfiles.length ? affectedProfiles : ["Default"]);
+      } else {
+        throw new Error(resp.error?.message ?? "mods.remove failed");
+      }
     } else {
       await rm(modPath, { recursive: true, force: true });
       profilesUpdated = await _scrubAllProfileModlists(ctx.config.mo2Root, name);
