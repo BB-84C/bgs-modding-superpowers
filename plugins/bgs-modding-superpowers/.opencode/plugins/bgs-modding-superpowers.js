@@ -2,9 +2,15 @@
 //
 // Wires three things:
 //   1. config.skills.paths: append <plugin>/skills so OpenCode discovers our SKILL.md files
-//   2. config.mcp.xedit + config.mcp.bgs_kb + config.mcp.mo2:
+//   2. config.mcp.xedit + config.mcp.bgs_kb:
 //                           register the bundled MCP stdio servers
 //                           (node tools/<server>/dist/index.js)
+//                           mo2-mcp is intentionally NOT registered yet —
+//                           it requires a lazy-bind refactor (server must
+//                           start without BGS_MO2_ROOT and bind via
+//                           mo2_session tool on demand, mirroring the
+//                           xedit-mcp pattern). Tracked as the v1.2-pre
+//                           architecture batch.
 //   3. first-user-message bootstrap: inject the using-bgs-modding-superpowers SKILL body
 //                                    into the first user message so the host agent loads
 //                                    the bootstrap on every session start
@@ -25,7 +31,6 @@ const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
 const SKILLS_DIR = path.join(PLUGIN_ROOT, 'skills');
 const XEDIT_MCP_ENTRY = path.join(PLUGIN_ROOT, 'tools', 'xedit-mcp', 'dist', 'index.js');
 const BGS_KB_MCP_ENTRY = path.join(PLUGIN_ROOT, 'tools', 'bgs-kb-mcp', 'dist', 'index.js');
-const MO2_MCP_ENTRY = path.join(PLUGIN_ROOT, 'tools', 'mo2-mcp', 'dist', 'index.js');
 const BOOTSTRAP_SKILL = path.join(SKILLS_DIR, 'using-bgs-modding-superpowers', 'SKILL.md');
 
 // Sentinel used to detect already-injected bootstrap so we don't double-inject across reloads.
@@ -39,35 +44,6 @@ function readBootstrap() {
     // Plugin still loads; first-user-message injection is just a no-op.
     return null;
   }
-}
-
-// mo2-mcp's index.ts hard-requires BGS_MO2_ROOT at startup; if missing it
-// writes "BGS_MO2_ROOT not set\n" to stderr and process.exit(1). That kills
-// stdio before MCP handshake completes, which OpenCode surfaces as
-//   "mo2 MCP error -32000: Connection closed".
-// detectMo2Root resolves a sensible default before we register the server:
-//   1. explicit process.env.BGS_MO2_ROOT wins (lets the user override)
-//   2. <PLUGIN_ROOT>/.artifacts/mo2 covers dev work in the awesome-bgs-mod-master
-//      repo (the canonical low-noise harness MO2)
-//   3. process.cwd() covers vendor-clone users running OpenCode at their own
-//      MO2 project root (the workspace cwd contains ModOrganizer.exe).
-// If none of those resolves, we skip registering mo2 entirely instead of
-// letting it crash on startup; the user can set BGS_MO2_ROOT and restart
-// OpenCode to bring it online.
-function detectMo2Root() {
-  if (process.env.BGS_MO2_ROOT) return process.env.BGS_MO2_ROOT;
-  const candidates = [
-    path.join(PLUGIN_ROOT, '.artifacts', 'mo2'),
-    process.cwd(),
-  ];
-  for (const c of candidates) {
-    try {
-      if (fs.existsSync(path.join(c, 'ModOrganizer.exe'))) return c;
-    } catch {
-      // ignore stat failures; try next candidate
-    }
-  }
-  return undefined;
 }
 
 export const BgsModdingSuperpowersPlugin = async () => {
@@ -113,28 +89,13 @@ export const BgsModdingSuperpowersPlugin = async () => {
         environment: {},
         timeout: 240000,
       };
-      // mo2-mcp: agent-facing MO2 control plane (34 tools across read/metadata/mutating
-      // tiers, plan/apply with leases, JSONL audit). Talks to the bundled control-plane
-      // Python broker over named pipe + the bundled Python sidecar over JSON-RPC. The
-      // first call lazily spins up the sidecar Python process; 240s timeout matches the
-      // xedit lane for consistency, but warm calls return in tens of ms.
-      //
-      // Registration is gated on detectMo2Root() finding a real MO2 install — without
-      // BGS_MO2_ROOT mo2-mcp would crash at startup ("Connection closed -32000"), so we
-      // simply do not register when no candidate resolves. Set BGS_MO2_ROOT explicitly
-      // and restart OpenCode to bring mo2 online in that case.
-      if (config.mcp.mo2 === undefined) {
-        const detectedMo2Root = detectMo2Root();
-        if (detectedMo2Root) {
-          config.mcp.mo2 = {
-            type: 'local',
-            command: ['node', MO2_MCP_ENTRY],
-            enabled: true,
-            environment: { BGS_MO2_ROOT: detectedMo2Root },
-            timeout: 240000,
-          };
-        }
-      }
+      // mo2-mcp: intentionally NOT registered yet. The current v1.1.x mo2-mcp
+      // hard-requires BGS_MO2_ROOT at startup (see tools/mo2-mcp/src/index.ts:93),
+      // which couples MCP-server startup to a pre-existing MO2 path. That is the
+      // wrong model — MCP servers should start clean and have tools that lazy-bind
+      // to MO2 on agent request (mirrors xedit-mcp where the daemon is lazily
+      // launched via xedit_session). Registration is held until the lazy-bind
+      // refactor lands; tracked as the v1.2-pre architecture batch.
     },
 
     // (d) Inject the bootstrap skill body into the first user message of each session.
