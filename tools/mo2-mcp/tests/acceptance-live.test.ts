@@ -1,5 +1,4 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
   appendFile,
@@ -10,36 +9,33 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { readMoIni } from "../src/mo-ini.js";
+import {
+  ACCEPTANCE_MOD,
+  ACCEPTANCE_SEPARATOR,
+  ALT_PROFILE,
+  ARTIFACTS,
+  EXPECTED_ESP_COUNT,
+  EXPECTED_WINNER,
+  FOMOD_ARCHIVE,
+  HARNESS_MO2_ROOT,
+  HARNESS_PROFILE,
+  OVERRIDDEN_FILE,
+  REAL_MO2_ROOT,
+  REAL_PROFILE,
+  SIMPLE_ARCHIVE,
+  expectOk,
+  harnessEnv,
+  pickFirstMod,
+  planApply,
+  realEnv,
+  removeModBestEffort,
+  spawnMcp,
+  uniqueName,
+  withMcp,
+  writeEvidence,
+} from "./acceptance-shared.js";
 
-const PROJECT_ROOT = process.env.BGS_MO2_ACCEPTANCE_PROJECT_ROOT ?? String.raw`D:\awesome-bgs-mod-master`;
-const REAL_MO2_ROOT = process.env.BGS_MO2_ROOT ?? String.raw`B:\WastelandBlues 2.0`;
-const REAL_PROFILE = process.env.BGS_MO2_PROFILE ?? "BB84自用";
-const HARNESS_MO2_ROOT = process.env.BGS_MO2_HARNESS_ROOT ?? String.raw`D:\awesome-bgs-mod-master\.artifacts\mo2`;
-const HARNESS_PROFILE = process.env.BGS_MO2_HARNESS_PROFILE ?? "Default";
-const ARTIFACTS = join(PROJECT_ROOT, ".opencode", "artifacts", "mo2-mcp", "acceptance");
-const MCP_CWD = process.cwd();
-
-const ACCEPTANCE_MOD = process.env.BGS_MO2_ACCEPTANCE_MOD ?? "LODGen 覆盖素材";
-const ACCEPTANCE_SEPARATOR = process.env.BGS_MO2_ACCEPTANCE_SEPARATOR;
-const ALT_PROFILE = process.env.BGS_MO2_ACCEPTANCE_ALT_PROFILE;
-const FOMOD_ARCHIVE = process.env.BGS_MO2_ACCEPTANCE_FOMOD_ARCHIVE ?? join(ARTIFACTS, "fixtures", "test-fomod.7z");
-const SIMPLE_ARCHIVE = process.env.BGS_MO2_ACCEPTANCE_SIMPLE_ARCHIVE ?? join(ARTIFACTS, "fixtures", "test-simple.7z");
-const OVERRIDDEN_FILE = process.env.BGS_MO2_ACCEPTANCE_OVERRIDDEN_FILE ?? "textures/acceptance/winner.dds";
-const EXPECTED_WINNER = process.env.BGS_MO2_ACCEPTANCE_EXPECTED_WINNER;
-const EXPECTED_ESP_COUNT = Number(process.env.BGS_MO2_ACCEPTANCE_ESP_COUNT ?? "NaN");
-
-interface ToolResponse {
-  ok: boolean;
-  result?: any;
-  error?: any;
-}
-
-interface McpHandle {
-  call: (name: string, args: any) => Promise<ToolResponse>;
-  kill: () => void;
-}
-
-describe.skipIf(process.env.MO2_MCP_ACCEPTANCE !== "1")("v1 acceptance", () => {
+describe.skipIf(process.env.MO2_MCP_ACCEPTANCE !== "1")("v1 acceptance (live)", () => {
   beforeAll(async () => {
     await mkdir(ARTIFACTS, { recursive: true });
   });
@@ -182,54 +178,6 @@ describe.skipIf(process.env.MO2_MCP_ACCEPTANCE !== "1")("v1 acceptance", () => {
       await writeEvidence("AT7-switch-profile", { toAlt, statusAlt, back });
     });
   }, 300_000);
-
-  it("AT8: customExecutables add/edit/remove preserves non-executable INI sections", async () => {
-    await withMcp(harnessEnv(), async (mcp) => {
-      const iniPath = join(HARNESS_MO2_ROOT, "ModOrganizer.ini");
-      const before = await readFile(iniPath, "utf8");
-      const title = uniqueName("AT8 Tool");
-      const add = await planApply(mcp, "mo2_configure_executable", {
-        action: "add",
-        entry: { title, binary: "C:/Windows/System32/cmd.exe", arguments: "/c ver", workingDirectory: "C:/Windows/System32" },
-      });
-      const listedAfterAdd = await mcp.call("mo2_list_executables", {});
-      const edit = await planApply(mcp, "mo2_configure_executable", {
-        action: "edit",
-        title,
-        updates: { arguments: "/c echo edited" },
-      });
-      const remove = await planApply(mcp, "mo2_configure_executable", { action: "remove", title });
-      const after = await readFile(iniPath, "utf8");
-      expectOk(add.apply);
-      expectOk(edit.apply);
-      expectOk(remove.apply);
-      expectOk(listedAfterAdd);
-      expect(stripCustomExecutables(after)).toBe(stripCustomExecutables(before));
-      await writeEvidence("AT8-custom-executables-roundtrip", { add, listedAfterAdd, edit, remove });
-    });
-  }, 120_000);
-
-  it("AT9: profile create, clone, rename, and filesystem cleanup", async () => {
-    await withMcp(harnessEnv(), async (mcp) => {
-      const created = uniqueName("AT9-Created");
-      const cloned = uniqueName("AT9-Cloned");
-      const renamed = uniqueName("AT9-Renamed");
-      try {
-        const create = await planApply(mcp, "mo2_create_profile", { name: created });
-        const clone = await planApply(mcp, "mo2_clone_profile", { source: HARNESS_PROFILE, target: cloned });
-        const renameProfile = await planApply(mcp, "mo2_rename_profile", { old_name: cloned, new_name: renamed });
-        expectOk(create.apply);
-        expectOk(clone.apply);
-        expectOk(renameProfile.apply);
-        expect(existsSync(join(HARNESS_MO2_ROOT, "profiles", renamed))).toBe(true);
-        await writeEvidence("AT9-profile-lifecycle", { create, clone, renameProfile });
-      } finally {
-        await rm(join(HARNESS_MO2_ROOT, "profiles", created), { recursive: true, force: true });
-        await rm(join(HARNESS_MO2_ROOT, "profiles", cloned), { recursive: true, force: true });
-        await rm(join(HARNESS_MO2_ROOT, "profiles", renamed), { recursive: true, force: true });
-      }
-    });
-  }, 120_000);
 
   it("AT10: interrupted apply leaves atomic file state old-or-new, never partial", async () => {
     const mcp = await spawnMcp(harnessEnv());
@@ -450,190 +398,3 @@ describe.skipIf(process.env.MO2_MCP_ACCEPTANCE !== "1")("v1 acceptance", () => {
     });
   }, 120_000);
 });
-
-async function withMcp<T>(env: Record<string, string>, fn: (mcp: McpHandle) => Promise<T>): Promise<T> {
-  const mcp = await spawnMcp(env);
-  try {
-    return await fn(mcp);
-  } finally {
-    mcp.kill();
-  }
-}
-
-function realEnv(extra: Record<string, string> = {}): Record<string, string> {
-  return { BGS_MO2_ROOT: REAL_MO2_ROOT, BGS_MO2_PROFILE: REAL_PROFILE, BGS_MO2_PERMISSION_CEILING: "full-control", ...extra };
-}
-
-function harnessEnv(extra: Record<string, string> = {}): Record<string, string> {
-  return { BGS_MO2_ROOT: HARNESS_MO2_ROOT, BGS_MO2_PROFILE: HARNESS_PROFILE, BGS_MO2_PERMISSION_CEILING: "full-control", ...extra };
-}
-
-async function planApply(mcp: McpHandle, tool: string, args: Record<string, unknown>): Promise<{ plan: ToolResponse; apply: ToolResponse }> {
-  const plan = await mcp.call(tool, { mode: "plan", ...args });
-  expectOk(plan);
-  const apply = await mcp.call(tool, {
-    mode: "apply",
-    plan_id: plan.result.planId,
-    lease_token: plan.result.lease_token,
-  });
-  return { plan, apply };
-}
-
-async function removeModBestEffort(mcp: McpHandle, name: string): Promise<void> {
-  const plan = await mcp.call("mo2_remove_mod", { mode: "plan", name, backup_first: false });
-  if (!plan.ok) return;
-  await mcp.call("mo2_remove_mod", {
-    mode: "apply",
-    plan_id: plan.result.planId,
-    lease_token: plan.result.lease_token,
-  });
-}
-
-async function pickFirstMod(mcp: McpHandle, profile: string): Promise<{ name: string; enabled: boolean }> {
-  const modlist = await mcp.call("mo2_modlist", { profile });
-  expectOk(modlist);
-  const mod = (modlist.result.mods as Array<{ name: string; enabled: boolean; is_separator: boolean }>).find((entry) => !entry.is_separator);
-  expect(mod).toBeDefined();
-  return mod!;
-}
-
-function expectOk(response: ToolResponse): asserts response is ToolResponse & { ok: true; result: any } {
-  expect(response.ok, JSON.stringify(response.error ?? response, null, 2)).toBe(true);
-}
-
-async function writeEvidence(name: string, payload: unknown): Promise<void> {
-  await mkdir(ARTIFACTS, { recursive: true });
-  await writeFile(
-    join(ARTIFACTS, `${name}.json`),
-    JSON.stringify({ ts: new Date().toISOString(), payload }, null, 2),
-    "utf8",
-  );
-}
-
-function uniqueName(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function stripCustomExecutables(text: string): string {
-  const lines = text.split(/\r?\n/);
-  const out: string[] = [];
-  let skipping = false;
-  for (const line of lines) {
-    if (/^\[customExecutables\]$/i.test(line.trim())) {
-      skipping = true;
-      continue;
-    }
-    if (skipping && /^\[.+\]$/.test(line.trim())) {
-      skipping = false;
-    }
-    if (!skipping) out.push(line);
-  }
-  return out.join("\n");
-}
-
-async function spawnMcp(env: Record<string, string>): Promise<McpHandle> {
-  const proc = spawn("node", ["dist/index.js"], {
-    cwd: MCP_CWD,
-    env: { ...process.env, ...env },
-    stdio: ["pipe", "pipe", "pipe"],
-  }) as ChildProcessWithoutNullStreams;
-
-  let nextId = 1;
-  let stdoutBuffer = "";
-  let stderrBuffer = "";
-  const pending = new Map<number, {
-    resolve: (value: any) => void;
-    reject: (error: Error) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
-  proc.stderr.on("data", (chunk: Buffer) => {
-    stderrBuffer += chunk.toString("utf8");
-  });
-
-  proc.stdout.on("data", (chunk: Buffer) => {
-    stdoutBuffer += chunk.toString("utf8");
-    let idx = stdoutBuffer.indexOf("\n");
-    while (idx >= 0) {
-      const line = stdoutBuffer.slice(0, idx).trim();
-      stdoutBuffer = stdoutBuffer.slice(idx + 1);
-      if (line) dispatchJsonRpcLine(line, pending, stderrBuffer);
-      idx = stdoutBuffer.indexOf("\n");
-    }
-  });
-
-  proc.once("exit", (code, signal) => {
-    for (const [id, entry] of pending) {
-      clearTimeout(entry.timer);
-      entry.reject(new Error(`MCP process exited before response id=${id}; code=${code}; signal=${signal}; stderr=${stderrBuffer}`));
-    }
-    pending.clear();
-  });
-
-  const request = (method: string, params: any, timeoutMs = 30_000): Promise<any> => {
-    const id = nextId++;
-    const payload = { jsonrpc: "2.0", id, method, params };
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(id);
-        reject(new Error(`MCP request timed out: ${method}; stderr=${stderrBuffer}`));
-      }, timeoutMs);
-      pending.set(id, { resolve, reject, timer });
-      proc.stdin.write(`${JSON.stringify(payload)}\n`);
-    });
-  };
-
-  await request("initialize", {
-    protocolVersion: "2024-11-05",
-    capabilities: {},
-    clientInfo: { name: "mo2-mcp-acceptance", version: "1.0.0" },
-  }, 60_000);
-  proc.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} })}\n`);
-
-  return {
-    call: async (name: string, args: any): Promise<ToolResponse> => {
-      const response = await request("tools/call", { name, arguments: args }, 180_000);
-      const text = response.result?.content?.[0]?.text;
-      if (typeof text !== "string") {
-        return { ok: false, error: { code: "malformed_mcp_response", response } };
-      }
-      try {
-        return JSON.parse(text) as ToolResponse;
-      } catch (error) {
-        return { ok: false, error: { code: "tool_response_not_json", message: String(error), text } };
-      }
-    },
-    kill: () => {
-      for (const [id, entry] of pending) {
-        clearTimeout(entry.timer);
-        entry.reject(new Error(`MCP process killed before response id=${id}`));
-      }
-      pending.clear();
-      proc.stdin.end();
-      proc.kill();
-    },
-  };
-}
-
-function dispatchJsonRpcLine(
-  line: string,
-  pending: Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>,
-  stderrBuffer: string,
-): void {
-  let message: any;
-  try {
-    message = JSON.parse(line);
-  } catch {
-    return;
-  }
-  if (typeof message.id !== "number") return;
-  const entry = pending.get(message.id);
-  if (!entry) return;
-  pending.delete(message.id);
-  clearTimeout(entry.timer);
-  if (message.error) {
-    entry.reject(new Error(`MCP JSON-RPC error id=${message.id}: ${JSON.stringify(message.error)}; stderr=${stderrBuffer}`));
-  } else {
-    entry.resolve(message);
-  }
-}
