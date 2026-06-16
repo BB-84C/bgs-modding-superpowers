@@ -76,7 +76,7 @@ describe("mo2_rename_mod", () => {
     expect(rec.lease.components.map((component) => component.path)).toContain(join(root, "mods", "OldMod"));
   });
 
-  it("apply live calls mods.rename with old_name/new_name and invalidates sidecar", async () => {
+  it("apply live refreshes before mods.rename, then refreshes and invalidates sidecar", async () => {
     const { root, ctx } = await _fixture(true);
     const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
     ctx.pipeClient = {
@@ -111,9 +111,12 @@ describe("mo2_rename_mod", () => {
 
     expect(apply.ok).toBe(true);
     expect(pipeCalls).toEqual([
+      { method: "organizer.refresh", params: { save_changes: false } },
       { method: "mods.rename", params: { old_name: "OldMod", new_name: "NewMod" } },
+      { method: "organizer.refresh", params: { save_changes: false } },
     ]);
     expect(sidecarCalls).toEqual([
+      { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Alt") } },
       { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } },
     ]);
   });

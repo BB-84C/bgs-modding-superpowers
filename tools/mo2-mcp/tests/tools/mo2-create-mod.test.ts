@@ -93,7 +93,7 @@ describe("mo2_create_mod", () => {
     ).rejects.toThrow(/above_mod_not_found: Missing/);
   });
 
-  it("apply calls mods.create with name and priority, then invalidates sidecar world", async () => {
+  it("apply calls mods.create with name and priority, then refreshes and invalidates sidecar world", async () => {
     const { root, ctx } = await _fixture();
     const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
     ctx.pipeClient = {
@@ -131,6 +131,7 @@ describe("mo2_create_mod", () => {
     expect(pipeCalls).toEqual([
       { method: "profile.active", params: {} },
       { method: "mods.create", params: { name: "NewEmpty", priority: 2 } },
+      { method: "organizer.refresh", params: { save_changes: false } },
     ]);
     expect(sidecarCalls).toEqual([
       { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } },

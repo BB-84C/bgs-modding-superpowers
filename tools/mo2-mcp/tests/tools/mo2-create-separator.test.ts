@@ -143,7 +143,7 @@ describe("mo2_create_separator", () => {
     ]);
   });
 
-  it("apply without color does not write meta.ini or refresh", async () => {
+  it("apply without color does not write meta.ini but still refreshes and invalidates", async () => {
     const { root, ctx } = await _fixture();
     const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
     ctx.pipeClient = {
@@ -156,6 +156,16 @@ describe("mo2_create_separator", () => {
       discoverAndConnect: async () => {},
       isConnected: () => true,
     } as unknown as ToolContext["pipeClient"];
+    const sidecarCalls: Array<{ method: string; params: unknown }> = [];
+    ctx.sidecar = {
+      call: async (method: string, params: unknown) => {
+        sidecarCalls.push({ method, params });
+        return { invalidated: true };
+      },
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    } as unknown as ToolContext["sidecar"];
     const tool = getTool("mo2_create_separator")!;
     const plan = (await tool.handler(
       { mode: "plan", name: "Plain" },
@@ -172,6 +182,10 @@ describe("mo2_create_separator", () => {
     expect(pipeCalls).toEqual([
       { method: "profile.active", params: {} },
       { method: "mods.create", params: { name: "Plain_separator" } },
+      { method: "organizer.refresh", params: { save_changes: false } },
+    ]);
+    expect(sidecarCalls).toEqual([
+      { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } },
     ]);
     expect(existsSync(join(root, "mods", "Plain_separator", "meta.ini"))).toBe(false);
   });

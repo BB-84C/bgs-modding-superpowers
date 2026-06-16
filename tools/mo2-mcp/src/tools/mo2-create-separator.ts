@@ -13,6 +13,7 @@ import { resolveProfileDir } from "../path-helpers.js";
 import { readMoIni } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
 import { assertActiveProfile } from "../profile-guard.js";
+import { refreshOrganizerAndInvalidateWorld } from "./state-sync.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -73,13 +74,9 @@ const handler: PlanApplyHandler = {
       const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
       const modsDir = ini.settings.modDirectory ?? join(ctx.config.mo2Root, "mods");
       await atomicWriteText(join(modsDir, sepName, "meta.ini"), `[General]\ncolor=${plan.args.color}\n`);
-      const refresh = await ctx.pipeClient.call("organizer.refresh", { save_changes: false });
-      if (!refresh.ok) throw new Error(refresh.error?.message ?? "broker error");
     }
 
-    if (ctx.sidecar) {
-      await ctx.sidecar.call("world.invalidate", { profile_dir: resolveProfileDir(ctx, profile) });
-    }
+    await refreshOrganizerAndInvalidateWorld(ctx, [profile]);
 
     return { separator_name: sepName, color_set: typeof plan.args.color === "string" };
   },

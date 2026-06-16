@@ -187,6 +187,43 @@ describe("mo2_set_file_hidden", () => {
     expect(await readFile(join(root, "mods", "High", "Data", "textures", "same.dds"), "utf8")).toBe("high");
   });
 
+  it("apply live refreshes MO2 and invalidates sidecar after hidden-state rename", async () => {
+    const { root, ctx, pipeCalls } = await fixture({
+      withPipe: true,
+      resolvedPath: (fixtureRoot) => join(fixtureRoot, "mods", "High", "Data", "textures", "same.dds"),
+    });
+    const sidecarCalls: Array<{ method: string; params: unknown }> = [];
+    ctx.sidecar = {
+      call: async (method: string, params: unknown) => {
+        sidecarCalls.push({ method, params });
+        return { invalidated: true };
+      },
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    } as unknown as ToolContext["sidecar"];
+    const tool = getTool("mo2_set_file_hidden")!;
+    const plan = (await tool.handler(
+      { mode: "plan", virtual_path: "Data/textures/same.dds", hidden: true },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+    const apply = (await tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )) as { ok: boolean; result: { renamed_from: string; renamed_to: string; hidden: boolean } };
+
+    expect(apply.ok).toBe(true);
+    expect(pipeCalls).toEqual([
+      { method: "organizer.resolve_path", params: { filename: "Data/textures/same.dds" } },
+      { method: "organizer.resolve_path", params: { filename: "Data/textures/same.dds" } },
+      { method: "organizer.refresh", params: { save_changes: false } },
+    ]);
+    expect(sidecarCalls).toEqual([
+      { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } },
+    ]);
+  });
+
   it("apply no-op returns no_op true without renaming", async () => {
     const { root, ctx } = await fixture();
     const tool = getTool("mo2_set_file_hidden")!;

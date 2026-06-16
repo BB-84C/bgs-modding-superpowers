@@ -71,6 +71,7 @@ async function fixture(options: { createMod?: boolean; withPipe?: boolean } = {}
       call: async (method: string, params: Record<string, unknown>) => {
         pipeCalls.push({ method, params });
         if (method === "mods.remove") return { ok: true, result: { name: params.name, removed: true } };
+        if (method === "organizer.refresh") return { ok: true, result: { refreshed: true } };
         throw new Error(`unmocked: ${method}`);
       },
       close: () => {},
@@ -142,7 +143,11 @@ describe("mo2_remove_mod", () => {
     )) as { ok: boolean; result: { removed: string; backup_name?: string } };
 
     expect(cp).toHaveBeenCalledWith(join(root, "mods", "Target"), join(root, "mods", "Targetbackup0"), { recursive: true });
-    expect(pipeCalls).toEqual([{ method: "mods.remove", params: { name: "Target" } }]);
+    expect(pipeCalls).toEqual([
+      { method: "organizer.refresh", params: { save_changes: false } },
+      { method: "mods.remove", params: { name: "Target" } },
+      { method: "organizer.refresh", params: { save_changes: false } },
+    ]);
     expect(apply.result).toMatchObject({ removed: "Target", backup_name: "Targetbackup0" });
   });
 
@@ -181,7 +186,11 @@ describe("mo2_remove_mod", () => {
 
     const backupCopies = vi.mocked(cp).mock.calls.filter(([, dest]) => String(dest).includes("Targetbackup"));
     expect(backupCopies).toEqual([]);
-    expect(pipeCalls).toEqual([{ method: "mods.remove", params: { name: "Target" } }]);
+    expect(pipeCalls).toEqual([
+      { method: "organizer.refresh", params: { save_changes: false } },
+      { method: "mods.remove", params: { name: "Target" } },
+      { method: "organizer.refresh", params: { save_changes: false } },
+    ]);
     expect(apply.result.backup_name).toBeUndefined();
   });
 

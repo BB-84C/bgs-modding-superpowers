@@ -73,6 +73,7 @@ async function fixture(options: { withPipe?: boolean; installFile?: string; crea
         if (method === "installation.install_local_archive") {
           return { ok: true, result: { name: params.name_suggestion, installation_file: params.archive_path } };
         }
+        if (method === "organizer.refresh") return { ok: true, result: { refreshed: true } };
         throw new Error(`unmocked: ${method}`);
       },
       close: () => {},
@@ -158,6 +159,7 @@ describe("mo2_reinstall_mod", () => {
       method: "installation.install_local_archive",
       params: { archive_path: join(root, "downloads", "InstalledMod.7z"), name_suggestion: "InstalledMod" },
     });
+    expect(pipeCalls).toContainEqual({ method: "organizer.refresh", params: { save_changes: true } });
     expect(sidecarCalls).toContainEqual({ method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } });
   });
 
@@ -185,9 +187,11 @@ describe("mo2_reinstall_mod", () => {
   });
 
   it("apply FOMOD with choices succeeds and returns fomod_used true", async () => {
-    const { ctx } = await fixture({ withPipe: true, createArchive: true });
+    const { root, ctx, pipeCalls } = await fixture({ withPipe: true, createArchive: true });
+    const sidecarCalls: MockSidecarCall[] = [];
     ctx.sidecar = {
-      call: async (method: string) => {
+      call: async (method: string, params: unknown) => {
+        sidecarCalls.push({ method, params });
         if (method === "fomod.parse_choices") return { pages: [{ name: "Install" }] };
         if (method === "world.invalidate") return { invalidated: true };
         throw new Error(`unmocked: ${method}`);
@@ -213,5 +217,7 @@ describe("mo2_reinstall_mod", () => {
 
     expect(apply.ok).toBe(true);
     expect(apply.result.fomod_used).toBe(true);
+    expect(pipeCalls).toContainEqual({ method: "organizer.refresh", params: { save_changes: true } });
+    expect(sidecarCalls).toContainEqual({ method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } });
   });
 });
