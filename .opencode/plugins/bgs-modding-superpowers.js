@@ -2,7 +2,7 @@
 //
 // Wires three things:
 //   1. config.skills.paths: append <plugin>/skills so OpenCode discovers our SKILL.md files
-//   2. config.mcp.xedit + config.mcp.bgs_kb:
+//   2. config.mcp.xedit + config.mcp.bgs_kb + config.mcp.mo2:
 //                           register the bundled MCP stdio servers
 //                           (node tools/<server>/dist/index.js)
 //   3. first-user-message bootstrap: inject the using-bgs-modding-superpowers SKILL body
@@ -25,6 +25,7 @@ const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
 const SKILLS_DIR = path.join(PLUGIN_ROOT, 'skills');
 const XEDIT_MCP_ENTRY = path.join(PLUGIN_ROOT, 'tools', 'xedit-mcp', 'dist', 'index.js');
 const BGS_KB_MCP_ENTRY = path.join(PLUGIN_ROOT, 'tools', 'bgs-kb-mcp', 'dist', 'index.js');
+const MO2_MCP_ENTRY = path.join(PLUGIN_ROOT, 'tools', 'mo2-mcp', 'dist', 'index.js');
 const BOOTSTRAP_SKILL = path.join(SKILLS_DIR, 'using-bgs-modding-superpowers', 'SKILL.md');
 
 // Sentinel used to detect already-injected bootstrap so we don't double-inject across reloads.
@@ -79,6 +80,18 @@ export const BgsModdingSuperpowersPlugin = async () => {
       config.mcp.bgs_kb ??= {
         type: 'local',
         command: ['node', BGS_KB_MCP_ENTRY],
+        enabled: true,
+        environment: {},
+        timeout: 240000,
+      };
+      // mo2-mcp: agent-facing MO2 control plane (34 tools across read/metadata/mutating
+      // tiers, plan/apply with leases, JSONL audit). Talks to the bundled control-plane
+      // Python broker over named pipe + the bundled Python sidecar over JSON-RPC. The
+      // first call lazily spins up the sidecar Python process; 240s timeout matches the
+      // xedit lane for consistency, but warm calls return in tens of ms.
+      config.mcp.mo2 ??= {
+        type: 'local',
+        command: ['node', MO2_MCP_ENTRY],
         enabled: true,
         environment: {},
         timeout: 240000,
