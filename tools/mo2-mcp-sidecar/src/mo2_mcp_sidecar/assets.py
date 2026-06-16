@@ -157,6 +157,13 @@ def assets_resolve_file(params: dict) -> dict:
             entry[k] = []
         else:
             entry[k] = str(v) if v is not None else v
+    # Keep the detailed ResolvedWinner fields for compatibility, but expose the
+    # actual winning FileEntry's owner directly.  The MCP contract is
+    # `result.winner.owner_mod`; nesting it under `winner.winner.owner_mod`
+    # made AT19 and human callers treat a valid winner as missing.
+    entry["owner_mod"] = winner.winner.owner_mod
+    entry["kind"] = str(winner.winner.kind)
+    entry["archive"] = str(winner.winner.archive) if winner.winner.archive is not None else None
     return {"virtual_path": virtual_path, "winner": entry, "providers": providers}
 
 
