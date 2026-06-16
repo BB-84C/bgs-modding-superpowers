@@ -76,13 +76,13 @@ describe("mo2_rename_mod", () => {
     expect(rec.lease.components.map((component) => component.path)).toContain(join(root, "mods", "OldMod"));
   });
 
-  it("apply live refreshes before mods.rename, then refreshes and invalidates sidecar", async () => {
+  it("apply live skips broker rename, uses fs rename + modlist rewrite, then invalidates sidecar", async () => {
     const { root, ctx } = await _fixture(true);
     const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
     ctx.pipeClient = {
       call: async (method: string, params: Record<string, unknown>) => {
         pipeCalls.push({ method, params });
-        return { ok: true, result: { old_name: params.old_name, new_name: params.new_name } };
+        throw new Error(`unexpected broker call: ${method}`);
       },
       close: () => {},
       discoverAndConnect: async () => {},
@@ -107,14 +107,18 @@ describe("mo2_rename_mod", () => {
     const apply = (await tool.handler(
       { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
       ctx,
-    )) as { ok: boolean; result: { old_name: string; new_name: string } };
+    )) as { ok: boolean; result: { renamed_dir: boolean; profiles_updated: string[] } };
 
     expect(apply.ok).toBe(true);
-    expect(pipeCalls).toEqual([
-      { method: "organizer.refresh", params: { save_changes: false } },
-      { method: "mods.rename", params: { old_name: "OldMod", new_name: "NewMod" } },
-      { method: "organizer.refresh", params: { save_changes: false } },
-    ]);
+    expect(pipeCalls).toEqual([]);
+    expect(apply.result.renamed_dir).toBe(true);
+    expect(apply.result.profiles_updated.sort()).toEqual(["Alt", "Default"]);
+    expect(existsSync(join(root, "mods", "OldMod"))).toBe(false);
+    expect(existsSync(join(root, "mods", "NewMod", "file.txt"))).toBe(true);
+    expect(await readFile(join(root, "profiles", "Default", "modlist.txt"), "utf8"))
+      .toBe("+NewMod\n+Keep\n");
+    expect(await readFile(join(root, "profiles", "Alt", "modlist.txt"), "utf8"))
+      .toBe("-NewMod\n+Keep\n");
     expect(sidecarCalls).toEqual([
       { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Alt") } },
       { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } },

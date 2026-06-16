@@ -1191,10 +1191,26 @@ def _handle_mods_create(organizer, pump, payload):
             return ("error", ErrorCode.INTERNAL_ERROR, "createMod returned None")
 
         actual_name = new_mod.name()
+        # Defensive: ensure the mod folder is materialized on disk before this
+        # call returns. organizer.createMod() registers the mod in MO2's model
+        # but does not guarantee the directory exists until the next save cycle;
+        # downstream MCP tools (mo2_remove_mod buildPlan, mo2_assets_resolve,
+        # etc.) check the filesystem and would race against the broker if the
+        # folder were only in-memory. absolute_path is also surfaced so the
+        # MCP layer does not need to re-resolve mod_directory.
+        absolute_path = new_mod.absolutePath()
+        try:
+            os.makedirs(absolute_path, exist_ok=True)
+        except OSError:
+            # Tolerate races / readonly mounts; downstream callers will surface
+            # any real filesystem error when they try to use the path.
+            pass
+
         result = {
             "name": actual_name,
             "created": True,
             "priority": mod_list.priority(actual_name),
+            "absolute_path": absolute_path,
         }
         if target_priority is not None:
             mod_list.setPriority(actual_name, target_priority)

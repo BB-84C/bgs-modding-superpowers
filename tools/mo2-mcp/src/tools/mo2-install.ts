@@ -28,7 +28,7 @@ import { atomicWriteText } from "../atomic.js";
 import { resolveModsDir, resolveProfileDir } from "../path-helpers.js";
 import { readMoIni } from "../mo-ini.js";
 import { assertActiveProfile } from "../profile-guard.js";
-import { refreshOrganizerAndInvalidateWorld } from "./state-sync.js";
+import { invalidateWorld } from "./state-sync.js";
 
 const FomodChoiceSchema = z.object({
   page_name: z.string(),
@@ -191,8 +191,8 @@ const handler: PlanApplyHandler = {
       : `${existing}${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}${newLine}\n`;
     await atomicWriteText(modlistPath, updated);
 
-    // 5. Refresh MO2 model + invalidate sidecar after all fs/model writes.
-    await refreshOrganizerAndInvalidateWorld(ctx, [profile], { saveChanges: true });
+    // 5. Invalidate sidecar World cache so subsequent asset reads see the new mod.
+    await invalidateWorld(ctx, [profile]);
 
     return {
       mod_name: modName,

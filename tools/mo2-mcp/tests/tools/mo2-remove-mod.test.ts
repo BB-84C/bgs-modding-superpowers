@@ -144,9 +144,7 @@ describe("mo2_remove_mod", () => {
 
     expect(cp).toHaveBeenCalledWith(join(root, "mods", "Target"), join(root, "mods", "Targetbackup0"), { recursive: true });
     expect(pipeCalls).toEqual([
-      { method: "organizer.refresh", params: { save_changes: false } },
       { method: "mods.remove", params: { name: "Target" } },
-      { method: "organizer.refresh", params: { save_changes: false } },
     ]);
     expect(apply.result).toMatchObject({ removed: "Target", backup_name: "Targetbackup0" });
   });
@@ -187,9 +185,7 @@ describe("mo2_remove_mod", () => {
     const backupCopies = vi.mocked(cp).mock.calls.filter(([, dest]) => String(dest).includes("Targetbackup"));
     expect(backupCopies).toEqual([]);
     expect(pipeCalls).toEqual([
-      { method: "organizer.refresh", params: { save_changes: false } },
       { method: "mods.remove", params: { name: "Target" } },
-      { method: "organizer.refresh", params: { save_changes: false } },
     ]);
     expect(apply.result.backup_name).toBeUndefined();
   });

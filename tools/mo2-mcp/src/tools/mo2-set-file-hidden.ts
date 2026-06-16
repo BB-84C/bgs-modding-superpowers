@@ -13,7 +13,7 @@ import { routeToPlanApply, type PlanApplyHandler, type PlanRecord } from "../pla
 import { readMoIni } from "../mo-ini.js";
 import { readProfile } from "../profile-reader.js";
 import type { ToolContext } from "../types.js";
-import { invalidateWorld, refreshOrganizer } from "./state-sync.js";
+import { invalidateWorld } from "./state-sync.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("plan"), virtual_path: z.string(), hidden: z.boolean() }),
@@ -121,7 +121,6 @@ const handler: PlanApplyHandler = {
     if (state.noOp) return { no_op: true, path: realPath };
 
     await rename(realPath, state.newPath);
-    await refreshOrganizer(ctx);
     await invalidateWorld(ctx, ["Default"]);
     return { renamed_from: realPath, renamed_to: state.newPath, hidden };
   },

@@ -6,6 +6,7 @@
  */
 import { z } from "zod";
 import { join } from "node:path";
+import { mkdir } from "node:fs/promises";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { readProfile } from "../profile-reader.js";
@@ -13,7 +14,7 @@ import { resolveProfileDir } from "../path-helpers.js";
 import { readMoIni } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
 import { assertActiveProfile } from "../profile-guard.js";
-import { refreshOrganizerAndInvalidateWorld } from "./state-sync.js";
+import { invalidateWorld } from "./state-sync.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -70,13 +71,20 @@ const handler: PlanApplyHandler = {
     const resp = await ctx.pipeClient.call("mods.create", payload);
     if (!resp.ok) throw new Error(resp.error?.message ?? "broker error");
 
+    // Defensive: ensure separator folder exists on disk (see mo2_create_mod for rationale).
+    const result = (resp.result ?? {}) as Record<string, unknown>;
+    const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
+    const modsDir = ini.settings.modDirectory ?? join(ctx.config.mo2Root, "mods");
+    const absPath = typeof result.absolute_path === "string"
+      ? (result.absolute_path as string)
+      : join(modsDir, sepName);
+    await mkdir(absPath, { recursive: true });
+
     if (typeof plan.args.color === "string") {
-      const ini = await readMoIni(join(ctx.config.mo2Root, "ModOrganizer.ini"));
-      const modsDir = ini.settings.modDirectory ?? join(ctx.config.mo2Root, "mods");
-      await atomicWriteText(join(modsDir, sepName, "meta.ini"), `[General]\ncolor=${plan.args.color}\n`);
+      await atomicWriteText(join(absPath, "meta.ini"), `[General]\ncolor=${plan.args.color}\n`);
     }
 
-    await refreshOrganizerAndInvalidateWorld(ctx, [profile]);
+    await invalidateWorld(ctx, [profile]);
 
     return { separator_name: sepName, color_set: typeof plan.args.color === "string" };
   },

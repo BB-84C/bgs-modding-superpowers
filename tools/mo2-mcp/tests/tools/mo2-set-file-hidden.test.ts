@@ -187,7 +187,7 @@ describe("mo2_set_file_hidden", () => {
     expect(await readFile(join(root, "mods", "High", "Data", "textures", "same.dds"), "utf8")).toBe("high");
   });
 
-  it("apply live refreshes MO2 and invalidates sidecar after hidden-state rename", async () => {
+  it("apply live invalidates sidecar after hidden-state rename without organizer.refresh", async () => {
     const { root, ctx, pipeCalls } = await fixture({
       withPipe: true,
       resolvedPath: (fixtureRoot) => join(fixtureRoot, "mods", "High", "Data", "textures", "same.dds"),
@@ -217,7 +217,6 @@ describe("mo2_set_file_hidden", () => {
     expect(pipeCalls).toEqual([
       { method: "organizer.resolve_path", params: { filename: "Data/textures/same.dds" } },
       { method: "organizer.resolve_path", params: { filename: "Data/textures/same.dds" } },
-      { method: "organizer.refresh", params: { save_changes: false } },
     ]);
     expect(sidecarCalls).toEqual([
       { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } },

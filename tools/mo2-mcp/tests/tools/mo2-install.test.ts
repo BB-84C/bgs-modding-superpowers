@@ -244,7 +244,6 @@ describe("mo2_install", () => {
     expect(brokerCalls.map((call) => call.method)).toEqual([
       "profile.active",
       "installation.create_mod_from_directory",
-      "organizer.refresh",
     ]);
   });
 

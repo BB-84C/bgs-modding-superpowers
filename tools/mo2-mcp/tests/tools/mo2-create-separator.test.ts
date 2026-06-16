@@ -95,7 +95,7 @@ describe("mo2_create_separator", () => {
     ).rejects.toThrow(/above_mod_not_found: Missing/);
   });
 
-  it("apply creates suffixed separator, writes color meta, refreshes, and invalidates", async () => {
+  it("apply creates suffixed separator, writes color meta, and invalidates", async () => {
     const { root, ctx } = await _fixture();
     const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
     ctx.pipeClient = {
@@ -134,7 +134,6 @@ describe("mo2_create_separator", () => {
     expect(pipeCalls).toEqual([
       { method: "profile.active", params: {} },
       { method: "mods.create", params: { name: "Section_separator", priority: 2 } },
-      { method: "organizer.refresh", params: { save_changes: false } },
     ]);
     expect(await readFile(join(root, "mods", "Section_separator", "meta.ini"), "utf8"))
       .toBe("[General]\ncolor=#aabbcc\n");
@@ -143,7 +142,7 @@ describe("mo2_create_separator", () => {
     ]);
   });
 
-  it("apply without color does not write meta.ini but still refreshes and invalidates", async () => {
+  it("apply without color does not write meta.ini but still invalidates", async () => {
     const { root, ctx } = await _fixture();
     const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
     ctx.pipeClient = {
@@ -182,7 +181,6 @@ describe("mo2_create_separator", () => {
     expect(pipeCalls).toEqual([
       { method: "profile.active", params: {} },
       { method: "mods.create", params: { name: "Plain_separator" } },
-      { method: "organizer.refresh", params: { save_changes: false } },
     ]);
     expect(sidecarCalls).toEqual([
       { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } },

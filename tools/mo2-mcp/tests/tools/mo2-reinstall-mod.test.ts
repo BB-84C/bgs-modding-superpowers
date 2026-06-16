@@ -159,7 +159,7 @@ describe("mo2_reinstall_mod", () => {
       method: "installation.install_local_archive",
       params: { archive_path: join(root, "downloads", "InstalledMod.7z"), name_suggestion: "InstalledMod" },
     });
-    expect(pipeCalls).toContainEqual({ method: "organizer.refresh", params: { save_changes: true } });
+    expect(pipeCalls.some((call) => call.method === "organizer.refresh")).toBe(false);
     expect(sidecarCalls).toContainEqual({ method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } });
   });
 
@@ -217,7 +217,7 @@ describe("mo2_reinstall_mod", () => {
 
     expect(apply.ok).toBe(true);
     expect(apply.result.fomod_used).toBe(true);
-    expect(pipeCalls).toContainEqual({ method: "organizer.refresh", params: { save_changes: true } });
+    expect(pipeCalls.some((call) => call.method === "organizer.refresh")).toBe(false);
     expect(sidecarCalls).toContainEqual({ method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } });
   });
 });
