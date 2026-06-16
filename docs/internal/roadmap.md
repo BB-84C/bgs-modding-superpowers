@@ -134,6 +134,42 @@ Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01:
 - **E / directory lease fingerprint upgrade deferred to v1.2.** Directory targets still use the current `{file_count,total_size}` fingerprint, which is cheap but cannot detect same-count/same-size content swaps. v1.2 should compare an upgraded directory digest `(relative_path,size,mtime_ms)` with a performance threshold: full digest for ordinary directories, explicit fallback for very large trees (candidate threshold: 5,000 files) so BodySlide-scale mods do not turn every plan into a costly scan.
 
 
+## 2026-06-16 — MO2 MCP v1.2-pre lazy-bind refactor shipped
+
+**Delivered (5 commits on `main`: `5bce94b` → `855b791` → `7a468cc` → `1a2786a` → `774786e`; feature branch `feat/mo2-mcp-lazy-bind` merged via fast-forward; vendor clone synced)**
+
+**Why this batch existed**: OpenCode integration test surfaced a v1 design bug — `mo2-mcp/src/index.ts main()` hard-required `BGS_MO2_ROOT` at startup and `process.exit(1)`d if absent, coupling MCP-server startup to a pre-existing MO2 path. OpenCode could not register `config.mcp.mo2` with the same shape as xedit/bgs_kb (`environment: {}`, transparent parent-env passthrough) because the spawned child crashed and OpenCode reported `mo2 MCP error -32000: Connection closed`. The original commit-1 fix attempt (registering with `environment: {}`) hit the crash; the commit-2 detour (hardcoded `<PLUGIN_ROOT>/.artifacts/mo2` fallback in the plugin file) repeated the STOCK001-v1 anti-pattern of baking dev-machine convention into a shared file. Both were reverted in `c68eb75` before this batch landed the right fix.
+
+**New architecture (mirrors xedit-mcp's daemon-adapter pattern)**:
+- Server startup is now lazy: `BGS_MO2_ROOT` is OPTIONAL.
+- New `BindingManager` (state machine: `unbound` / `binding` / `bound` / `failed`) owns the lazy lifecycle. The agent drives binding via the new `mo2_session` tool: `mo2_session({})` reads the snapshot, `mo2_session({mo2Root, profile?})` binds/rebinds, `mo2_session({unbind:true})` cleans up.
+- `ToolContext` now carries `binding: BindingManager` instead of `config / pipeClient / sidecar`. The 36 existing tools call `requireBoundContext(ctx)` which extracts `bound.config / bound.pipeClient / bound.sidecar` — and falls back to a compat path for legacy unit-test fixtures that still construct ctx the old way (with getter/setter pass-through so in-place pipeClient/sidecar mutation by `mo2_switch_profile` stays visible).
+- `main()` after the stdio transport connects: if `BGS_MO2_ROOT` is present, eagerly `await binding.bind({ mo2Root: $env, profile: $env })` BEFORE writing the `ready` log, so clients can treat the ready signal as "tools are usable immediately". A bind failure never blocks the server — it stays alive in `failed` state and the agent can recover via `mo2_session`.
+- `dispatch.ts` awaitSettled hook: if a tool call arrives while a bind is in flight (`state === 'binding'`), `await ctx.binding.awaitSettled()` BEFORE dispatching. Applies to ALL tools including the binding-exempt ones so e.g. `mo2_status` answers with the bound view when a bind is imminent.
+
+**Test verification**:
+- Unit (vitest): 331 passed / 19 skipped / 0 failed (was 167/19/164 mid-refactor before fixture migration).
+- Sidecar pytest: 64 passed.
+- Spawn smoke no env: `mo2-mcp ready (..., binding=unbound)` then alive on stdio.
+- Spawn smoke with env: `[mo2-mcp] eager bind bound (...)` then `binding=bound`.
+- Acceptance suite (PS1 wrapper -Mode all): **16 PASS / 3 SKIP / 0 FAIL of 19** — matches the v1.1.x baseline exactly. Live phase 14/3/0 of 17, closed phase 2/0 of 2.
+
+**Follow-up fixes landed in `1a2786a` after the lazy-bind core shipped (1 PS1 + 4 TS hits)**:
+1. `main()` eager-bind reads `BGS_MO2_PROFILE` too (was reading only `BGS_MO2_ROOT`, so realEnv WL2 acceptance bound to `Default` instead of `BB84自用`).
+2. `mo2_rollback` was reaching `bound.config.snapshotRoot` (`<mo2Root>/.mo2-mcp/snapshots`) while `ctx.snapshots` writes to `<tmpdir>/mo2-mcp-runtime/snapshots` (the SnapshotManager is constructed at startup before `mo2Root` is known). Writes and reads went to different roots → `snapshot_not_found`. Added `SnapshotManager.findManifest(snapshotId)` and rewrote `mo2_rollback` to use `ctx.snapshots` for both plan and apply.
+3. `dispatch.ts` awaitSettled originally skipped binding-exempt tools, which left `mo2_status` returning the unbound view during the eager-bind race. Now applies to all tools.
+4. `tests/acceptance-shared.ts` `spawnMcp` now sends `mo2_session({})` before returning so every child has settled bound state before the test runs.
+5. `scripts/run-mo2-mcp-acceptance.ps1` `Ensure-HarnessMo2Alive` renamed to `Ensure-Mo2Alive($Root)` and the LIVE phase now starts BOTH MO2 launchers (WL2 + harness) because the live suite mixes `realEnv()` and `harnessEnv()` tests in the same vitest run. Multiple MO2 GUI processes coexist fine.
+
+**Orthogonal closeout debt cleared in the same batch**:
+- WL2 broker plugin (`B:\WastelandBlues 2.0\plugins\mo2_agent_control.py`) was stale at v1 (no `organizer.refresh()` calls inside the `mods.create` / `installation.create_mod_from_directory` main-thread closures — the v1.1.x AT16 fix). v1.1.x closeout pushed `main` and synced the plugin vendor clone but missed broker redeploy per MO2 instance. Redeployed via `pwsh scripts/install-mo2-control-plane.ps1 -MO2Root "B:\WastelandBlues 2.0" -Force`; SHA256 now matches `tools/mo2-control-plane/live-bridge/mo2_agent_control.py`. Codified into `.opencode/memory/45-mo2-mcp-internals.md` rule 9 as a permanent closeout-audit step.
+
+**Deferred to v1.2 proper (unchanged from the prior dated section above)**:
+- TOCTOU file-level advisory locks (`LockFileEx` / `flock`)
+- Directory lease full-file `(relative_path,size,mtime_ms)` digest
+- `detectMo2Running` shared-memory probe (signal B — needs FFI)
+
+
 ## 2026-06-13 — Archive/loose-file helpers shipped (Plan A engine+CLI + Plan B MO2 IPluginTool GUI)
 
 **Delivered (merge commit `fb7f090` on `main`; 22 individual commits previously on `feat/archive-loose-file-helpers`, now deleted local + remote)**
