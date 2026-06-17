@@ -1218,3 +1218,59 @@ ot_a_fomod|info.xml contract that was being duplicated with subtly different sha
 - B.3.6 end-to-end FOMOD apply with Unique NPCs (needs OpenCode restart to load Batch 4 fixes)
 - B.3.3, B.3.8, B.5.1, C.4.1 envelope re-verify (same OpenCode restart prerequisite)
 - PLAN.md formal PR-shape corrections (currently in .opencode/artifacts/.../PLAN.md which is gitignored; if PLAN.md becomes a PR-deliverable, the CORR-1 through CORR-6 section needs to move into a tracked location)
+
+## 2026-06-17 ## MO2 MCP v1.2 Batch 5 — BUG-25 + BUG-26 shipped + FOMOD apply empirically validated
+
+**Delivered (4 commits on eat/mo2-mcp-v1.2-batch1)**:
+
+| Commit | Lane | Scope |
+|---|---|---|
+| `d04e818` | 5A | BUG-25a sidecar: _normalize_virtual_path() in assets.py strips leading Data/ for resolve + conflicts. +14 sidecar tests. |
+| `ce6d84e` | 5B | BUG-25b TS-side: _stripDataPrefixFromPattern() in mo2-search-files.ts strips leading Data/ from regex (preserving ^ anchor) + glob patterns. +7 TS tests. |
+| `ef4db87` | 5C | BUG-26 NEW: FomodChoicesRequiredError typed class + dispatch.ts catch branch. Both mo2_install + mo2_reinstall_mod now preserve fomod_tree in envelope. +4 tests. |
+| `1721f5d` | materialize | Mirror to `plugins/bgs-modding-superpowers/` |
+
+**Acceptance**:
+- `npm test` in `tools/mo2-mcp`: **475 passed** / 19 skipped / 0 failed (was 464; net +11 from Batch 5: 5B +7, 5C +4)
+- `pytest` in `tools/mo2-mcp-sidecar`: **93 passed** (was 79; +14 from Lane 5A)
+- `npm run build`: clean
+- `scripts/build-portable-plugin.ps1`: materialized into `plugins/bgs-modding-superpowers/`
+
+**Empirical milestone this batch — FOMOD multi-page apply EMPIRICALLY VALIDATED**:
+
+End-to-end test of BUG-22 + BUG-23 + BUG-24 (Batch 4 fixes) on the real-world Nexus FOMOD `Unique NPCs - An Overhaul of the Commonwealth` (6.7 GB archive at `F:/Fallout 4 Mods/MODS/NPC/...`):
+- Step 1 plan (no choices) FAILED → exposed BUG-26 (dispatch.ts strips err.fomod_tree from plain Error). **Fixed same batch** `ef4db87`.
+- Step 2 choices construction: subagent extracted ModuleConfig.xml directly via 7z (workaround). 6 pages, 19 groups, 51 options.
+- Step 3 plan (with valid choices): **PASS**
+- Step 4 apply (Pattern A: sidecar.stage_fomod + manual content replacement preserving meta.ini): **PASS in 125 sec**, no broker hang, no MO2 modal dialog popup, no enrichment envelope triggered.
+- Step 5 readback: **PASS** — 26 files byte-perfect match against ModuleConfig.xml `Unique NPCs Core.esp` option's `<files>` element. Meshes + Tools dirs CreationTime stamped during apply window.
+
+**Conclusion**: `mo2_reinstall_mod` Pattern A WORKS in production on real-world multi-page FOMODs. The Lane 4C refactor delivered correct end-state without the MO2 GUI FOMOD wizard hang that previously made FOMOD reinstall impossible.
+
+Evidence preserved at `.opencode/artifacts/fomod-test-uniquenpcs/`.
+
+**Side cleanup**: 8 stale staging dirs from prior aborted runs purged from `.artifacts/mo2/.mo2-mcp/staging/`. Best-effort cleanup occasionally fails; periodic prune helper noted for Batch 6.
+
+**Cumulative state on feat/mo2-mcp-v1.2-batch1** (32 commits since main @ 063c437):
+- 23 bug fixes shipped (Batch 1+2+4+5 = BUG-1, 2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25a, 25b, 26 + Anthropic regression hotfix)
+- 2 BUGs falsified (BUG-4, BUG-5)
+- 1 BUG resolved by config (BUG-LAST)
+- 8 carryforward fixtures landed (C.1.3, C.2.1, C.3.1-4 batteries)
+- BUG-16 + L2 enrichment empirically validated
+- BUG-22+23 Pattern A FOMOD reinstall empirically validated on 6.7 GB real-world FOMOD
+- BUG-17 deferred process-class
+- 0 new bugs discovered this session (last new bug BUG-26 found AND fixed in same batch)
+
+**70-case e2e coverage**: **~62/70 verified PASS** (89%). Remaining gaps:
+- 2 unreachable-by-design (C.5.2, C.5.3)
+- 1 vendor-class limitation (B.5.1 multi-field plan via gpt-5.x — would need fixer-beta or claude for that case)
+- ~5 fully-shipped fixture/carryforward cases counted above
+
+**Status**: feat branch READY FOR MERGE. Per user instruction: STOPPED before main merge. PR URL: `https://github.com/BB-84C/bgs-modding-superpowers/pull/new/feat/mo2-mcp-v1.2-batch1`.
+
+**Recommended merge sequence when user is ready**:
+1. Review feat branch (32 commits, +6,000-7,000 lines, 23 bug fixes)
+2. Fast-forward merge to main OR PR (no rebase needed; clean linear history)
+3. Vendor clone refresh: `git -C 'D:\Starfield MO2\.opencode\vendor\bgs-modding-superpowers' pull --ff-only origin main`
+4. Per-MO2-instance broker SHA audit (memory/45 rule 9) on harness + WL2
+5. End-of-cycle OpenCode restart to load merged-main MCP dist
