@@ -992,3 +992,47 @@ Discord extraction: invites are link-stable (validated against the public Discor
 - **Discord is often canonical but not scrape-friendly.** Invites are link-stable; pinned-message extraction requires login or a Discord-aware export tool.
 - **Treat community claims by source class.** Official / tool docs and GitHub issues are authoritative for tool behavior; AFK / TTW / Sim Settlements are authoritative for their own projects; Reddit is best for field reports and sidebar guide links, not final truth without cross-checking.
 - **Per-record `sources` discipline**: every KB record's `sources` field cites at minimum the URL and a kind tag (`tooling-docs` / `community-forum` / `official` / `wiki` / `github-issue` / `discord-pinned`). Unsourced facts default to `confidence: low-community` with a `needs verification` note per the KB-4 anti-copy guardrail.
+
+## 2026-06-17 — MO2 MCP v1.2 batch1: ENRICHMENT L1+L2 + BUG-11 + BUG-13 shipped
+
+**Delivered (6 commits on eat/mo2-mcp-v1.2-batch1 off main @ 063c437)**:
+
+| Commit | Lane | Scope |
+|---|---|---|
+| `c2efc24` | C | Forward-slash convert binary/workingDirectory paths in _serializeValue (BUG-11) |
+| `3a862b7` | A | Hoist discriminant mode into top-level properties in 
+ormalizeMcpInputSchema (BUG-13) |
+| `e5f92be` | B p1 | New `broker-error.ts`, `mo2-process-state.ts`, `mo2-log.ts` (L1+L2 helpers) |
+| `aa3a83c` | B p2 | Wire pipe-client failures through L1 process probe + L2 log tail, throw BrokerEnrichedError |
+| `0b22b9b` | B p3 | Forward structured broker errors through dispatch.ts catch branch |
+| `9f306e7` | materialize | Mirror to `plugins/bgs-modding-superpowers/tools/mo2-mcp/` |
+
+**Why this batch existed**: e2e Phase 4-final-beta (fixer-beta) baseline of 17 PASS / 9 FAIL / 1 broker_hang / 1 NOT_COVERED surfaced two architectural gaps in addition to the 17 bugs catalogued in `.opencode/artifacts/mo2-mcp/e2e-test-plan/run-20260617T002922Z/BUGS.md`:
+- BUG-13: the v1.2-pre `normalizeMcpInputSchema` shape `{type:'object', properties:{}, additionalProperties:true, anyOf:[...]}` was generation-hostile to OpenAI tool-callers, so gpt-5.x agents (fixer-alpha lane) could not emit `mode: 'apply'` against the discriminated-union schema even though Anthropic agents (claude-opus-4-7) handled the same shape correctly. This is the root cause of the earlier BUG-5 "apply unreachable" misframing.
+- BUG-16: broker mods.set_active hangs MO2 GUI when a modal dialog blocks the Qt main thread (BUG-11 binary-path mangling is one trigger). Agent's only signal was opaque internal_error: pipe call timeout (<method>), with no way to distinguish modal vs network vs broker crash.
+
+**3-lane parallel dispatch (fixer-beta × 3)**:
+- Lane A (BUG-13): ~80 LOC, 7 tests in 
+ormalize-mcp-input-schema.test.ts. Hoists shared const/single-num properties from nyOf/oneOf/llOf branches into top-level properties while preserving the original union; gpt-5.x now sees an num anchor for argument decoding.
+- Lane B (ENRICHMENT L1+L2 + BrokerEnrichedError): ~350 LOC, 49 tests across 4 new files. pipe-client.ts call() now wraps every failure in BrokerEnrichedError, runs MO2 process Responding probe (L1) and mo2.log tail (L2), classifies the failure into mo2_gui_unresponsive / pipe_call_timeout / pipe_empty_response / pipe_parse_error / roker_error, and attaches structured details that dispatch.ts forwards to the agent envelope.
+- Lane C (BUG-11 Layer B): ~50 LOC, 10 tests in configure-executable-path-encoding.test.ts. _serializeValue(key, value) forward-slashes backslashes for PATH_KEYS = {binary, workingDirectory}; arguments and titles preserved verbatim. Recon verified MO2 itself stores inary=D:/awesome-bgs-mod-master/... with forward slashes, so this matches MO2's own dominant convention (no Qt double-backslash escape, no @ByteArray() wrap).
+
+**False positives falsified during pre-dispatch recon**:
+- BUG-11 Layer A ("configure_executable schema missing payload fields under mode:apply") — actually correct plan/apply contract; both fixer-alpha and fixer-beta tried apply-direct based on a wrong PLAN.md expectation and got plan_expired_or_unknown. PLAN.md/BUGS.md to be updated; tool implementation is fine.
+
+**Acceptance**:
+- `npm test`: **397 passed / 19 skipped / 0 failures** (was 331 passed at v1.2-pre baseline; net +66 tests).
+- `npm run build`: clean.
+- `scripts/build-portable-plugin.ps1`: 8764 files, 41.69 MB materialized into `plugins/bgs-modding-superpowers/`.
+- Real OpenCode→MCP semantic reverify (V1 BUG-13 fix proof via fixer-alpha gpt-5.x dispatch, V2 BUG-11 byte-correct INI write, V3 BUG-16 reproduce sees mo2_gui_unresponsive, V4 L2 log tail attached on broker errors): pending OpenCode session restart to load the new MCP dist.
+
+**Out of scope** (Batch 2 next):
+- BUG-1 (mo2_machine_contract static paths), BUG-2 (mo2_profile_ini_get game derivation), BUG-3 (sidecar multibyte profile binding), BUG-6 (NAMESAFE001/PATHSAFE001 rule order), BUG-7 (mo2_session empty-args), BUG-9 (cross-profile guard), BUG-10 (invalid_arguments envelope), BUG-12 (install fixture PATHSAFE001 false-positive), BUG-14 (mo2_toggle_plugin plugins.txt flush), BUG-15 (mo2_remove_mod backup_first:false orphan row).
+
+**Deferred to v1.3**:
+- ENRICHMENT L3 (broker-side Windows API modal dialog probe). Revisit if telemetry shows >5 BUG-16-class hangs per 100 batch calls in real workloads — L1+L2 should already catch most cases at the client side.
+
+**Carried over from v1.2-pre (unchanged)**:
+- TOCTOU file-level advisory locks (LockFileEx / lock)
+- Directory lease full-file (relative_path,size,mtime_ms) digest
+- detectMo2Running shared-memory probe completion
