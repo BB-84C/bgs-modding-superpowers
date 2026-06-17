@@ -95,6 +95,12 @@ const handler: PlanApplyHandler = {
   toolName: "mo2_send_mod_to",
   async buildPlan(args, ctx) {
     const profile = (args.profile as string) ?? "Default";
+    // BUG-9 fix (2026-06-17): refuse plan generation when MO2 is live on a
+    // different profile (mirrors the apply-time check). Priority reorder
+    // targets the requested profile's modlist.txt; planning against the
+    // wrong profile produces a diff that does not match what apply would
+    // later try to enforce.
+    await assertActiveProfile(ctx, profile);
     const targetPri = await _computeTargetPriority(args, ctx, profile);
     const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
     return {

@@ -44,6 +44,11 @@ const handler: PlanApplyHandler = {
     const bound = requireBoundContext(ctx);
     if (!bound.pipeClient) throw new Error("live_mo2_required_for_create_mod");
     const profile = (args.profile as string | undefined) ?? "Default";
+    // BUG-9 fix (2026-06-17): refuse plan generation when the requested
+    // profile is not the live MO2's active profile. The applyMutation path
+    // already enforces this; pushing it up to buildPlan prevents misleading
+    // plan envelopes that look mintable but would never apply.
+    await assertActiveProfile(ctx, profile);
     const targetPri = await _targetPriority(bound.config.mo2Root, profile, args.above);
     const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
     const aboveText = typeof args.above === "string"

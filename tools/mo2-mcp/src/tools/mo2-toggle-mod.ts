@@ -35,6 +35,13 @@ const handler: PlanApplyHandler = {
   toolName: "mo2_toggle_mod",
   async buildPlan(args, ctx) {
     const profile = (args.profile as string) ?? "Default";
+    // BUG-9 fix (2026-06-17): refuse plan generation when MO2 is live on a
+    // different profile. The active-profile guard was only firing at apply
+    // time, which let the planner mint a plan_id + lease_token + diff that
+    // referenced a non-active profile's modlist.txt; agents then carried
+    // that misleading plan forward. assertActiveProfile is a no-op when
+    // MO2 is offline (pipeClient absent).
+    await assertActiveProfile(ctx, profile);
     const profileDir = resolveProfileDir(ctx, profile);
     const modlistPath = join(profileDir, "modlist.txt");
     const p = await readProfile(profileDir);

@@ -51,6 +51,10 @@ const handler: PlanApplyHandler = {
     const bound = requireBoundContext(ctx);
     if (!bound.pipeClient) throw new Error("live_mo2_required");
     const profile = (args.profile as string | undefined) ?? "Default";
+    // BUG-9 fix (2026-06-17): refuse plan generation when the requested
+    // profile is not the live MO2's active profile; mirrors the
+    // applyMutation guard.
+    await assertActiveProfile(ctx, profile);
     const targetPri = await _targetPriority(bound.config.mo2Root, profile, args.above);
     const sepName = _separatorName(args.name);
     const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");

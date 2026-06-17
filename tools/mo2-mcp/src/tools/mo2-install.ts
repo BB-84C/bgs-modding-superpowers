@@ -75,6 +75,11 @@ const handler: PlanApplyHandler = {
     const archivePath = args.archive_path as string;
     const modName = args.mod_name as string;
     const profile = (args.profile as string) ?? "Default";
+    // BUG-9 fix (2026-06-17): refuse plan generation when MO2 is live on a
+    // different profile (the modlist.txt that will be registered into
+    // belongs to <profile>). assertActiveProfile is a no-op when MO2 is
+    // offline (pipeClient absent).
+    await assertActiveProfile(ctx, profile);
     const modsDir = await resolveModsDir(ctx);
     const destPath = join(modsDir, modName);
     if (existsSync(destPath)) {
