@@ -1157,3 +1157,64 @@ ot_a_fomod after Lane 2D BUG-12 fix
 - WL2 yellow re-runs (needs single-instance MO2 swap, separate session)
 - mo2_reinstall_mod refactor to Pattern A (shares FOMOD-staging helper with mo2_install)
 - End-to-end FOMOD multi-page test using Unique NPCs (pending the refactor)
+
+## 2026-06-17 ## MO2 MCP v1.2 Batch 4 — BUG-19 to BUG-24 shipped + WL2 yellow verified
+
+**Delivered (6 commits on eat/mo2-mcp-v1.2-batch1)**:
+
+| Commit | Lane | Scope |
+|---|---|---|
+| `1f115d9` | 4A | BUG-19: non-FOMOD install path restored. Root cause was mo2-install.ts truthiness on rgs.fomod_choices (JS treats [] as truthy → routed empty-choices non-FOMOD plans to FOMOD parser). Lane 2D BUG-12 fix was correct; the bug was in TS layer. |
+| `228ba36` | 4B | BUG-20: _normalizeAbove() helper in mo2-create-mod.ts treats empty/non-string bove as absent. |
+| `166994d` | 4B | BUG-21: CrossProfileMutationError class in profile-guard.ts + dispatch.ts catch branch. Envelope now {code:'cross_profile_live_mutation_blocked', details:{requested, active, hint}}. |
+| `554bdab` | 4C | refactor: extracted 	ools/mo2-mcp/src/fomod-helpers.ts shared by mo2_install and mo2_reinstall_mod. |
+| `829dd87` | 4C | BUG-22 + BUG-23 + BUG-24: mo2_reinstall_mod wired to Pattern A. path.isAbsolute() check (BUG-22). FOMOD reinstall: extract → sidecar.stage_fomod(choices) → manual replace mod content preserving meta.ini (BUG-23 — skips broker install_local_archive(staged_dir) because broker rejects existing mod names). Plan-time FOMOD tree surfacing via omod_choices_required_for_reinstall error (BUG-24). |
+| `604fe29` | materialize | Mirror to `plugins/bgs-modding-superpowers/` |
+
+**5-lane parallel dispatch** (Lane 4A fixer-alpha + Lane 4B fixer-beta + Lane 4C fixer-beta + Lane 4D fixer-alpha WL2 read-only):
+- Lane 4A discovered the actual BUG-19 root was in mo2-install.ts, not the assumed rchive.py regression. Lane 2D's BUG-12 sidecar fix was correct; the symptom traced higher up the stack.
+- Lane 4C extracted a shared omod-helpers.ts helper. Centralized the 
+ot_a_fomod|info.xml contract that was being duplicated with subtly different shapes. mo2_install refactor was 8 lines net (behavior preserved).
+- Lane 4D WL2 read-only rerun: WL2 mutation invariant byte-clean (all 3 SHAs match baseline). 3 PASS / 3 FAIL, where 1 FAIL is acceptable (A.3 xedit_target null is correct for WL2 lacking OpenCodeXEdit per Lane 2A spec) and 2 FAILs surface NEW BUG-25 candidate (sidecar asset path normalization for Data/ prefix).
+
+**Acceptance**:
+- `npm test` in `tools/mo2-mcp`: **464 passed** / 19 skipped / 0 failed (was 451; net +13 from Batch 4: Lane 4A +3 sidecar via embedded TS tests, Lane 4B +10, Lane 4C +3)
+- `pytest` in `tools/mo2-mcp-sidecar`: **79 passed** (was 76; +3 from Lane 4A regression guards)
+- `npm run build`: clean
+- `scripts/build-portable-plugin.ps1`: materialized into `plugins/bgs-modding-superpowers/`
+- WL2 mutation invariant: modlist + plugins + ModOrganizer.ini SHA256 byte-identical to baseline
+
+**Empirically validated this session**:
+- BUG-2 (game-derivation fallback): A.8 returned source: profile_local on WL2 (no [General] game= present).
+- BUG-3 (sidecar UTF-8 multibyte profile): A.9 returned profile_name: BB84自用 correctly, mod_count: 803.
+- WL2 invariant: read-only operations leave WL2 byte-clean.
+- Anthropic-compat hotfix: orchestrator's claude-opus-4-7 session loaded post-Batch-3 dist + dispatched 5 parallel Task subagents successfully.
+
+**One new bug discovered**:
+- BUG-25 (medium): sidecar asset path normalization. Mo2Mo2AssetsResolve_tool + Mo2Mo2SearchFiles_tool return empty results when query includes Data/ prefix on real WL2 install. Mo2Mo2AssetsSummary_tool works (proves index has content + multibyte profile is correct). Likely sidecar's asset cache stores paths without Data/ prefix while tool layer doesn't strip the input. Investigate mo2_mcp_sidecar/assets.py.
+
+**Cumulative state on feat/mo2-mcp-v1.2-batch1** (28 commits since main @ 063c437):
+- 20 bug fixes shipped (Batch 1+2+4 = BUG-1, 2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24 + Anthropic regression hotfix)
+- 2 BUGs falsified (BUG-4, BUG-5)
+- 1 BUG resolved by config (BUG-LAST)
+- 8 carryforward fixtures landed (C.1.3, C.2.1, C.3.1-4)
+- 1 BUG deferred + validated empirically (BUG-16+L2)
+- 1 BUG deferred process-class (BUG-17)
+- 1 BUG newly discovered (BUG-25)
+
+**70-case e2e coverage (post-Batch-4, pre-empirical-revalidation)**:
+- 47/70 verified PASS (38 prior + 9 reverified in Batch 3 rerun)
+- 9 WL2/harness PASS from Batch 3+4 rerun (T0.1, B.1.1-7, B.2.3, A.8, A.9, A.10) — overlap with above
+- 6 yellow fixed in Batch 4, needs empirical re-verify after OpenCode restart (B.3.3 BUG-19, B.3.8 BUG-20, C.4.1 BUG-21, plus B.5.1 with corrected contract per PLAN.md CORR-1)
+- 4 carryforward fixtures shipped earlier (C.1.3, C.2.1, C.3.1-4 — closed via Batch 3 lanes)
+- 1 reinstall+FOMOD test possible (Unique NPCs harness mod ready; awaits OpenCode restart + Batch 4 BUG-22/23/24 fixes loaded)
+- 2 unreachable-by-design (C.5.2, C.5.3 — PLAN.md CORR-3)
+- 2 yellow BUG-25 candidate (A.11, A.13 sidecar asset paths)
+
+**Status**: feat branch ready for merge to main, vendor clone refresh, and per-MO2-instance broker SHA audit. Per user instruction: STOPPED before merge. PR URL: `https://github.com/BB-84C/bgs-modding-superpowers/pull/new/feat/mo2-mcp-v1.2-batch1`.
+
+**Out of scope (Batch 5 territory if pursued)**:
+- BUG-25 (sidecar asset path normalization)
+- B.3.6 end-to-end FOMOD apply with Unique NPCs (needs OpenCode restart to load Batch 4 fixes)
+- B.3.3, B.3.8, B.5.1, C.4.1 envelope re-verify (same OpenCode restart prerequisite)
+- PLAN.md formal PR-shape corrections (currently in .opencode/artifacts/.../PLAN.md which is gitignored; if PLAN.md becomes a PR-deliverable, the CORR-1 through CORR-6 section needs to move into a tracked location)
