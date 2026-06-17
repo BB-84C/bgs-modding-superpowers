@@ -1,20 +1,32 @@
 /**
- * Tests for normalizeMcpInputSchema — BUG-13 Lane A.
+ * Tests for normalizeMcpInputSchema — BUG-13 Lane A + Anthropic top-level
+ * union ban (recurrence guard).
  *
  * Background: Zod discriminatedUnion produces top-level {anyOf:[...]}; the
- * MCP wire contract needs {type:"object", ...}. The prior shape wrapped
- * unions as {type:"object", properties:{}, additionalProperties:true,
- * anyOf:[...]}. The empty top-level `properties` gives OpenAI tool-callers
- * (gpt-5.x) no anchor for argument decoding — the model defaults to the
- * first branch's discriminant every time.
+ * MCP wire contract needs {type:"object", ...}. Two earlier shapes were
+ * tried and BOTH failed:
  *
- * Fix: hoist any property that exists in every branch as a const or single-
- * value-enum literal into top-level `properties` with a unioned enum. The
- * original anyOf is preserved so branch-by-branch validators keep working.
+ *   Shape v1.2-pre: {type:"object", properties:{}, additionalProperties:true,
+ *     anyOf:[...]}
+ *   --> Anthropic's tool-use API rejects ANY top-level anyOf/oneOf/allOf in
+ *       input_schema and crashes tool registration with
+ *         "input_schema does not support oneOf, allOf, or anyOf at the top level"
+ *   --> OpenAI also lacked a discriminant anchor and defaulted to the first
+ *       branch.
  *
- * Phase 4-final-beta evidence (claude-opus-4-7 17/17 apply-mode-correct on
- * the prior empty-properties shape) proves the additive hoist is safe for
- * Anthropic tool-callers.
+ *   Shape v1.2-mid (BUG-13 Lane A first fix): {type:"object",
+ *     properties:{<hoisted-discriminants>}, additionalProperties:true,
+ *     anyOf:[...]}
+ *   --> Fixed OpenAI argument decoding but still kept anyOf at the top
+ *       level, so Anthropic still rejects it.
+ *
+ * Current fix (Lane A + Anthropic guard): hoist discriminants AND merge
+ * non-discriminant branch properties at top level, and DROP the
+ * anyOf/oneOf/allOf keyword entirely. The real per-branch validation lives
+ * in Zod inside dispatch.ts, not in the wire schema.
+ *
+ * The "no top-level union keyword" assertion in these tests IS the
+ * regression guard. Do not re-add `[kw]: branches` at the top level.
  */
 import { describe, it, expect } from "vitest";
 import { normalizeMcpInputSchema } from "../src/index.js";
@@ -34,7 +46,7 @@ describe("normalizeMcpInputSchema", () => {
     expect(out).toBe(input);
   });
 
-  it("hoists a const-based mode discriminant from anyOf into top-level properties", () => {
+  it("hoists a const-based mode discriminant from anyOf into top-level properties and drops the union keyword", () => {
     const input = {
       anyOf: [
         {
@@ -60,11 +72,21 @@ describe("normalizeMcpInputSchema", () => {
     };
     const out = normalizeMcpInputSchema(input);
     expect(out.type).toBe("object");
-    expect(out.properties).toEqual({
-      mode: { enum: ["plan", "apply"] },
-    });
+    // Discriminant is hoisted with a unioned enum AND every branch's other
+    // properties are merged at top level so LLMs see the full surface.
+    const props = out.properties as Record<string, unknown>;
+    expect(props.mode).toEqual({ enum: ["plan", "apply"] });
+    expect(props.name).toEqual({ type: "string" });
+    expect(props.enabled).toEqual({ type: "boolean" });
+    expect(props.profile).toEqual({ type: "string" });
+    expect(props.plan_id).toEqual({ type: "string" });
+    expect(props.lease_token).toEqual({ type: "string" });
     expect(out.required).toEqual(["mode"]);
     expect(out.additionalProperties).toBe(true);
+    // Anthropic guard: NO top-level union keyword on the wire.
+    expect((out as any).anyOf).toBeUndefined();
+    expect((out as any).oneOf).toBeUndefined();
+    expect((out as any).allOf).toBeUndefined();
   });
 
   it("hoists when branches mix const and single-value enum for the same discriminant", () => {
@@ -96,7 +118,7 @@ describe("normalizeMcpInputSchema", () => {
     expect(out.required).toEqual(["mode"]);
   });
 
-  it("falls back to empty properties when branches share no const/enum discriminant", () => {
+  it("merges branch properties at top level even when branches share no const/enum discriminant", () => {
     const input = {
       anyOf: [
         {
@@ -117,33 +139,48 @@ describe("normalizeMcpInputSchema", () => {
     };
     const out = normalizeMcpInputSchema(input);
     expect(out.type).toBe("object");
-    expect(out.properties).toEqual({});
+    // No shared discriminant means no `required` array, but every branch
+    // field is still visible at top level so LLMs can fill them.
+    const props = out.properties as Record<string, unknown>;
+    expect(props.name).toEqual({ type: "string" });
+    expect(props.plan_id).toEqual({ type: "string" });
     expect(out.additionalProperties).toBe(true);
     expect(out.required).toBeUndefined();
-    expect((out as any).anyOf).toBe(input.anyOf);
+    // Anthropic guard: NO top-level union keyword on the wire.
+    expect((out as any).anyOf).toBeUndefined();
+    expect((out as any).oneOf).toBeUndefined();
+    expect((out as any).allOf).toBeUndefined();
   });
 
-  it("preserves the original anyOf branches verbatim at the top level (regression guard)", () => {
-    const input = {
-      anyOf: [
-        {
-          type: "object",
-          properties: { mode: { const: "plan" }, name: { type: "string" } },
-          required: ["mode", "name"],
-        },
-        {
-          type: "object",
-          properties: { mode: { const: "apply" }, plan_id: { type: "string" } },
-          required: ["mode", "plan_id"],
-        },
-      ],
-    };
-    const out = normalizeMcpInputSchema(input);
-    // The original branches array must be carried through unchanged so MCP
-    // clients that validate branch-by-branch still see the full per-mode
-    // shape (including each branch's own const/required mode).
-    expect((out as any).anyOf).toBe(input.anyOf);
-    expect((out as any).anyOf).toEqual(input.anyOf);
+  it("DROPS top-level anyOf/oneOf/allOf entirely (Anthropic regression guard)", () => {
+    // This test guards the recurring regression: previous fixes preserved
+    // `anyOf` at the top level, which crashes Anthropic's tool-use API
+    // registration with
+    //   "input_schema does not support oneOf, allOf, or anyOf at the top level"
+    // The wire schema must stay union-free; per-branch validation lives in
+    // Zod inside dispatch.ts. If this test fails, do NOT delete the
+    // assertions — fix the function instead.
+    for (const kw of ["anyOf", "oneOf", "allOf"] as const) {
+      const input = {
+        [kw]: [
+          {
+            type: "object",
+            properties: { mode: { const: "plan" }, name: { type: "string" } },
+            required: ["mode", "name"],
+          },
+          {
+            type: "object",
+            properties: { mode: { const: "apply" }, plan_id: { type: "string" } },
+            required: ["mode", "plan_id"],
+          },
+        ],
+      };
+      const out = normalizeMcpInputSchema(input);
+      expect(out.type, `${kw} should produce type:object`).toBe("object");
+      expect((out as any).anyOf, `${kw} → must drop top-level anyOf`).toBeUndefined();
+      expect((out as any).oneOf, `${kw} → must drop top-level oneOf`).toBeUndefined();
+      expect((out as any).allOf, `${kw} → must drop top-level allOf`).toBeUndefined();
+    }
   });
 
   it("only marks the hoisted discriminant required when it is required in every branch", () => {
@@ -175,6 +212,8 @@ describe("normalizeMcpInputSchema", () => {
     expect(props.mode).toEqual({ enum: ["plan", "apply"] });
     // mode is hoisted but not required at top level (B doesn't require it)
     expect(out.required).toBeUndefined();
+    // Anthropic guard.
+    expect((out as any).anyOf).toBeUndefined();
   });
 
   it("hoists every property that is a const/enum-single literal in every branch (multi-discriminant)", () => {
@@ -201,10 +240,14 @@ describe("normalizeMcpInputSchema", () => {
       ],
     };
     const out = normalizeMcpInputSchema(input);
-    expect(out.properties).toEqual({
-      mode: { enum: ["plan", "apply"] },
-      action: { enum: ["create", "delete"] },
-    });
+    const props = out.properties as Record<string, unknown>;
+    expect(props.mode).toEqual({ enum: ["plan", "apply"] });
+    expect(props.action).toEqual({ enum: ["create", "delete"] });
+    // Non-discriminant fields are also merged through.
+    expect(props.name).toEqual({ type: "string" });
+    expect(props.plan_id).toEqual({ type: "string" });
     expect(out.required).toEqual(["mode", "action"]);
+    // Anthropic guard.
+    expect((out as any).anyOf).toBeUndefined();
   });
 });
