@@ -31,6 +31,7 @@ import { assertActiveProfile } from "../profile-guard.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
 import { detectFomod, hasFomodChoices } from "../fomod-helpers.js";
+import { FomodChoicesRequiredError, type FomodTreeShape } from "../fomod-required-error.js";
 
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + archive_path +
 // mod_name + plan_id + lease_token all gain .min(1). Empty strings in any of
@@ -97,9 +98,11 @@ const handler: PlanApplyHandler = {
     const { isFomod, tree: fomodTree } = await detectFomod(bound.sidecar, archivePath);
 
     if (isFomod && !hasFomodChoices(args)) {
-      const err = new Error("fomod_choices_required");
-      (err as Error & { fomod_tree?: unknown }).fomod_tree = fomodTree;
-      throw err;
+      throw new FomodChoicesRequiredError({
+        code: "fomod_choices_required",
+        message: "fomod_choices_required",
+        fomod_tree: fomodTree as FomodTreeShape,
+      });
     }
 
     const profileDir = resolveProfileDir(ctx, profile);

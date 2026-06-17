@@ -8,6 +8,7 @@ import { PlanCache } from "../../src/plan-apply.js";
 import { SnapshotManager } from "../../src/snapshot.js";
 import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
+import { FomodChoicesRequiredError } from "../../src/fomod-required-error.js";
 
 interface MockPipeCall {
   method: string;
@@ -261,8 +262,11 @@ describe("mo2_reinstall_mod", () => {
       caught = e;
     }
     expect(caught).toBeInstanceOf(Error);
+    expect(caught).toBeInstanceOf(FomodChoicesRequiredError);
+    expect((caught as FomodChoicesRequiredError).code).toBe("fomod_choices_required_for_reinstall");
+    expect((caught as FomodChoicesRequiredError).details.fomod_tree.pages).toEqual(fakeTree.pages);
     expect((caught as Error).message).toMatch(/fomod_choices_required_for_reinstall/);
-    expect((caught as Error & { fomod_tree?: unknown }).fomod_tree).toEqual(fakeTree);
+    expect((caught as FomodChoicesRequiredError).details.fomod_tree).toEqual(fakeTree);
   });
 
   // BUG-23 fix: FOMOD apply now routes through sidecar install.stage_fomod
@@ -359,7 +363,13 @@ describe("mo2_reinstall_mod", () => {
     const tool = getTool("mo2_reinstall_mod")!;
 
     // Plan-time throw — no apply call needed.
-    await expect(tool.handler({ mode: "plan", name: "InstalledMod" }, ctx))
-      .rejects.toThrow(/fomod_choices_required_for_reinstall/);
+    const caught = await tool.handler({ mode: "plan", name: "InstalledMod" }, ctx)
+      .then(() => undefined, (e: unknown) => e);
+
+    expect(caught).toBeInstanceOf(FomodChoicesRequiredError);
+    const err = caught as FomodChoicesRequiredError;
+    expect(err.message).toMatch(/fomod_choices_required_for_reinstall/);
+    expect(err.code).toBe("fomod_choices_required_for_reinstall");
+    expect(Array.isArray(err.details.fomod_tree.pages)).toBe(true);
   });
 });

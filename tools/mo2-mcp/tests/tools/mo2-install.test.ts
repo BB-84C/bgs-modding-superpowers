@@ -8,6 +8,7 @@ import { PlanCache } from "../../src/plan-apply.js";
 import { SnapshotManager } from "../../src/snapshot.js";
 import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
+import { FomodChoicesRequiredError } from "../../src/fomod-required-error.js";
 
 interface MockSidecar {
   call: (m: string, p: unknown) => Promise<unknown>;
@@ -88,12 +89,17 @@ describe("mo2_install", () => {
       stop: async () => {},
     }));
     const tool = getTool("mo2_install")!;
-    await expect(
-      tool.handler(
-        { mode: "plan", archive_path: "/tmp/fomod.7z", mod_name: "FomodMod" },
-        ctx,
-      ),
-    ).rejects.toThrow(/fomod_choices_required/);
+    const caught = await tool.handler(
+      { mode: "plan", archive_path: "/tmp/fomod.7z", mod_name: "FomodMod" },
+      ctx,
+    ).then(() => undefined, (e: unknown) => e);
+
+    expect(caught).toBeInstanceOf(FomodChoicesRequiredError);
+    const err = caught as FomodChoicesRequiredError;
+    expect(err.message).toMatch(/fomod_choices_required/);
+    expect(err.code).toBe("fomod_choices_required");
+    expect(Array.isArray(err.details.fomod_tree.pages)).toBe(true);
+    expect(err.details.fomod_tree.pages[0]?.groups[0]?.options[0]?.name).toBe("A");
   });
 
   it("plan succeeds for non-FOMOD (parse_choices throws not_a_fomod)", async () => {
@@ -181,12 +187,15 @@ describe("mo2_install", () => {
     }));
     const tool = getTool("mo2_install")!;
 
-    await expect(
-      tool.handler(
-        { mode: "plan", archive_path: "/tmp/fomod.7z", mod_name: "FomodMod", fomod_choices: [] },
-        ctx,
-      ),
-    ).rejects.toThrow(/fomod_choices_required/);
+    const caught = await tool.handler(
+      { mode: "plan", archive_path: "/tmp/fomod.7z", mod_name: "FomodMod", fomod_choices: [] },
+      ctx,
+    ).then(() => undefined, (e: unknown) => e);
+
+    expect(caught).toBeInstanceOf(FomodChoicesRequiredError);
+    const err = caught as FomodChoicesRequiredError;
+    expect(err.code).toBe("fomod_choices_required");
+    expect(Array.isArray(err.details.fomod_tree.pages)).toBe(true);
   });
 
   it("plan rejects mod_name_exists", async () => {
