@@ -1,0 +1,9 @@
+[2026-06-17 02:58:55.825 I] starting up
+[2026-06-17 02:58:56.123 E] error message 1
+[2026-06-17 02:58:57.001 I] info line
+  at frame 1 of stack trace
+  at frame 2 of stack trace
+[2026-06-17 02:58:58.500 E] error message 2
+[2026-06-17 02:58:59.200 I] another info
+[2026-06-17 02:59:00.000 E] Cannot launch program C:\indowsystem32\notepad.exe
+[2026-06-17 02:59:01.500 I] shutting down
