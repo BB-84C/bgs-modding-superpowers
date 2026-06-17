@@ -1036,3 +1036,69 @@ ormalize-mcp-input-schema.test.ts. Hoists shared const/single-num properties fr
 - TOCTOU file-level advisory locks (LockFileEx / lock)
 - Directory lease full-file (relative_path,size,mtime_ms) digest
 - detectMo2Running shared-memory probe completion
+
+## 2026-06-17 ## MO2 MCP v1.2 batch1 Anthropic regression hotfix + V1 empirical verify
+
+**Hotfix landed (2 commits on eat/mo2-mcp-v1.2-batch1)**: 
+- `810f2e6` drop top-level anyOf/oneOf/allOf in normalizeMcpInputSchema (Anthropic regression hotfix)
+- `9eff5f7` rematerialize after the hotfix
+
+**Why this hotfix existed**: the original Lane A (BUG-13) fix at `3a862b7` hoisted discriminant fields into top-level `properties` (correct for OpenAI tool-callers) but ALSO preserved the original `anyOf` keyword at the top level on the rationalization that "branch-by-branch validators keep working". There are no branch-by-branch validators in this repo: the real per-branch validator is Zod `safeParse` in `dispatch.ts`, NOT the wire schema. Anthropic's tool-use API rejects top-level union keywords with `"input_schema does not support oneOf, allOf, or anyOf at the top level"`, crashing the entire MCP for any Anthropic-backed OpenCode session. The hotfix drops the union keyword entirely and merges branch properties at top level for LLM visibility. Codified into AGENTS.md "MCP inputSchema Anthropic Compatibility (2026-06-17)" as a permanent constraint.
+
+**V1 empirical verify (PASS)**: fixer-alpha (gpt-5.x family) dispatched for a single plan+apply round-trip on `Mo2Mo2ToggleMod_tool` against harness mod `OpenCodeDevArtifacts`. fixer-alpha generated `mode: "apply"` correctly through the new hoisted-discriminant schema; modlist.txt SHA256 changed from baseline `9CE63125...` to `CFA3F2D3...`; line 5 mutated from `+OpenCodeDevArtifacts` to `-OpenCodeDevArtifacts`. BUG-13 fix confirmed for OpenAI-tool-calling models in the live OpenCode-MCP wire.
+
+**BUG-16 carryforward (could not reproduce)**: reverse-toggle apply via orchestrator self-test succeeded cleanly. MO2 PID 31736 still Responding, broker state "ok", modlist returned to baseline. L1 + L2 had no broker failure to wrap. Unit tests prove the enrichment code emits `mo2_gui_unresponsive` + `mo2_log_tail` when triggered; empirical end-to-end deferred until a natural broker hang.
+
+**Side discovery (BUG-18)**: L2 looked at `<mo2Root>/logs/mo2.log` but real MO2 writes to `<mo2Root>/logs/mo_interface.log`. Fixed in Batch 2 Lane 2A.
+
+## 2026-06-17 ## MO2 MCP v1.2 Batch 2 shipped
+
+**Delivered (9 commits on eat/mo2-mcp-v1.2-batch1)**:
+
+| Commit | Lane | Scope |
+|---|---|---|
+| `13bb4fc` | 2E | NAMESAFE001 widened to catch traversal markers + PATHSAFE001 defers name-shaped args (BUG-6) |
+| `4ab1f94` | 2A | mo2_machine_contract static path fields + mo2_profile_ini_get game-derivation fallback + mo2-log.ts mo_interface.log fallback (BUG-1, BUG-2, BUG-18) |
+| `397b462` | 2D | sidecar UTF-8 stdio encoding for multibyte profile names (BUG-3) |
+| `c1a1cbb` | 2D | sidecar accepts legitimate _build/ archive paths in install (BUG-12) |
+| `e6034ca` | 2B | mo2_session({}) empty-args introspection (BUG-7) |
+| `44fc17c` | 2B | z.string().min(1) on 21 plan/apply tools so empty-string args produce invalid_arguments envelope (BUG-10) |
+| `a4040d7` | 2C | cross-profile guard at plan time + unify modlist scrub in remove_mod (BUG-9 + BUG-15) + plugins.txt flush after toggle_plugin (BUG-14) |
+| `fe2e1c6` | 2C | BUG-9/14/15 test coverage |
+| `0c954d1` | materialize | Mirror to plugins/bgs-modding-superpowers/ |
+
+**5-lane parallel dispatch (mixed fixer-alpha/fixer-beta)**: 5 truly disjoint file scopes, dispatched simultaneously. Cross-lane working-tree contention occurred between Lane 2B (tool schemas) and Lane 2C (mutation tool handlers) which both edited files like `mo2-toggle-mod.ts`; lanes resolved by each staging only their own commit-relevant files via `git add` of specific paths. Final integration: 441 TS pass + 70 sidecar pass + clean build.
+
+**Bugs resolved this batch**:
+- BUG-1 mo2_machine_contract missing static paths
+- BUG-2 mo2_profile_ini_get game-derivation fallback
+- BUG-3 sidecar multibyte profile mojibake (UTF-8 stdio)
+- BUG-6 NAMESAFE001 vs PATHSAFE001 misroute
+- BUG-7 mo2_session({}) empty args rejected by OpenCode
+- BUG-9 cross-profile live mutation guard not firing
+- BUG-10 invalid_arguments envelope vs internal_error misroute
+- BUG-12 install fixture _build/ false-positive path-traversal
+- BUG-14 mo2_toggle_plugin apply doesn't flush plugins.txt
+- BUG-15 mo2_remove_mod backup_first:false orphan modlist row
+- BUG-18 L2 log path wrong filename
+
+**Out of scope (remaining)**:
+- BUG-16 broker hang on mods.set_active — partial root-cause traced (modal dialog blocks Qt thread). v1.2 batch1 BUG-11 fix eliminated one trigger source (binary-path mangling). Empirical L1 + L2 validation pending a naturally-occurring broker hang. L3 (broker-side modal probe) deferred per ENRICHMENT-DESIGN.md.
+- BUG-17 fixer-alpha runner-pattern recurrence — process bug, mitigated via small batches + fixer-beta preference for schema-sensitive work.
+
+**Acceptance**:
+- `npm test` in `tools/mo2-mcp`: 441 passed / 19 skipped / 0 failures (was 397; net +44 tests from Batch 2 lanes)
+- `pytest` in `tools/mo2-mcp-sidecar`: 70 passed (was 64; +6 from BUG-3 stdio encoding tests + BUG-12 archive safety widening tests)
+- `npm run build`: clean
+- `scripts/build-portable-plugin.ps1`: materialized
+
+**Cumulative state on feat/mo2-mcp-v1.2-batch1** (18 commits since main @ 063c437):
+- 14 bug fixes shipped (Batch 1: BUG-11, BUG-13 + Anthropic regression hotfix, ENRICHMENT L1+L2; Batch 2: BUG-1, 2, 3, 6, 7, 9, 10, 12, 14, 15, 18)
+- 2 BUGs falsified-by-revisit (BUG-4, BUG-5)
+- BUG-LAST resolved via `.mo2-mcp.json` ceiling config
+- BUG-16, BUG-17 deferred (process bug + needs L3 or empirical trigger)
+
+**Not yet done**:
+- Merge `feat/mo2-mcp-v1.2-batch1` to `main` (user call — feature-branch lifecycle is theirs)
+- Refresh vendor clone (`git -C 'D:\Starfield MO2\.opencode\vendor\bgs-modding-superpowers' pull --ff-only origin main`) — pending main merge
+- Per-MO2-instance broker redeploy hash audit (memory/45 rule 9) — pending main merge
