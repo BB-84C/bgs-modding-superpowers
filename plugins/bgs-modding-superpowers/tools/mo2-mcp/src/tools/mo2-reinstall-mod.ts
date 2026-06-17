@@ -52,6 +52,7 @@ import type { ToolContext } from "../types.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
 import { detectFomod, hasFomodChoices } from "../fomod-helpers.js";
+import { FomodChoicesRequiredError, type FomodTreeShape } from "../fomod-required-error.js";
 
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + mod name + plan_id
 // + lease_token all gain .min(1) so empty strings fail Zod safeParse instead
@@ -187,9 +188,11 @@ const handler: PlanApplyHandler = {
       const detection = await detectFomod(bound.sidecar, archivePath);
       isFomod = detection.isFomod;
       if (isFomod && !hasFomodChoices(args)) {
-        const err = new Error("fomod_choices_required_for_reinstall");
-        (err as Error & { fomod_tree?: unknown }).fomod_tree = detection.tree;
-        throw err;
+        throw new FomodChoicesRequiredError({
+          code: "fomod_choices_required_for_reinstall",
+          message: "fomod_choices_required_for_reinstall",
+          fomod_tree: detection.tree as FomodTreeShape,
+        });
       }
     }
 

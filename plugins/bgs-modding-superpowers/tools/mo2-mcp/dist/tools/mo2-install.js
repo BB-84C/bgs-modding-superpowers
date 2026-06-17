@@ -31,6 +31,7 @@ import { assertActiveProfile } from "../profile-guard.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext } from "../binding.js";
 import { detectFomod, hasFomodChoices } from "../fomod-helpers.js";
+import { FomodChoicesRequiredError } from "../fomod-required-error.js";
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + archive_path +
 // mod_name + plan_id + lease_token all gain .min(1). Empty strings in any of
 // these fall through to internal "<thing> not found" handler errors today;
@@ -88,9 +89,11 @@ const handler = {
         // Detect FOMOD via shared helper (delegates to sidecar.fomod.parse_choices).
         const { isFomod, tree: fomodTree } = await detectFomod(bound.sidecar, archivePath);
         if (isFomod && !hasFomodChoices(args)) {
-            const err = new Error("fomod_choices_required");
-            err.fomod_tree = fomodTree;
-            throw err;
+            throw new FomodChoicesRequiredError({
+                code: "fomod_choices_required",
+                message: "fomod_choices_required",
+                fomod_tree: fomodTree,
+            });
         }
         const profileDir = resolveProfileDir(ctx, profile);
         const modlistPath = join(profileDir, "modlist.txt");

@@ -5,6 +5,7 @@ import { runRules, hasBlocking } from "./pipeline/rules.js";
 import { BindingRequiredError, bindingSnapshot } from "./binding.js";
 import { BrokerEnrichedError } from "./broker-error.js";
 import { CrossProfileMutationError } from "./profile-guard.js";
+import { FomodChoicesRequiredError } from "./fomod-required-error.js";
 function jsonText(value) {
     return { type: "text", text: JSON.stringify(value) };
 }
@@ -183,6 +184,30 @@ export async function dispatchToolCall({ toolName, rawArgs, ctx, rules, }) {
             // branch the generic Error fallback below collapses the code to
             // `internal_error`, which is correct behavior but unusable for agent
             // decision logic.
+            await ctx.audit.log({
+                ts: new Date().toISOString(),
+                sessionId: ctx.sessionId,
+                tool: tool.name,
+                argsHash: hashArgs(argsForParse),
+                decision: "refused",
+                durationMs: Date.now() - t0,
+                error: { code: e.code, message: e.message },
+                details: e.details,
+            });
+            return {
+                content: [
+                    jsonText({
+                        ok: false,
+                        error: { code: e.code, message: e.message, details: e.details },
+                    }),
+                ],
+            };
+        }
+        if (e instanceof FomodChoicesRequiredError) {
+            // BUG-26 fix (2026-06-17): FOMOD choice gates carry the parsed
+            // page/group/option tree that agents need to retry with valid choices.
+            // The generic Error fallback below preserves only e.message, so this
+            // branch must run before `internal_error` or the tree is lost.
             await ctx.audit.log({
                 ts: new Date().toISOString(),
                 sessionId: ctx.sessionId,

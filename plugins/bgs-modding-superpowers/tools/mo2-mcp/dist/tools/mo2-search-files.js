@@ -34,6 +34,14 @@ function globToRegex(pattern) {
         .replace(/\x01/g, "(?:.*/)?");
     return new RegExp(`^${transformed}$`, "i");
 }
+function _stripDataPrefixFromPattern(pattern) {
+    if (pattern.startsWith("regex:")) {
+        const source = pattern.slice("regex:".length);
+        const stripped = source.replace(/^(\^?)(?:\[(?:Dd|dD)\]ata|data)\//i, "$1");
+        return "regex:" + stripped;
+    }
+    return pattern.replace(/^data\//i, "");
+}
 registerTool({
     name: "mo2_search_files",
     tier: "T1",
@@ -42,7 +50,8 @@ registerTool({
     handler: async (args, ctx) => {
         const bound = requireBoundContext(ctx);
         const profile = args.profile ?? "Default";
-        const pattern = args.pattern;
+        const inputPattern = args.pattern;
+        const pattern = _stripDataPrefixFromPattern(inputPattern);
         const maxResults = args.max_results ?? 1000;
         const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
         const modsDir = ini.settings.modDirectory ?? join(bound.config.mo2Root, "mods");
@@ -82,7 +91,7 @@ registerTool({
         }
         return {
             ok: true,
-            result: { results, truncated, count: results.length, pattern, profile },
+            result: { results, truncated, count: results.length, pattern: inputPattern, profile },
             error: null,
         };
     },

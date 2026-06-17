@@ -36,6 +36,57 @@ def _world(profile_dir: str):
     return _cache.get(Path(profile_dir))
 
 
+def _normalize_virtual_path(path: str) -> str:
+    """Normalize a virtual path to mo2_assets_engine's storage convention.
+
+    BUG-25 (WL2 Lane 4D, run-20260617T002922Z): mo2_assets_resolve returned
+    {winner: null, providers: []} for inputs like
+    'Data/textures/BNS/Landscape/Grass/FernGrass01_d.DDS' on an 803-mod WL2
+    profile that demonstrably contained the file (mo2_assets_summary returned
+    mod_count=803 against the same cache). Root cause: mod_enumerator.py:33
+    stores each FileEntry.relative_path as
+
+        path.relative_to(mod.root).as_posix().lower()
+
+    i.e. paths are BOTH mod-relative (no 'Data/' prefix, matching MO2's VFS
+    internal convention where mods/<Mod>/textures/foo.dds projects to
+    Data/textures/foo.dds at runtime) AND lowercased. The winners dict
+    returned by conflict_resolver.resolve_all_winners is keyed on those
+    normalized values, but assets_resolve_file / assets_conflicts used to
+    pass the agent's raw input straight through to winners.get(...) /
+    str.startswith(...), so any caller that did the obvious "ask for the
+    runtime path I see" thing got a silent miss.
+
+    Normalization steps, in order:
+
+    1. Convert backslashes to forward slashes (defensive: MO2 VFS is
+       posix-style, but Windows-side callers and Pip-Boy displays
+       occasionally mix separators).
+    2. Strip leading slashes ('/Data/foo', '//Data/foo').
+    3. Strip ONE leading 'Data/' segment, case-insensitive
+       ('Data/', 'data/', 'DATA/', 'DaTa/'). Only the leading segment;
+       a nested 'data/' deeper in the tree (e.g. 'textures/data/foo.dds',
+       which is a real path a mod can legitimately ship) is preserved.
+    4. Strip residual leading slashes that step 3 may have left behind
+       (handles 'Data//foo' -> '/foo' -> 'foo').
+    5. Lowercase the result so '.DDS' / 'Foo' / 'BNS' match the engine's
+       lowercased storage.
+
+    Empty input is returned as-is; callers handle empty as "no filter" /
+    "no path".
+    """
+    if not path:
+        return path
+    p = path.replace("\\", "/")
+    while p.startswith("/"):
+        p = p[1:]
+    if len(p) >= 5 and p[:5].lower() == "data/":
+        p = p[5:]
+        while p.startswith("/"):
+            p = p[1:]
+    return p.lower()
+
+
 def _build_entries_by_mod(w: Any) -> dict[str, list[Any]]:
     """Enumerate files per mod using mo2_assets_engine (with archive order).
 
@@ -102,6 +153,12 @@ def assets_conflicts(params: dict) -> dict:
     profile_dir = params["profile_dir"]
     max_results = params.get("max_results", 10000)
     path_prefix = params.get("path_prefix")
+    # BUG-25: normalize path_prefix to engine convention (mod-relative, lowercase,
+    # no 'Data/' prefix) so callers can pass either 'textures/' (already-correct
+    # storage form) or 'Data/textures/' (the runtime VFS form they actually see)
+    # and get the same filter. See _normalize_virtual_path() for full rationale.
+    if path_prefix:
+        path_prefix = _normalize_virtual_path(path_prefix)
     w = _world(profile_dir)
     try:
         from mo2_assets_engine.conflict_resolver import resolve_all_winners  # type: ignore[import-not-found]
@@ -137,6 +194,10 @@ def assets_resolve_file(params: dict) -> dict:
     """Resolve a single virtual_path to winner + providers."""
     profile_dir = params["profile_dir"]
     virtual_path = params["virtual_path"]
+    # BUG-25: normalize input for the winners-dict lookup. The original
+    # virtual_path is echoed back in the response so callers see the path
+    # they asked for, not the storage form.
+    lookup_key = _normalize_virtual_path(virtual_path)
     w = _world(profile_dir)
     try:
         from mo2_assets_engine.conflict_resolver import resolve_all_winners  # type: ignore[import-not-found]
@@ -145,7 +206,7 @@ def assets_resolve_file(params: dict) -> dict:
                 "error": "resolve_all_winners not importable"}
     entries_by_mod = _build_entries_by_mod(w)
     winners = resolve_all_winners(mods=w.mods or [], entries_by_mod=entries_by_mod)
-    winner = winners.get(virtual_path)
+    winner = winners.get(lookup_key)
     if winner is None:
         return {"virtual_path": virtual_path, "winner": None, "providers": []}
     providers = [entry.owner_mod for entry in winner.losers] + [winner.winner.owner_mod]

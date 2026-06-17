@@ -51,6 +51,7 @@ import { readMoIni } from "../mo-ini.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext } from "../binding.js";
 import { detectFomod, hasFomodChoices } from "../fomod-helpers.js";
+import { FomodChoicesRequiredError } from "../fomod-required-error.js";
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + mod name + plan_id
 // + lease_token all gain .min(1) so empty strings fail Zod safeParse instead
 // of falling through to handler-level errors.
@@ -160,9 +161,11 @@ const handler = {
             const detection = await detectFomod(bound.sidecar, archivePath);
             isFomod = detection.isFomod;
             if (isFomod && !hasFomodChoices(args)) {
-                const err = new Error("fomod_choices_required_for_reinstall");
-                err.fomod_tree = detection.tree;
-                throw err;
+                throw new FomodChoicesRequiredError({
+                    code: "fomod_choices_required_for_reinstall",
+                    message: "fomod_choices_required_for_reinstall",
+                    fomod_tree: detection.tree,
+                });
             }
         }
         return {
