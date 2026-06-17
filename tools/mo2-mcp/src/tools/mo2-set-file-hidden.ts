@@ -16,9 +16,10 @@ import type { ToolContext } from "../types.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
+// BUG-10 fix (2026-06-17): virtual_path + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("plan"), virtual_path: z.string(), hidden: z.boolean() }),
-  z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+  z.object({ mode: z.literal("plan"), virtual_path: z.string().min(1), hidden: z.boolean() }),
+  z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 
 function _withoutDataPrefix(virtualPath: string): string {
