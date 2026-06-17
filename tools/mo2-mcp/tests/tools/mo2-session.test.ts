@@ -144,4 +144,37 @@ describe("mo2_session", () => {
     expect(tool.inputSchema).toBeInstanceOf(z.ZodType);
     expect(tool.inputSchema.safeParse({ mo2Root: 123 }).success).toBe(false);
   });
+
+  // BUG-7 regression guard: the introspection contract `mo2_session({})` must
+  // be a first-class shape at every layer (Zod, dispatch, response). Earlier
+  // schema declared `mo2Root` / `profile` as `z.string().min(1).optional()`,
+  // producing wire JSON Schema with `minLength: 1` that some OpenCode tool-call
+  // surfaces interpret as "field must be present and non-empty" — making the
+  // empty-args call unreachable. The schema must accept `{}` cleanly.
+  it("BUG-7: Zod schema accepts fully-empty args {} as introspection", () => {
+    const tool = getTool("mo2_session")!;
+    const result = tool.inputSchema.safeParse({});
+    expect(result.success).toBe(true);
+  });
+
+  it("BUG-7: empty-string mo2Root is also accepted and routed to introspection", () => {
+    // Defensive coverage: a tool emitter that erroneously sends an empty string
+    // for mo2Root should still get back the introspection snapshot (handler
+    // .trim() check), not a confusing invalid_arguments envelope.
+    const tool = getTool("mo2_session")!;
+    expect(tool.inputSchema.safeParse({ mo2Root: "" }).success).toBe(true);
+  });
+
+  it("BUG-7: dispatch of mo2_session({}) returns snapshot via central dispatch path", async () => {
+    const ctx = await makeCtx();
+    const result = await dispatchToolCall({
+      toolName: "mo2_session",
+      rawArgs: {},
+      ctx,
+      rules: [],
+    });
+    // The dispatch path must NOT produce invalid_arguments; it must reach the
+    // handler and return the bindingSnapshot envelope.
+    expect(responseJson(result)).toEqual({ ok: true, snapshot: { state: "unbound" } });
+  });
 });
