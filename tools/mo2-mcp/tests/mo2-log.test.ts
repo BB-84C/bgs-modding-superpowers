@@ -19,10 +19,10 @@ async function seedLogFromFixture(): Promise<string> {
   return target;
 }
 
-async function seedLogFromString(text: string): Promise<string> {
+async function seedLogFromString(text: string, fileName = "mo2.log"): Promise<string> {
   const logDir = join(tempRoot, "logs");
   await mkdir(logDir, { recursive: true });
-  const target = join(logDir, "mo2.log");
+  const target = join(logDir, fileName);
   await writeFile(target, text, "utf8");
   return target;
 }
@@ -45,6 +45,31 @@ describe("tailMo2Log", () => {
     expect(result.lines.length).toBe(9);
     expect(result.lines[0]).toContain("starting up");
     expect(result.lines[result.lines.length - 1]).toContain("shutting down");
+  });
+
+  it("prefers mo_interface.log over mo2.log when both logs exist", async () => {
+    const interfacePath = await seedLogFromString(
+      "[2026-06-17 03:00:00.000 I] interface log line\n",
+      "mo_interface.log",
+    );
+    await seedLogFromString("[2026-06-17 03:00:00.000 I] legacy log line\n", "mo2.log");
+
+    const result = await tailMo2Log(tempRoot);
+
+    expect(result.logPath).toBe(interfacePath);
+    expect(result.lines).toEqual(["[2026-06-17 03:00:00.000 I] interface log line"]);
+  });
+
+  it("falls back to mo2.log when mo_interface.log is absent", async () => {
+    const legacyPath = await seedLogFromString(
+      "[2026-06-17 03:00:00.000 I] legacy log line\n",
+      "mo2.log",
+    );
+
+    const result = await tailMo2Log(tempRoot);
+
+    expect(result.logPath).toBe(legacyPath);
+    expect(result.lines).toEqual(["[2026-06-17 03:00:00.000 I] legacy log line"]);
   });
 
   it("filters lines by sinceTs (keeps newer timestamped lines plus continuation lines)", async () => {

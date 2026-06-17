@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,19 +8,20 @@ import { SnapshotManager } from "../../src/snapshot.js";
 import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
-async function _fixture(): Promise<ToolContext> {
+async function _fixture(options: { generalLines?: string[]; profileFiles?: Record<string, string> } = {}): Promise<ToolContext> {
   const root = await mkdtemp(join(tmpdir(), "mo2-ig-"));
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(
     join(root, "ModOrganizer.ini"),
-    "[General]\ngame=fallout4\n[Settings]\nbase_directory=" + root + "\n",
+    `[General]\n${(options.generalLines ?? ["game=fallout4"]).join("\n")}\n[Settings]\nbase_directory=${root}\n`,
     "utf8",
   );
-  await writeFile(
-    join(root, "profiles", "Default", "fallout4Prefs.ini"),
-    "[Display]\niResolutionX=1920\niResolutionY=1080\n[General]\nuExterior=42\n",
-    "utf8",
-  );
+  const profileFiles = options.profileFiles ?? {
+    Fallout4Prefs: "[Display]\niResolutionX=1920\niResolutionY=1080\n[General]\nuExterior=42\n",
+  };
+  for (const [baseName, text] of Object.entries(profileFiles)) {
+    await writeFile(join(root, "profiles", "Default", `${baseName}.ini`), text, "utf8");
+  }
 
   return {
     config: {
@@ -38,10 +39,20 @@ async function _fixture(): Promise<ToolContext> {
   };
 }
 
+const ORIGINAL_USERPROFILE = process.env.USERPROFILE;
+
 describe("mo2_profile_ini_get", () => {
   beforeAll(async () => {
     _clearToolsForTests();
     await import("../../src/tools/mo2-profile-ini-get.js");
+  });
+
+  afterEach(() => {
+    if (ORIGINAL_USERPROFILE === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = ORIGINAL_USERPROFILE;
+    }
   });
 
   it("registers as T1", () => {
@@ -81,6 +92,51 @@ describe("mo2_profile_ini_get", () => {
     )) as { ok: boolean; result: { value: string } };
     expect(result.ok).toBe(true);
     expect(result.result.value).toBe("1920");
+  });
+
+  it("derives the game from profile-local INI filenames when [General] game is missing", async () => {
+    const ctx = await _fixture({
+      generalLines: [],
+      profileFiles: {
+        Fallout4Prefs: "[Display]\niResolutionX=2560\n",
+      },
+    });
+    const tool = getTool("mo2_profile_ini_get")!;
+
+    const result = (await tool.handler(
+      { ini_name: "prefs", section: "Display", key: "iResolutionX" },
+      ctx,
+    )) as { ok: boolean; result: { source: string; value: string } };
+
+    expect(result.ok).toBe(true);
+    expect(result.result.source).toBe("profile_local");
+    expect(result.result.value).toBe("2560");
+  });
+
+  it("derives the game from gamePath when no profile-local INI reveals it", async () => {
+    const userRoot = await mkdtemp(join(tmpdir(), "mo2-docs-"));
+    const gamePath = join(userRoot, "Stock Game", "Fallout 4");
+    await mkdir(join(userRoot, "Documents", "My Games", "Fallout4"), { recursive: true });
+    await writeFile(
+      join(userRoot, "Documents", "My Games", "Fallout4", "Fallout4Prefs.ini"),
+      "[Display]\niResolutionX=3440\n",
+      "utf8",
+    );
+    process.env.USERPROFILE = userRoot;
+    const ctx = await _fixture({
+      generalLines: [`gamePath=@ByteArray(${gamePath.replace(/\\/g, "\\\\")})`],
+      profileFiles: {},
+    });
+    const tool = getTool("mo2_profile_ini_get")!;
+
+    const result = (await tool.handler(
+      { ini_name: "prefs", section: "Display", key: "iResolutionX" },
+      ctx,
+    )) as { ok: boolean; result: { source: string; value: string } };
+
+    expect(result.ok).toBe(true);
+    expect(result.result.source).toBe("documents");
+    expect(result.result.value).toBe("3440");
   });
 
   it("returns ini_not_found for missing custom ini", async () => {
