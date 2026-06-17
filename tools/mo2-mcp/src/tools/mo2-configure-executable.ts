@@ -83,8 +83,30 @@ async function _assertMo2Closed(mo2Root: string): Promise<void> {
   }
 }
 
-function _serializeValue(value: string | boolean): string {
-  return typeof value === "boolean" ? (value ? "true" : "false") : value;
+/**
+ * Keys whose values are filesystem paths and must be written with forward
+ * slashes. MO2 itself writes these with forward slashes; Qt QSettings on
+ * subsequent read treats `\W`, `\S`, etc. as undefined escape sequences and
+ * strips the leading backslash, corrupting paths like
+ * `C:\Windows\System32\notepad.exe` into `C:indowsystem32\notepad.exe`.
+ *
+ * `arguments` is intentionally NOT in this set: command-line arguments may
+ * embed verbatim Windows path literals that the launched program parses on
+ * its own (e.g. `-D "D:\Games\Fallout 4"`); the caller is responsible for
+ * whatever quoting/escaping that program needs, and we must round-trip
+ * those bytes verbatim.
+ *
+ * `title` is also NOT in this set: titles are arbitrary user-facing labels
+ * and not path-typed.
+ */
+const PATH_KEYS = new Set(["binary", "workingDirectory"]);
+
+export function _serializeValue(key: string, value: string | boolean): string {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (PATH_KEYS.has(key) && value.includes("\\")) {
+    return value.replace(/\\/g, "/");
+  }
+  return value;
 }
 
 function _serializeCustomExecutables(
@@ -99,13 +121,13 @@ function _serializeCustomExecutables(
     for (const key of ENTRY_KEY_ORDER) {
       const value = entry[key as keyof MoIniCustomExecutable];
       if (value === undefined) continue;
-      lines.push(`${prefix}${key}=${_serializeValue(value)}`);
+      lines.push(`${prefix}${key}=${_serializeValue(key, value)}`);
       seen.add(key);
     }
     for (const [key, value] of Object.entries(entry)) {
       if (seen.has(key) || value === undefined) continue;
       if (typeof value === "string" || typeof value === "boolean") {
-        lines.push(`${prefix}${key}=${_serializeValue(value)}`);
+        lines.push(`${prefix}${key}=${_serializeValue(key, value)}`);
       }
     }
   });
@@ -113,7 +135,7 @@ function _serializeCustomExecutables(
   return lines.join(newline);
 }
 
-function _rewriteCustomExecutables(
+export function _rewriteCustomExecutables(
   raw: string,
   range: [number, number] | undefined,
   entries: MoIniCustomExecutable[],
