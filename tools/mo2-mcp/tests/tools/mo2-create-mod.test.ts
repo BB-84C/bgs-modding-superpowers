@@ -94,6 +94,78 @@ describe("mo2_create_mod", () => {
     ).rejects.toThrow(/above_mod_not_found: Missing/);
   });
 
+  // BUG-20 fix (2026-06-17): some OpenCode tool-call surfaces emit `above: ""`
+  // for the semantically-optional field, which used to interpolate into the
+  // error message as `above_mod_not_found: ` (trailing space). The handler
+  // now treats empty-string the same as the field being absent: skip lookup
+  // and place the new mod at the bottom (no above-text in the diff).
+  it("BUG-20: plan with above:'' is treated as absent and places mod at bottom", async () => {
+    const { ctx } = await _fixture();
+    const tool = getTool("mo2_create_mod")!;
+
+    const plan = (await tool.handler(
+      { mode: "plan", name: "NewEmpty", above: "" },
+      ctx,
+    )) as { ok: boolean; result: { diff: string; affected_files: string[] } };
+
+    expect(plan.ok).toBe(true);
+    expect(plan.result.diff).toBe("Create empty mod NewEmpty");
+    expect(plan.result.diff).not.toContain("above");
+    expect(plan.result.diff).not.toContain("pri=");
+    expect(plan.result.affected_files[0]).toContain(join("profiles", "Default", "modlist.txt"));
+  });
+
+  it("BUG-20: plan with above omitted is treated as absent and places mod at bottom", async () => {
+    const { ctx } = await _fixture();
+    const tool = getTool("mo2_create_mod")!;
+
+    const plan = (await tool.handler(
+      { mode: "plan", name: "NewEmpty" },
+      ctx,
+    )) as { ok: boolean; result: { diff: string } };
+
+    expect(plan.ok).toBe(true);
+    expect(plan.result.diff).toBe("Create empty mod NewEmpty");
+  });
+
+  it("BUG-20: apply with above:'' is treated as absent (mods.create called without priority)", async () => {
+    const { root, ctx } = await _fixture();
+    const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    ctx.pipeClient = {
+      call: async (method: string, params: Record<string, unknown>) => {
+        pipeCalls.push({ method, params });
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+        return { ok: true, result: { name: params.name, created: true } };
+      },
+      close: () => {},
+      discoverAndConnect: async () => {},
+      isConnected: () => true,
+    } as unknown as ToolContext["pipeClient"];
+    ctx.sidecar = {
+      call: async () => ({ invalidated: true }),
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    } as unknown as ToolContext["sidecar"];
+    const tool = getTool("mo2_create_mod")!;
+    const plan = (await tool.handler(
+      { mode: "plan", name: "BottomMod2", above: "" },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+    const apply = (await tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )) as { ok: boolean };
+
+    expect(apply.ok).toBe(true);
+    const createCall = pipeCalls.find((c) => c.method === "mods.create");
+    expect(createCall).toBeDefined();
+    // No `priority` key — falls to bottom on the MO2 side.
+    expect(createCall!.params).toEqual({ name: "BottomMod2" });
+    expect(existsSync(join(root, "mods", "BottomMod2"))).toBe(true);
+  });
+
   it("apply calls mods.create with name and priority, ensures mod folder exists, then invalidates sidecar world", async () => {
     const { root, ctx } = await _fixture();
     const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
