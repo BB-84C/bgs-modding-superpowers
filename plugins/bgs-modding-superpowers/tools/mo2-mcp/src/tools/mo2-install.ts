@@ -30,6 +30,7 @@ import { readMoIni } from "../mo-ini.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { detectFomod, hasFomodChoices } from "../fomod-helpers.js";
 
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + archive_path +
 // mod_name + plan_id + lease_token all gain .min(1). Empty strings in any of
@@ -65,6 +66,12 @@ async function _copyDirectoryContents(sourceDir: string, destDir: string): Promi
   }
 }
 
+// FOMOD detection + choices-shape helpers were extracted into
+// ../fomod-helpers.ts (2026-06-17 v1.2 Batch 4 Lane 4C) so mo2_reinstall_mod
+// can share the same contract with the sidecar instead of carrying a parallel
+// regex / shape that drifts. See fomod-helpers.ts for the not_a_fomod/info.xml
+// substring contract and the empty-array=no-choices semantics (BUG-19 fix).
+
 const handler: PlanApplyHandler = {
   toolName: "mo2_install",
   async buildPlan(args, ctx) {
@@ -86,19 +93,10 @@ const handler: PlanApplyHandler = {
       throw new Error(`mod_name_exists: ${modName}`);
     }
 
-    // Detect FOMOD: try sidecar.fomod.parse_choices; non-FOMOD will throw.
-    let isFomod = false;
-    let fomodTree: unknown = null;
-    try {
-      fomodTree = await bound.sidecar.call("fomod.parse_choices", { archive_path: archivePath });
-      isFomod = true;
-    } catch (e) {
-      if (e instanceof Error && !/not_a_fomod|info\.xml/i.test(e.message)) {
-        throw e;
-      }
-    }
+    // Detect FOMOD via shared helper (delegates to sidecar.fomod.parse_choices).
+    const { isFomod, tree: fomodTree } = await detectFomod(bound.sidecar, archivePath);
 
-    if (isFomod && !args.fomod_choices) {
+    if (isFomod && !hasFomodChoices(args)) {
       const err = new Error("fomod_choices_required");
       (err as Error & { fomod_tree?: unknown }).fomod_tree = fomodTree;
       throw err;
@@ -129,7 +127,8 @@ const handler: PlanApplyHandler = {
     await assertActiveProfile(ctx, profile);
 
     // 1. Stage content into stagingDir.
-    if (args.fomod_choices) {
+    const useFomodChoices = hasFomodChoices(args);
+    if (useFomodChoices) {
       await bound.sidecar.call("install.stage_fomod", {
         archive_path: archivePath,
         choices: args.fomod_choices,
@@ -212,7 +211,7 @@ const handler: PlanApplyHandler = {
     return {
       mod_name: modName,
       dest_path: finalDestPath,
-      fomod_used: !!args.fomod_choices,
+      fomod_used: useFomodChoices,
       installation_file: basename(archivePath),
     };
   },

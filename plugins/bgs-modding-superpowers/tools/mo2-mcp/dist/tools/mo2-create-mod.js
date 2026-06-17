@@ -24,8 +24,27 @@ const inputSchema = z.discriminatedUnion("mode", [
     }),
     z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
-async function _targetPriority(mo2Root, profile, above) {
+/**
+ * Normalize the `above` arg: treat non-strings and empty strings as absent.
+ *
+ * BUG-20 fix (2026-06-17): OpenCode's tool-call surface can pass `above: ""`
+ * when the user omits the field (some tool wrappers require an explicit string
+ * for "optional"). The handler used to interpret that as a real mod-name
+ * lookup, which always failed with `above_mod_not_found: ` (trailing space).
+ * Per Lane 2B's `.min(1)` audit, `above` stays permissive at the Zod layer to
+ * keep the wire schema agent-friendly; we normalize empty -> undefined here
+ * inside the handler instead, so the tools/list inputSchema is unaffected and
+ * the Anthropic-compat normalize path stays untouched.
+ */
+function _normalizeAbove(above) {
     if (typeof above !== "string")
+        return undefined;
+    if (above === "")
+        return undefined;
+    return above;
+}
+async function _targetPriority(mo2Root, profile, above) {
+    if (above === undefined)
         return undefined;
     const p = await readProfile(join(mo2Root, "profiles", profile));
     const abovePri = p.mods.find((mod) => mod.name === above)?.priority;
@@ -45,10 +64,11 @@ const handler = {
         // already enforces this; pushing it up to buildPlan prevents misleading
         // plan envelopes that look mintable but would never apply.
         await assertActiveProfile(ctx, profile);
-        const targetPri = await _targetPriority(bound.config.mo2Root, profile, args.above);
+        const above = _normalizeAbove(args.above);
+        const targetPri = await _targetPriority(bound.config.mo2Root, profile, above);
         const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
-        const aboveText = typeof args.above === "string"
-            ? ` above ${args.above} (pri=${String(targetPri)})`
+        const aboveText = above !== undefined
+            ? ` above ${above} (pri=${String(targetPri)})`
             : "";
         return {
             diff: `Create empty mod ${String(args.name)}${aboveText}`,
@@ -62,7 +82,8 @@ const handler = {
             throw new Error("live_mo2_required_for_create_mod");
         const profile = plan.args.profile ?? "Default";
         await assertActiveProfile(ctx, profile);
-        const targetPri = await _targetPriority(bound.config.mo2Root, profile, plan.args.above);
+        const above = _normalizeAbove(plan.args.above);
+        const targetPri = await _targetPriority(bound.config.mo2Root, profile, above);
         const payload = { name: plan.args.name };
         if (targetPri !== undefined)
             payload.priority = targetPri;

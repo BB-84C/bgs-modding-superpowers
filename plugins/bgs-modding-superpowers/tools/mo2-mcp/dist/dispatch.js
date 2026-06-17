@@ -4,6 +4,7 @@ import { hashArgs } from "./audit.js";
 import { runRules, hasBlocking } from "./pipeline/rules.js";
 import { BindingRequiredError, bindingSnapshot } from "./binding.js";
 import { BrokerEnrichedError } from "./broker-error.js";
+import { CrossProfileMutationError } from "./profile-guard.js";
 function jsonText(value) {
     return { type: "text", text: JSON.stringify(value) };
 }
@@ -156,6 +157,32 @@ export async function dispatchToolCall({ toolName, rawArgs, ctx, rules, }) {
             // process responsiveness probe + L2 mo2.log tail in `details`. Surface
             // those to the agent and audit them with the structured code so
             // BUG-16-class hangs become diagnosable instead of opaque timeouts.
+            await ctx.audit.log({
+                ts: new Date().toISOString(),
+                sessionId: ctx.sessionId,
+                tool: tool.name,
+                argsHash: hashArgs(argsForParse),
+                decision: "refused",
+                durationMs: Date.now() - t0,
+                error: { code: e.code, message: e.message },
+                details: e.details,
+            });
+            return {
+                content: [
+                    jsonText({
+                        ok: false,
+                        error: { code: e.code, message: e.message, details: e.details },
+                    }),
+                ],
+            };
+        }
+        if (e instanceof CrossProfileMutationError) {
+            // BUG-21 fix (2026-06-17): cross-profile guard surfaces a structured
+            // envelope with the stable code `cross_profile_live_mutation_blocked`
+            // and the requested/active profile pair in `details`. Without this
+            // branch the generic Error fallback below collapses the code to
+            // `internal_error`, which is correct behavior but unusable for agent
+            // decision logic.
             await ctx.audit.log({
                 ts: new Date().toISOString(),
                 sessionId: ctx.sessionId,

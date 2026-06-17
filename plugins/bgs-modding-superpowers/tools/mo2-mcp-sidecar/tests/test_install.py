@@ -207,6 +207,34 @@ def test_stage_fomod_from_directory_extracts_selected_only(tmp_path):
 
 
 @pytest.mark.skipif(not _fomod._PYFOMOD_AVAILABLE, reason="pyfomod not installed")
+def test_fomod_install_with_info_xml_uses_fomod_parser(tmp_path):
+    """Archive FOMOD + choices should stage selected files through pyfomod."""
+    import zipfile
+
+    archive_path = tmp_path / "fomod.zip"
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        zf.writestr("fomod/ModuleConfig.xml", _STAGE_FOMOD_XML)
+        zf.writestr("fomod/info.xml", '<?xml version="1.0"?><fomod><Name>StageTest</Name></fomod>')
+        zf.writestr("light.esp", "light-data")
+        zf.writestr("heavy.esp", "heavy-data")
+    staging = tmp_path / "staging"
+
+    from mo2_mcp_sidecar.install import install_stage_fomod
+    result = install_stage_fomod({
+        "archive_path": str(archive_path),
+        "choices": [{"page_name": "Choose",
+                     "selected_options": [{"group_name": "Variant",
+                                           "option_name": "Light"}]}],
+        "staging_dir": str(staging),
+    })
+
+    assert result["archive_format"] == "zip"
+    assert result["file_count"] == 1
+    assert (staging / "light.esp").read_text() == "light-data"
+    assert not (staging / "heavy.esp").exists()
+
+
+@pytest.mark.skipif(not _fomod._PYFOMOD_AVAILABLE, reason="pyfomod not installed")
 def test_stage_fomod_rejects_destination_parent_traversal(tmp_path):
     """FOMOD destination paths must not escape staging_dir."""
     fomod_root = tmp_path / "TraversalFomod"
