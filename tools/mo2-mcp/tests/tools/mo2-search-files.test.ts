@@ -26,6 +26,9 @@ async function _fixture(): Promise<ToolContext> {
   await mkdir(join(modsDir, "ModA", "Data"), { recursive: true });
   await writeFile(join(modsDir, "ModA", "Data", "foo.esp"), "", "utf8");
   await writeFile(join(modsDir, "ModA", "Data", "bar.esm"), "", "utf8");
+  await mkdir(join(modsDir, "ModA", "textures", "data"), { recursive: true });
+  await writeFile(join(modsDir, "ModA", "textures", "foo.dds"), "", "utf8");
+  await writeFile(join(modsDir, "ModA", "textures", "data", "foo.dds"), "", "utf8");
   await mkdir(join(modsDir, "ModB"), { recursive: true });
   await writeFile(join(modsDir, "ModB", "baz.esp"), "", "utf8");
 
@@ -89,5 +92,85 @@ describe("mo2_search_files", () => {
     expect(result.ok).toBe(true);
     expect(result.result.results).toHaveLength(1);
     expect(result.result.truncated).toBe(true);
+  });
+
+  it("regex pattern with Data/ prefix matches stored mod-relative paths", async () => {
+    const ctx = await _fixture();
+    const tool = getTool("mo2_search_files")!;
+    const result = (await tool.handler(
+      { pattern: "regex:^Data/textures/.*\\.dds$", max_results: 10 },
+      ctx,
+    )) as { ok: boolean; result: { results: string[] } };
+    expect(result.ok).toBe(true);
+    expect(result.result.results).toContain("ModA/textures/foo.dds");
+  });
+
+  it("regex pattern without Data/ prefix still works", async () => {
+    const ctx = await _fixture();
+    const tool = getTool("mo2_search_files")!;
+    const result = (await tool.handler(
+      { pattern: "regex:^textures/.*\\.dds$", max_results: 10 },
+      ctx,
+    )) as { ok: boolean; result: { results: string[] } };
+    expect(result.ok).toBe(true);
+    expect(result.result.results).toContain("ModA/textures/foo.dds");
+  });
+
+  it("glob pattern with Data/ prefix matches stored mod-relative paths", async () => {
+    const ctx = await _fixture();
+    const tool = getTool("mo2_search_files")!;
+    const result = (await tool.handler(
+      { pattern: "Data/textures/*.dds", max_results: 10 },
+      ctx,
+    )) as { ok: boolean; result: { results: string[] } };
+    expect(result.ok).toBe(true);
+    expect(result.result.results).toContain("ModA/textures/foo.dds");
+  });
+
+  it("glob pattern without Data/ prefix still works", async () => {
+    const ctx = await _fixture();
+    const tool = getTool("mo2_search_files")!;
+    const result = (await tool.handler(
+      { pattern: "textures/*.dds", max_results: 10 },
+      ctx,
+    )) as { ok: boolean; result: { results: string[] } };
+    expect(result.ok).toBe(true);
+    expect(result.result.results).toContain("ModA/textures/foo.dds");
+  });
+
+  it("case-insensitive Data prefix variants match glob patterns", async () => {
+    const tool = getTool("mo2_search_files")!;
+    for (const pattern of ["data/textures/*.dds", "DATA/textures/*.dds", "DaTa/textures/*.dds"]) {
+      const ctx = await _fixture();
+      const result = (await tool.handler({ pattern, max_results: 10 }, ctx)) as {
+        ok: boolean;
+        result: { results: string[] };
+      };
+      expect(result.ok).toBe(true);
+      expect(result.result.results).toContain("ModA/textures/foo.dds");
+    }
+  });
+
+  it("Data/ in middle of path is not stripped", async () => {
+    const ctx = await _fixture();
+    const tool = getTool("mo2_search_files")!;
+    const result = (await tool.handler(
+      { pattern: "textures/data/foo.dds", max_results: 10 },
+      ctx,
+    )) as { ok: boolean; result: { results: string[] } };
+    expect(result.ok).toBe(true);
+    expect(result.result.results).toContain("ModA/textures/data/foo.dds");
+    expect(result.result.results).not.toContain("ModA/textures/foo.dds");
+  });
+
+  it("regex with case-insensitive class [Dd]ata/ matches stored paths", async () => {
+    const ctx = await _fixture();
+    const tool = getTool("mo2_search_files")!;
+    const result = (await tool.handler(
+      { pattern: "regex:^[Dd]ata/textures/.*\\.dds$", max_results: 10 },
+      ctx,
+    )) as { ok: boolean; result: { results: string[] } };
+    expect(result.ok).toBe(true);
+    expect(result.result.results).toContain("ModA/textures/foo.dds");
   });
 });
