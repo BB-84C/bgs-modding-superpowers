@@ -172,19 +172,38 @@ main().catch((e) => {
  * needs an object container so the args object can be schema-validated.
  *
  * If the top-level shape already has type==="object", pass it through. Else
- * wrap it as { type:"object", <keyword>:..., properties:{}, additionalProperties:true }
- * so the schema still describes the union for clients that look inside.
+ * wrap it as { type:"object", <keyword>:..., properties:..., additionalProperties:true }.
+ *
+ * BUG-13 (Lane A): when the union has a shared discriminant property (a
+ * property that exists in every branch and is a const/single-value-enum
+ * literal), hoist it into top-level `properties` with a unioned `enum` so
+ * OpenAI tool-callers have an anchor for argument decoding. The original
+ * anyOf/oneOf/allOf is preserved at top level so branch-by-branch validators
+ * still see the full per-mode shape. Branch-specific fields stay permissive
+ * via `additionalProperties: true`.
+ *
+ * Backward-compatible: claude-opus-4-7 already handled the empty-properties
+ * shape correctly (17/17 in phase4final-beta); the hoist is additive and
+ * keeps that working.
  */
-function normalizeMcpInputSchema(schema: Record<string, unknown>): Record<string, unknown> {
+export function normalizeMcpInputSchema(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
   if (schema && typeof schema === "object" && schema.type === "object") return schema;
   for (const kw of ["anyOf", "oneOf", "allOf"] as const) {
     if (kw in schema) {
-      return {
+      const branches = schema[kw];
+      const { properties, required } = extractDiscriminants(branches);
+      const result: Record<string, unknown> = {
         type: "object",
-        properties: {},
+        properties,
         additionalProperties: true,
-        [kw]: schema[kw],
+        [kw]: branches,
       };
+      if (required.length > 0) {
+        result.required = required;
+      }
+      return result;
     }
   }
   // Fall through: anything we don't recognize, wrap permissively.
@@ -193,4 +212,97 @@ function normalizeMcpInputSchema(schema: Record<string, unknown>): Record<string
     properties: {},
     additionalProperties: true,
   };
+}
+
+interface HoistedDiscriminants {
+  properties: Record<string, unknown>;
+  required: string[];
+}
+
+/**
+ * Scan union branches for discriminant properties — those that appear in
+ * EVERY branch and carry either `const` or a single-value `enum`. Hoist
+ * each such property into the parent `properties` map with a unioned enum
+ * across branches. A discriminant is included in top-level `required` only
+ * if every branch requires it; otherwise the hoisted property is advisory.
+ *
+ * Returns empty properties + required when no shared discriminant is found
+ * (preserves the prior permissive wrap shape).
+ */
+function extractDiscriminants(branches: unknown): HoistedDiscriminants {
+  if (!Array.isArray(branches) || branches.length === 0) {
+    return { properties: {}, required: [] };
+  }
+
+  type Candidate = { values: unknown[]; type: string | undefined };
+  const perBranch: Array<Map<string, Candidate>> = [];
+  const requiredPerBranch: Array<Set<string>> = [];
+
+  for (const branch of branches) {
+    if (!branch || typeof branch !== "object") {
+      return { properties: {}, required: [] };
+    }
+    const b = branch as Record<string, unknown>;
+    const props =
+      b.properties && typeof b.properties === "object"
+        ? (b.properties as Record<string, unknown>)
+        : {};
+    const req = Array.isArray(b.required) ? (b.required as string[]) : [];
+    const map = new Map<string, Candidate>();
+    for (const [propName, propSchema] of Object.entries(props)) {
+      if (!propSchema || typeof propSchema !== "object") continue;
+      const ps = propSchema as Record<string, unknown>;
+      let values: unknown[] | undefined;
+      if ("const" in ps) {
+        values = [ps.const];
+      } else if (Array.isArray(ps.enum) && ps.enum.length === 1) {
+        values = [ps.enum[0]];
+      }
+      if (values === undefined) continue;
+      map.set(propName, {
+        values,
+        type: typeof ps.type === "string" ? ps.type : undefined,
+      });
+    }
+    perBranch.push(map);
+    requiredPerBranch.push(new Set(req));
+  }
+
+  // Find props that appear in EVERY branch as a discriminant candidate.
+  const firstBranch = perBranch[0];
+  const commonPropNames: string[] = [];
+  for (const propName of firstBranch.keys()) {
+    if (perBranch.every((b) => b.has(propName))) {
+      commonPropNames.push(propName);
+    }
+  }
+
+  if (commonPropNames.length === 0) {
+    return { properties: {}, required: [] };
+  }
+
+  const hoistedProperties: Record<string, unknown> = {};
+  const hoistedRequired: string[] = [];
+  for (const propName of commonPropNames) {
+    const allValues: unknown[] = [];
+    const types = new Set<string>();
+    for (const b of perBranch) {
+      const cand = b.get(propName)!;
+      for (const v of cand.values) {
+        if (!allValues.includes(v)) allValues.push(v);
+      }
+      if (cand.type !== undefined) types.add(cand.type);
+    }
+    const hoistedProp: Record<string, unknown> = {};
+    if (types.size === 1) {
+      hoistedProp.type = [...types][0];
+    }
+    hoistedProp.enum = allValues;
+    hoistedProperties[propName] = hoistedProp;
+    if (requiredPerBranch.every((r) => r.has(propName))) {
+      hoistedRequired.push(propName);
+    }
+  }
+
+  return { properties: hoistedProperties, required: hoistedRequired };
 }
