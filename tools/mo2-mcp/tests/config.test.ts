@@ -1,8 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadConfig } from "../src/config.js";
+
+async function writeConfigFixture(root: string, fixtureName: string): Promise<void> {
+  const text = await readFile(new URL(`./fixtures/${fixtureName}`, import.meta.url), "utf8");
+  await writeFile(join(root, ".mo2-mcp.json"), text);
+}
 
 describe("loadConfig", () => {
   it("reads BGS_MO2_ROOT and .mo2-mcp.json", async () => {
@@ -31,6 +36,33 @@ describe("loadConfig", () => {
     expect(cfg.permissionCeiling).toBe("metadata-editable");
     expect(cfg.allowedProfiles).toEqual(["Default"]);
     expect(cfg.deny).toEqual([]);
+  });
+
+  it("reads read-only permission ceiling from fixture content", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    await writeConfigFixture(root, "mo2-mcp-readonly.json");
+
+    const cfg = await loadConfig({ mo2Root: root });
+    expect(cfg.permissionCeiling).toBe("read-only");
+  });
+
+  it("reads metadata-editable permission ceiling from fixture content", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    await writeConfigFixture(root, "mo2-mcp-metadata-editable.json");
+
+    const cfg = await loadConfig({ mo2Root: root });
+    expect(cfg.permissionCeiling).toBe("metadata-editable");
+  });
+
+  it("reads full-control permission ceiling from config content", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    await writeFile(
+      join(root, ".mo2-mcp.json"),
+      JSON.stringify({ permission_ceiling: "full-control" }),
+    );
+
+    const cfg = await loadConfig({ mo2Root: root });
+    expect(cfg.permissionCeiling).toBe("full-control");
   });
 
   it("reads user-configured deny patterns", async () => {
