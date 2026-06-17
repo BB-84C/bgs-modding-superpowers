@@ -13,11 +13,21 @@ from . import fomod as _fomod
 from . import install as _install
 
 
+def _configure_stdio_utf8() -> None:
+    """Force JSON-RPC stdio to UTF-8 regardless of inherited Windows code page."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def _echo_handler(params: dict) -> dict:
     return params
 
 
 def main() -> int:
+    _configure_stdio_utf8()
+
     parser = argparse.ArgumentParser(description="MO2 MCP sidecar")
     parser.add_argument("--mods-root", required=True, type=Path)
     parser.add_argument("--profile-dir", required=False, type=Path, default=None)
