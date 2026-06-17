@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import zipfile
+from pathlib import Path
 
 import pytest
 
 from mo2_mcp_sidecar import archive
+
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+_ZIPSLIP_FIXTURE = _FIXTURES_DIR / "test-zipslip.zip"
 
 
 class _SevenZipInfo:
@@ -91,6 +95,80 @@ def test_safe_7z_targets_reject_absolute_file_members(tmp_path):
 
     with pytest.raises(ValueError, match="path_traversal_blocked"):
         archive._safe_7z_targets(infos, tmp_path)
+
+
+# --- C.1.3 carryforward: zip-slip fixture coverage --------------------------
+#
+# The committed fixture at tests/fixtures/test-zipslip.zip contains 4 raw entry
+# names representing real attack shapes a malicious mod archive could carry:
+#
+#     legit/file.txt              -> legitimate control (must pass alone)
+#     ../escape.txt               -> relative-up traversal
+#     C:/evil/bad.txt             -> absolute Windows path
+#     subdir/../../escape.txt     -> embedded traversal inside a nested path
+#
+# Each per-member test calls ``_validate_safe_member`` directly so the rejection
+# is attributed to the specific attack shape, not to whichever entry happened
+# to be iterated first by ``archive_extract_all``.  The final integration test
+# confirms the whole fixture is rejected end-to-end and that nothing lands in
+# the staging directory.
+
+
+def _fixture_member_names() -> list[str]:
+    with zipfile.ZipFile(_ZIPSLIP_FIXTURE) as zf:
+        return zf.namelist()
+
+
+def test_zipslip_fixture_is_present_and_has_expected_members():
+    """Guard against accidental fixture drift (raw entry names must survive)."""
+    assert _ZIPSLIP_FIXTURE.is_file(), f"fixture missing: {_ZIPSLIP_FIXTURE}"
+    names = _fixture_member_names()
+    assert "legit/file.txt" in names
+    assert "../escape.txt" in names
+    assert "C:/evil/bad.txt" in names
+    assert "subdir/../../escape.txt" in names
+
+
+def test_zipslip_relative_up_rejected(tmp_path):
+    names = _fixture_member_names()
+    assert "../escape.txt" in names
+    with pytest.raises(ValueError, match="path_traversal_blocked"):
+        archive._validate_safe_member("../escape.txt", tmp_path)
+
+
+def test_zipslip_absolute_path_rejected(tmp_path):
+    names = _fixture_member_names()
+    assert "C:/evil/bad.txt" in names
+    with pytest.raises(ValueError, match="path_traversal_blocked"):
+        archive._validate_safe_member("C:/evil/bad.txt", tmp_path)
+
+
+def test_zipslip_embedded_traversal_rejected(tmp_path):
+    names = _fixture_member_names()
+    assert "subdir/../../escape.txt" in names
+    with pytest.raises(ValueError, match="path_traversal_blocked"):
+        archive._validate_safe_member("subdir/../../escape.txt", tmp_path)
+
+
+def test_zipslip_legit_member_alone_passes(tmp_path):
+    """Positive control: the benign member from the same fixture extracts fine."""
+    names = _fixture_member_names()
+    assert "legit/file.txt" in names
+    resolved = archive._validate_safe_member("legit/file.txt", tmp_path)
+    assert resolved == (tmp_path / "legit" / "file.txt").resolve()
+
+
+def test_zipslip_fixture_full_extraction_rejected_and_dest_left_empty(tmp_path):
+    """End-to-end: archive_extract_all on the fixture must refuse and not write."""
+    dest = tmp_path / "staging"
+    dest.mkdir()
+    with pytest.raises(ValueError, match="path_traversal_blocked"):
+        archive.archive_extract_all(
+            {"archive_path": str(_ZIPSLIP_FIXTURE), "dest": str(dest)}
+        )
+    assert list(dest.rglob("*")) == []
+    # Defense-in-depth: no sibling escape artifact landed next to dest either.
+    assert not (tmp_path / "escape.txt").exists()
 
 
 @pytest.mark.skipif(not archive._PY7ZR_AVAILABLE, reason="py7zr not installed")
