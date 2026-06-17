@@ -1102,3 +1102,58 @@ ormalize-mcp-input-schema.test.ts. Hoists shared const/single-num properties fr
 - Merge `feat/mo2-mcp-v1.2-batch1` to `main` (user call — feature-branch lifecycle is theirs)
 - Refresh vendor clone (`git -C 'D:\Starfield MO2\.opencode\vendor\bgs-modding-superpowers' pull --ff-only origin main`) — pending main merge
 - Per-MO2-instance broker redeploy hash audit (memory/45 rule 9) — pending main merge
+
+## 2026-06-17 ## MO2 MCP v1.2 Batch 3 — fixture lanes + carryforward verify
+
+**Delivered (3 commits on eat/mo2-mcp-v1.2-batch1 since Batch 2)**:
+
+| Commit | Lane | Scope |
+|---|---|---|
+| `a2dd622` | F1 | zip-slip malicious .zip fixture + 6 sidecar tests in 	est_archive_safety.py (closes C.1.3 carryforward) |
+| `f1099b6` | F2 | CEILING001 read-only direction tests + 2 fixture JSONs + config loader tests (closes C.2.1 carryforward) |
+| `c4c33ec` | F3 | lease violation harness with 4 acceptance tests (content-hash drift detection — closes C.3.1-4 carryforward; impl found healthy) |
+
+**Plus**: 1 fixer-alpha re-run of 16 harness yellow cases + 1 fixer-beta investigation lane (F4 Unique NPCs reinstall + FOMOD). F4 did NOT commit because it discovered 3 contract bugs in mo2_reinstall_mod before reaching test code; routed to BUGS.md (BUG-22, BUG-23, BUG-24).
+
+**Test counts**:
+- `npm test` in `tools/mo2-mcp`: **451 passed** / 19 skipped / 0 failed (+10 from Batch 2: F2 +6, F3 +4)
+- `pytest` in `tools/mo2-mcp-sidecar`: **76 passed** (+6 from F1)
+- `npm run build`: clean
+
+**Empirical milestones validated this session**:
+- **BUG-13 (gpt-5.x can emit mode:apply)**: fixer-alpha (gpt-5.x) successfully drove 8 plan/apply round-trips on Mo2Mo2*_tool (T0.1, B.1.1-7, B.2.3). The Anthropic regression hotfix shape (drop top-level nyOf/oneOf/llOf, hoist discriminant) is OpenAI-tool-callable AND Anthropic-API-acceptable.
+- **BUG-14 (toggle_plugin plugins.txt flush)**: confirmed live — plugins.txt SHA256 changed E6CC49... → 62BBC6... and was correctly restored on cleanup.
+- **BUG-16 + ENRICHMENT L2 (mo2_log_tail surfaces real MO2 log lines on broker failure)**: fixer-alpha's cleanup re-enable hit pipe_call_timeout and the new envelope surfaced details.mo2_log_tail.lines containing invalid mod index: 20 — the memory/30 rule 10 orphan-row symptom. Prior to this batch, that would have been an opaque timeout. L1+L2 enrichment delivers structured agent context as designed.
+- **BUG-18 (L2 log path mo_interface.log fallback)**: confirmed live — the validation above only worked because Lane 2A's 	ools/mo2-mcp/src/mo2-log.ts tries mo_interface.log before mo2.log. The harness only has mo_interface.log.
+
+**6 NEW BUGs discovered this session** (full details in BUGS.md):
+- BUG-19 (high): mo2_install sidecar regression — non-FOMOD archives fail with 
+ot_a_fomod after Lane 2D BUG-12 fix
+- BUG-20 (medium): mo2_create_mod treats bove:"" as a real mod name; should be null/undefined
+- BUG-21 (low, cosmetic): cross-profile guard envelope wraps as internal_error instead of cross_profile_live_mutation_blocked (behavior is correct, code is wrong)
+- BUG-22 (high): mo2_reinstall_mod path.join mangles absolute installationFile paths (blocks every modpack curator who downloads outside MO2's downloads folder)
+- BUG-23 (high): mo2_reinstall_mod apply silently drops omod_choices, would trigger MO2 GUI FOMOD wizard hang via BUG-16 chain
+- BUG-24 (medium, design gap): mo2_reinstall_mod plan doesn't surface FOMOD tree like mo2_install does; agents have no way to discover FOMOD structure for reinstall
+
+**FOMOD multi-page coverage status**:
+- Multi-page support EXISTS at the sidecar substrate (omod.py iterates oot.pages plural, drives pyfomod wizard via installer.next() per page).
+- It's consumed correctly by mo2_install (Pattern A: omod.parse_choices → install.stage_fomod → installation.install_local_archive on staged dir, which has no info.xml).
+- **It is NOT wired to mo2_reinstall_mod** (BUG-23 above). Multi-page FOMOD reinstall coverage requires BUG-22 + BUG-23 + BUG-24 fixed first, then can be empirically tested with the Unique NPCs harness mod.
+
+**70-case e2e coverage updated tally**:
+- 47/70 verified PASS (38 prior + 9 reverified this session through fixer-alpha)
+- 4/70 still yellow pending BUG-19/20/21 fixes (B.3.3, B.3.8, B.5.1, C.4.1 envelope)
+- 6/70 WL2 cases yellow (deferred to WL2-bind session)
+- 8/70 carryforward fixtures NOW SHIPPED (C.1.3, C.2.1, C.3.1-4, partial B.3.6 via F4)
+- 1/70 needs Batch 4 fix-then-test (B.3.6 full reinstall + FOMOD multi-page)
+- 2/70 unreachable through OpenCode wire by design (C.5.2, C.5.3)
+- 2/70 deferred (B.5.1 PLAN.md correction, FOMOD multi-page apply pending Batch 4)
+
+**Cumulative on feat/mo2-mcp-v1.2-batch1**: 21+ commits since main @ 063c437, 14 Batch 1+2 bugs shipped + 8 carryforward fixtures landed + 6 new bugs documented for Batch 4. 451 TS + 76 sidecar tests pass.
+
+**Out of scope (Batch 4 territory)**:
+- BUG-19 through BUG-24 fixes
+- PLAN.md formal correction (B.5.1 contract, C.3 spec divergence, C.5.2/3 unreachable-by-design note)
+- WL2 yellow re-runs (needs single-instance MO2 swap, separate session)
+- mo2_reinstall_mod refactor to Pattern A (shares FOMOD-staging helper with mo2_install)
+- End-to-end FOMOD multi-page test using Unique NPCs (pending the refactor)
