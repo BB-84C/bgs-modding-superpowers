@@ -63,6 +63,35 @@ def test_extract_accepts_legitimate_nested_path(tmp_path):
     assert (dest / "subdir" / "file.txt").read_bytes() == b"safe"
 
 
+def test_non_fomod_install_extracts_all_members(tmp_path):
+    archive_path = tmp_path / "plain-mod.zip"
+    dest = tmp_path / "staging"
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        zf.writestr("data/file1.txt", b"payload-1")
+        zf.writestr("data/file2.txt", b"payload-2")
+
+    result = archive.archive_extract_all({"archive_path": str(archive_path), "dest": str(dest)})
+
+    assert result["files"] == ["data/file1.txt", "data/file2.txt"]
+    assert (dest / "data" / "file1.txt").read_bytes() == b"payload-1"
+    assert (dest / "data" / "file2.txt").read_bytes() == b"payload-2"
+
+
+def test_non_fomod_install_doesnt_look_for_fomod_subdir(tmp_path):
+    archive_path = tmp_path / "plain-mod-with-bad-member.zip"
+    dest = tmp_path / "staging"
+    dest.mkdir()
+    with zipfile.ZipFile(archive_path, "w") as zf:
+        zf.writestr("data/file1.txt", b"payload-1")
+        zf.writestr("../escape.txt", b"bad")
+
+    with pytest.raises(ValueError) as excinfo:
+        archive.archive_extract_all({"archive_path": str(archive_path), "dest": str(dest)})
+
+    assert "path_traversal_blocked" in str(excinfo.value)
+    assert "fomod" not in str(excinfo.value).lower()
+
+
 def test_safe_member_accepts_underscore_prefixed_fixture_paths(tmp_path):
     assert archive._validate_safe_member("_build/simple/file.txt", tmp_path) == (
         tmp_path / "_build" / "simple" / "file.txt"

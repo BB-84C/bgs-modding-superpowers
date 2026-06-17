@@ -65,6 +65,10 @@ async function _copyDirectoryContents(sourceDir: string, destDir: string): Promi
   }
 }
 
+function _hasFomodChoices(args: Record<string, unknown>): boolean {
+  return Array.isArray(args.fomod_choices) && args.fomod_choices.length > 0;
+}
+
 const handler: PlanApplyHandler = {
   toolName: "mo2_install",
   async buildPlan(args, ctx) {
@@ -98,7 +102,7 @@ const handler: PlanApplyHandler = {
       }
     }
 
-    if (isFomod && !args.fomod_choices) {
+    if (isFomod && !_hasFomodChoices(args)) {
       const err = new Error("fomod_choices_required");
       (err as Error & { fomod_tree?: unknown }).fomod_tree = fomodTree;
       throw err;
@@ -129,7 +133,8 @@ const handler: PlanApplyHandler = {
     await assertActiveProfile(ctx, profile);
 
     // 1. Stage content into stagingDir.
-    if (args.fomod_choices) {
+    const hasFomodChoices = _hasFomodChoices(args);
+    if (hasFomodChoices) {
       await bound.sidecar.call("install.stage_fomod", {
         archive_path: archivePath,
         choices: args.fomod_choices,
@@ -212,7 +217,7 @@ const handler: PlanApplyHandler = {
     return {
       mod_name: modName,
       dest_path: finalDestPath,
-      fomod_used: !!args.fomod_choices,
+      fomod_used: hasFomodChoices,
       installation_file: basename(archivePath),
     };
   },

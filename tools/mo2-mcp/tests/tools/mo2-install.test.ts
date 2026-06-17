@@ -117,6 +117,78 @@ describe("mo2_install", () => {
     expect(plan.result.diff).toContain("FOMOD=false");
   });
 
+  it("BUG-19: non-FOMOD install with explicit empty choices uses archive extraction", async () => {
+    const calls: string[] = [];
+    const { root, ctx } = await _fixture((rootDir) => ({
+      call: async (method, params) => {
+        calls.push(method);
+        if (method === "fomod.parse_choices") {
+          throw new Error("not_a_fomod: no info.xml");
+        }
+        if (method === "archive.extract_all") {
+          const dest = (params as { dest: string }).dest;
+          await mkdir(join(dest, "data"), { recursive: true });
+          await writeFile(join(dest, "data", "file1.txt"), "payload-1", "utf8");
+          await writeFile(join(dest, "data", "file2.txt"), "payload-2", "utf8");
+          return { files: ["data/file1.txt", "data/file2.txt"], file_count: 2, dest, format: "7z" };
+        }
+        if (method === "install.stage_fomod") {
+          throw new Error("not_a_fomod: install.stage_fomod should not run for non-FOMOD empty choices");
+        }
+        if (method === "world.invalidate") return { invalidated: true };
+        throw new Error(`unmocked: ${method}`);
+      },
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    }));
+
+    const tool = getTool("mo2_install")!;
+    const plan = (await tool.handler(
+      { mode: "plan", archive_path: "/tmp/simple.7z", mod_name: "EmptyChoicesSimple", fomod_choices: [] },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string; diff: string } };
+    expect(plan.ok).toBe(true);
+    expect(plan.result.diff).toContain("FOMOD=false");
+
+    const apply = (await tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )) as { ok: boolean; result: { fomod_used: boolean } };
+
+    expect(apply.ok).toBe(true);
+    expect(apply.result.fomod_used).toBe(false);
+    expect(calls).toContain("archive.extract_all");
+    expect(calls).not.toContain("install.stage_fomod");
+    expect(existsSync(join(root, "mods", "EmptyChoicesSimple", "data", "file1.txt"))).toBe(true);
+    expect(existsSync(join(root, "mods", "EmptyChoicesSimple", "data", "file2.txt"))).toBe(true);
+  });
+
+  it("BUG-19: FOMOD plan treats explicit empty choices as missing choices", async () => {
+    const { ctx } = await _fixture((root) => ({
+      call: async (method, _params) => {
+        if (method === "fomod.parse_choices") {
+          return {
+            fomod_name: "TestMod",
+            pages: [{ name: "Step1", groups: [{ name: "G", type: "SelectAny", options: [{ name: "A", description: "", image: null, type: "Optional" }] }] }],
+          };
+        }
+        throw new Error(`unmocked: ${method}`);
+      },
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    }));
+    const tool = getTool("mo2_install")!;
+
+    await expect(
+      tool.handler(
+        { mode: "plan", archive_path: "/tmp/fomod.7z", mod_name: "FomodMod", fomod_choices: [] },
+        ctx,
+      ),
+    ).rejects.toThrow(/fomod_choices_required/);
+  });
+
   it("plan rejects mod_name_exists", async () => {
     const { root, ctx } = await _fixture((_root) => ({
       call: async () => { throw new Error("not_a_fomod"); },
