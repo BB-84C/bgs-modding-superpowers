@@ -13,6 +13,7 @@ import { connect } from "node:net";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { listMo2ProcessesAtRoot } from "./detection.js";
+import { enrichBrokerError } from "./broker-error.js";
 
 export interface BrokerResponse {
   ok: boolean;
@@ -23,6 +24,13 @@ export interface BrokerResponse {
 export class PipeClient {
   private pipeName?: string;
   private connectedOnce = false;
+  /**
+   * MO2 root remembered from discoverAndConnect(), used by call() to drive
+   * L1 (process state) and L2 (log tail) enrichment when a broker call
+   * fails. Optional because tests and one-off scripts can construct a
+   * PipeClient without ever calling discoverAndConnect.
+   */
+  private mo2Root?: string;
 
   /**
    * Discover the broker pipe via endpoint.json, then smoke-test with
@@ -33,6 +41,7 @@ export class PipeClient {
     timeoutMs = 5000,
     _options: { expectedPid?: number } = {},
   ): Promise<void> {
+    this.mo2Root = mo2Root;
     const endpointPath = join(
       mo2Root,
       "plugins",
@@ -88,6 +97,12 @@ export class PipeClient {
    * Send one JSON-RPC-shaped request, receive one response, socket closes.
    *
    * Per P-B1: open new connection per call. No pending map.
+   *
+   * Wraps `_rawCall` with L1+L2 enrichment (ENRICHMENT-DESIGN.md, Lane B): on
+   * failure, probe MO2 process state, tail mo2.log, and throw a typed
+   * BrokerEnrichedError so dispatch.ts can surface a structured envelope.
+   * The bare ``pipe not discovered`` precondition rejects synchronously and
+   * is NOT enriched (no MO2 root yet to probe).
    */
   async call(
     method: string,
@@ -97,7 +112,26 @@ export class PipeClient {
     if (!this.pipeName) {
       throw new Error("pipe not discovered (call discoverAndConnect first)");
     }
+    const startedAt = Date.now();
+    try {
+      return await this._rawCall(method, payload, timeoutMs);
+    } catch (err) {
+      // No mo2Root means we can't drive the enrichment probes; rethrow raw.
+      if (!this.mo2Root) throw err;
+      throw await enrichBrokerError(err, method, this.mo2Root, startedAt);
+    }
+  }
 
+  /**
+   * Raw broker call. Throws plain Error on timeout / empty / parse / socket
+   * failure. Callers should prefer `call()` which adds L1+L2 enrichment;
+   * `_rawCall` is exposed only for the in-class wrapping seam.
+   */
+  private async _rawCall(
+    method: string,
+    payload: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<BrokerResponse> {
     const id = `req-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const request = {
       protocol_version: "1",
@@ -106,7 +140,7 @@ export class PipeClient {
       method,
       payload,
     };
-    const path = toPipePath(this.pipeName);
+    const path = toPipePath(this.pipeName!);
 
     return new Promise<BrokerResponse>((resolve, reject) => {
       const socket = connect(path);
