@@ -7,9 +7,10 @@ import { z } from "zod";
 import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { requireBoundContext } from "../binding.js";
+// BUG-10 fix (2026-06-17): virtual_path gains .min(1).
 const inputSchema = z.object({
     profile: z.string().default("Default"),
-    virtual_path: z.string(),
+    virtual_path: z.string().min(1),
 });
 registerTool({
     name: "mo2_assets_resolve",

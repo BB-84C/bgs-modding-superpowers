@@ -10,8 +10,9 @@ import { registerTool } from "../tool-registry.js";
 import { readMoIni } from "../mo-ini.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
+// BUG-10 fix (2026-06-17): mod name gains .min(1).
 const inputSchema = z.object({
-  name: z.string(),
+  name: z.string().min(1),
 });
 
 interface MetaSection {

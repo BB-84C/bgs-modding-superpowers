@@ -13,14 +13,15 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { detectMo2Running } from "../detection.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
+// BUG-10 fix (2026-06-17): source + target + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
     mode: z.literal("plan"),
-    source: z.string(),
-    target: z.string(),
+    source: z.string().min(1),
+    target: z.string().min(1),
     include_saves: z.boolean().default(false),
   }),
-  z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+  z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 
 async function assertMo2Closed(mo2Root: string): Promise<void> {

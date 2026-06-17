@@ -13,9 +13,12 @@ import { readMoIni } from "../mo-ini.js";
 import { readProfile } from "../profile-reader.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
+// BUG-10 fix (2026-06-17): pattern gains .min(1). Empty glob/regex would match
+// nothing useful and falls through silently today; explicit invalid_arguments
+// is the correct contract.
 const inputSchema = z.object({
   profile: z.string().default("Default"),
-  pattern: z.string(),
+  pattern: z.string().min(1),
   max_results: z.number().int().min(1).max(10000).default(1000),
 });
 

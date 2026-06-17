@@ -14,14 +14,15 @@ import { resolveProfileDir, resolveModsDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext } from "../binding.js";
+// BUG-10 fix (2026-06-17): mod name + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("plan"),
-        name: z.string(),
+        name: z.string().min(1),
         above: z.string().optional(),
         profile: z.string().default("Default"),
     }),
-    z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+    z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 async function _targetPriority(mo2Root, profile, above) {
     if (typeof above !== "string")
@@ -39,6 +40,11 @@ const handler = {
         if (!bound.pipeClient)
             throw new Error("live_mo2_required_for_create_mod");
         const profile = args.profile ?? "Default";
+        // BUG-9 fix (2026-06-17): refuse plan generation when the requested
+        // profile is not the live MO2's active profile. The applyMutation path
+        // already enforces this; pushing it up to buildPlan prevents misleading
+        // plan envelopes that look mintable but would never apply.
+        await assertActiveProfile(ctx, profile);
         const targetPri = await _targetPriority(bound.config.mo2Root, profile, args.above);
         const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
         const aboveText = typeof args.above === "string"

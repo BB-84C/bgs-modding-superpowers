@@ -12,13 +12,14 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import { requireBoundContext } from "../binding.js";
+// BUG-10 fix (2026-06-17): backup label + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("plan"),
         profile: z.string().default("Default"),
-        label: z.string(),
+        label: z.string().min(1),
     }),
-    z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+    z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 function _backupDir(ctx, profile, label) {
     return join(requireBoundContext(ctx).config.mo2Root, ".mo2-mcp", "profile-backups", `${profile}_${label}`);

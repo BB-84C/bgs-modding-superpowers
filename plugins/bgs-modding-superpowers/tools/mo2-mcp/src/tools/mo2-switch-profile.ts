@@ -18,9 +18,10 @@ import { registerTool } from "../tool-registry.js";
 import type { ToolContext } from "../types.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
+// BUG-10 fix (2026-06-17): new_profile + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("plan"), new_profile: z.string() }),
-  z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+  z.object({ mode: z.literal("plan"), new_profile: z.string().min(1) }),
+  z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 
 interface EndpointInfo {

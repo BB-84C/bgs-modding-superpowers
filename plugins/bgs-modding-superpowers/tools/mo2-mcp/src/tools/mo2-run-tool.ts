@@ -14,14 +14,15 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
+// BUG-10 fix (2026-06-17): executable title + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
     mode: z.literal("plan"),
-    title: z.string(),
+    title: z.string().min(1),
     wait: z.boolean().default(false),
     profile: z.string().default("Default"),
   }),
-  z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+  z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 
 interface StartApplicationResult {

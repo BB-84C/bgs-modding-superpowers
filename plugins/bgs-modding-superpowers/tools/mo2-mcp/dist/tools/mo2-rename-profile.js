@@ -15,9 +15,10 @@ import { detectMo2Running } from "../detection.js";
 import { readMoIni } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
 import { requireBoundContext } from "../binding.js";
+// BUG-10 fix (2026-06-17): rename profile name args + plan_id/lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
-    z.object({ mode: z.literal("plan"), old_name: z.string(), new_name: z.string() }),
-    z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+    z.object({ mode: z.literal("plan"), old_name: z.string().min(1), new_name: z.string().min(1) }),
+    z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 async function assertMo2Closed(mo2Root) {
     const det = await detectMo2Running({ mo2Root });

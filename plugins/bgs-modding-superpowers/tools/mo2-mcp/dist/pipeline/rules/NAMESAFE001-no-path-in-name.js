@@ -3,16 +3,19 @@
  *
  * This is intentionally separate from PATHSAFE001: it only applies when the
  * argument key is semantically a mod/profile/title/name field, where slashes,
- * drive letters, Windows-forbidden filename characters, and surrounding
- * whitespace are never valid names.
+ * drive letters, traversal markers, Windows-forbidden filename characters,
+ * and surrounding whitespace are never valid names.
  */
 import { registerRule } from "../registry.js";
 import { walkStringArgs } from "../arg-walk.js";
 const NAME_KEY_PATTERN = /^(name|mod_name|profile|new_profile|new_name|old_name|from_profile|source|target|title|above|target_separator|label)$/i;
 const FORBIDDEN_NAME_CHARS = /[<>:"|?*\\/]/;
 const CONTROL_CHARS = /[\x00-\x1f]/;
+function hasParentSegment(value) {
+    return value.split(/[\\/]+/).includes("..");
+}
 function hasUnsafeNameShape(value) {
-    return value.trim() !== value || FORBIDDEN_NAME_CHARS.test(value) || CONTROL_CHARS.test(value);
+    return value.trim() !== value || hasParentSegment(value) || FORBIDDEN_NAME_CHARS.test(value) || CONTROL_CHARS.test(value);
 }
 export const nameSafetyDenyRule = {
     id: "NAMESAFE001",

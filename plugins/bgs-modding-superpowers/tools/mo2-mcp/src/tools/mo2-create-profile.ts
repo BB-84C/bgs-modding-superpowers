@@ -15,14 +15,16 @@ import { requireBoundContext, bindingSnapshot } from "../binding.js";
 
 const ProfileSettingSchema = z.enum(["MODS", "SAVEGAMES", "CONFIGURATION", "PREFER_DEFAULTS"]);
 
+// BUG-10 fix (2026-06-17): profile name + plan_id + lease_token gain .min(1).
+// from_profile stays optional (clone source is allowed to be omitted).
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
     mode: z.literal("plan"),
-    name: z.string(),
+    name: z.string().min(1),
     from_profile: z.string().optional(),
     settings: z.array(ProfileSettingSchema).optional(),
   }),
-  z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+  z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 
 async function _copyProfileTextAndIni(profilesRoot: string, fromProfile: string, newDir: string): Promise<void> {

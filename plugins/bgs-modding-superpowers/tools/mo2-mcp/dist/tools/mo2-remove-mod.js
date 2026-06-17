@@ -89,35 +89,44 @@ const handler = {
         const modsDir = await resolveModsDir(ctx);
         const modPath = join(modsDir, name);
         let backupName;
-        let profilesUpdated = [];
         if (backupFirst) {
             backupName = await _nextBackupName(modsDir, name);
             await cp(modPath, join(modsDir, backupName), { recursive: true });
         }
         const bound = requireBoundContext(ctx);
+        // BUG-15 fix (2026-06-17) - preface. The broker call below is
+        // informational for the unified filesystem cleanup that follows: it
+        // tells MO2's in-memory model to drop the mod, but it does NOT reliably
+        // flush profiles/<*>/modlist.txt. The previous code branched on
+        // backup_first via the broker error path: backup_first=true happened
+        // to take the "not_found + folder exists" fallback that already called
+        // _scrubAllProfileModlists, while backup_first=false hit the broker-ok
+        // branch and skipped the scrub, leaving orphan rows on disk.
         if (bound.pipeClient) {
-            const affectedProfiles = await _profilesReferencingMod(bound.config.mo2Root, name);
             const resp = await bound.pipeClient.call("mods.remove", { name });
-            if (resp.ok) {
-                await invalidateWorld(ctx, affectedProfiles.length ? affectedProfiles : ["Default"]);
-            }
-            else if (/mod ['"]?.+['"]? not found/i.test(resp.error?.message ?? "") && existsSync(modPath)) {
-                // Live MO2's in-memory model can lag behind fs-created mods (e.g. createMod
-                // + immediate remove round-trips in acceptance). Fall back to the same
-                // filesystem removal path as offline mode when the folder exists on disk.
-                await rm(modPath, { recursive: true, force: true });
-                profilesUpdated = await _scrubAllProfileModlists(bound.config.mo2Root, name);
-                await invalidateWorld(ctx, profilesUpdated.length ? profilesUpdated : affectedProfiles.length ? affectedProfiles : ["Default"]);
-            }
-            else {
-                throw new Error(resp.error?.message ?? "mods.remove failed");
+            if (!resp.ok) {
+                const isNotFound = /mod ['"]?.+['"]? not found/i.test(resp.error?.message ?? "");
+                if (!isNotFound || !existsSync(modPath)) {
+                    throw new Error(resp.error?.message ?? "mods.remove failed");
+                }
+                // not_found + folder exists: broker's model lagged behind disk
+                // (e.g. fs-created mod, or cp-driven refresh races). Fall through
+                // into the unified filesystem cleanup so the orphan row also gets
+                // removed.
             }
         }
-        else {
+        // BUG-15 fix (2026-06-17) - unified removal. Physical rm + profile
+        // modlist scrub run on all three paths (broker-ok, broker-not_found,
+        // offline). This single seam guarantees profiles/<*>/modlist.txt no
+        // longer references the removed mod regardless of which path we
+        // entered. `rm` with force=true is a no-op when the folder is already
+        // gone (broker may have deleted it). The scrub touches every profile
+        // that referenced the mod and returns the changed set.
+        if (existsSync(modPath)) {
             await rm(modPath, { recursive: true, force: true });
-            profilesUpdated = await _scrubAllProfileModlists(bound.config.mo2Root, name);
-            await invalidateWorld(ctx, profilesUpdated.length ? profilesUpdated : ["Default"]);
         }
+        const profilesUpdated = await _scrubAllProfileModlists(bound.config.mo2Root, name);
+        await invalidateWorld(ctx, profilesUpdated.length ? profilesUpdated : ["Default"]);
         return { removed: name, backup_name: backupName, profiles_updated: profilesUpdated };
     },
 };

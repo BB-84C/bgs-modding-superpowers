@@ -2,7 +2,7 @@
  * MO2 log tail reader.
  *
  * Used by pipe-client error enrichment (ENRICHMENT-DESIGN L2) to attach the
- * tail of `<mo2Root>/logs/mo2.log` to broker failure envelopes, so the agent
+ * tail of MO2's interface log to broker failure envelopes, so the agent
  * can see WHY MO2 was unresponsive (modal dialog source, broker exception,
  * `OSError: [Errno 232] The pipe is being closed`, BUG-11's `Cannot launch
  * program` line, etc.) instead of just an opaque timeout message.
@@ -19,15 +19,26 @@
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 const TIMESTAMP_RE = /^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}\.\d{3})/;
+const LOG_FILE_CANDIDATES = ["mo_interface.log", "mo2.log"];
 export async function tailMo2Log(mo2Root, options = {}) {
-    const logPath = join(mo2Root, "logs", "mo2.log");
     const maxBytes = options.maxBytes ?? 64 * 1024;
     const maxLines = options.maxLines ?? 100;
+    let fallbackLogPath = join(mo2Root, "logs", LOG_FILE_CANDIDATES[LOG_FILE_CANDIDATES.length - 1]);
+    for (const fileName of LOG_FILE_CANDIDATES) {
+        const logPath = join(mo2Root, "logs", fileName);
+        fallbackLogPath = logPath;
+        const result = await tailLogFile(logPath, { ...options, maxBytes, maxLines });
+        if (result)
+            return result;
+    }
+    return { lines: [], truncated: false, logPath: fallbackLogPath };
+}
+async function tailLogFile(logPath, options) {
     let handle;
     try {
         handle = await open(logPath, "r");
         const stats = await handle.stat();
-        const start = Math.max(0, stats.size - maxBytes);
+        const start = Math.max(0, stats.size - options.maxBytes);
         const length = stats.size - start;
         const buf = Buffer.alloc(length);
         if (length > 0) {
@@ -51,15 +62,15 @@ export async function tailMo2Log(mo2Root, options = {}) {
                 return ms >= sinceMs;
             });
         }
-        const truncated = lines.length > maxLines;
+        const truncated = lines.length > options.maxLines;
         return {
-            lines: truncated ? lines.slice(-maxLines) : lines,
+            lines: truncated ? lines.slice(-options.maxLines) : lines,
             truncated,
             logPath,
         };
     }
     catch {
-        return { lines: [], truncated: false, logPath };
+        return null;
     }
     finally {
         if (handle) {

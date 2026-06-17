@@ -13,17 +13,20 @@ import { routeToPlanApply } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext } from "../binding.js";
+// BUG-10 fix (2026-06-17): FOMOD page/group/option names + mod name + plan_id
+// + lease_token all gain .min(1) so empty strings fail Zod safeParse instead
+// of falling through to handler-level errors.
 const FomodChoiceSchema = z.object({
-    page_name: z.string(),
-    selected_options: z.array(z.object({ group_name: z.string(), option_name: z.string() })),
+    page_name: z.string().min(1),
+    selected_options: z.array(z.object({ group_name: z.string().min(1), option_name: z.string().min(1) })),
 });
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("plan"),
-        name: z.string(),
+        name: z.string().min(1),
         fomod_choices: z.array(FomodChoiceSchema).optional(),
     }),
-    z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+    z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 function _extractInstallationFile(resp) {
     if (!resp.ok)

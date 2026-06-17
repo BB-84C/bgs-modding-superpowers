@@ -33,6 +33,8 @@ registerTool({
         const profileName = bound.config.allowedProfiles[0];
         const profileDir = join(bound.config.mo2Root, "profiles", profileName);
         const modsDir = ini.settings.modDirectory ?? join(bound.config.mo2Root, "mods");
+        const gamePath = ini.general.gamePath ?? null;
+        const xeditCandidate = gamePath ? join(gamePath, "Tools", "OpenCodeXEdit", "xEdit.exe") : null;
         const allMods = await readdir(modsDir, { withFileTypes: true }).catch(() => []);
         const archiveSearchRoots = allMods
             .filter((d) => d.isDirectory())
@@ -47,6 +49,10 @@ registerTool({
         return {
             ok: true,
             result: {
+                mod_organizer_exe: join(bound.config.mo2Root, "ModOrganizer.exe"),
+                game_path: gamePath,
+                stock_game_path: gamePath?.toLowerCase().includes("stock game") ? gamePath : null,
+                xedit_target: xeditCandidate && existsSync(xeditCandidate) ? xeditCandidate : null,
                 profile_list_paths: {
                     modlist_txt: join(profileDir, "modlist.txt"),
                     plugins_txt: join(profileDir, "plugins.txt"),

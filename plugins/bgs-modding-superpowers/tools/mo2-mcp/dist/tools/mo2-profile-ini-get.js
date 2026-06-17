@@ -5,7 +5,7 @@
  * Falls back to %DOCUMENTS%/My Games/<Game>/ if profile-local INIs not enabled.
  */
 import { z } from "zod";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { readMoIni } from "../mo-ini.js";
@@ -16,6 +16,37 @@ const inputSchema = z.object({
     section: z.string().optional(),
     key: z.string().optional(),
 });
+const INI_SUFFIXES = ["", "Prefs", "Custom"];
+const GAME_INI_BASES = [
+    "Fallout4",
+    "Fallout4VR",
+    "SkyrimSE",
+    "SkyrimAE",
+    "SkyrimVR",
+    "Skyrim",
+    "Starfield",
+    "FalloutNV",
+    "Fallout3",
+    "Oblivion",
+];
+const GAME_ALIASES = {
+    fallout4: "Fallout4",
+    fallout4vr: "Fallout4VR",
+    skyrimse: "SkyrimSE",
+    skyrimspecialedition: "SkyrimSE",
+    skyrimae: "SkyrimAE",
+    skyrimanniversaryedition: "SkyrimAE",
+    skyrimvr: "SkyrimVR",
+    skyrimle: "Skyrim",
+    skyrimlegendaryedition: "Skyrim",
+    skyrim: "Skyrim",
+    starfield: "Starfield",
+    falloutnv: "FalloutNV",
+    falloutnewvegas: "FalloutNV",
+    newvegas: "FalloutNV",
+    fallout3: "Fallout3",
+    oblivion: "Oblivion",
+};
 function parseIni(text) {
     const sections = {};
     let current = "";
@@ -34,6 +65,39 @@ function parseIni(text) {
     }
     return sections;
 }
+function normalizeGameKey(value) {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+function gameIniBaseFromIdentifier(value) {
+    const trimmed = value?.trim();
+    if (!trimmed)
+        return null;
+    const normalized = normalizeGameKey(trimmed);
+    return GAME_ALIASES[normalized] ?? trimmed;
+}
+async function gameIniBaseFromProfileFiles(profileDir) {
+    const entries = await readdir(profileDir).catch(() => []);
+    const names = new Set(entries.map((entry) => entry.toLowerCase()));
+    for (const base of GAME_INI_BASES) {
+        for (const suffix of INI_SUFFIXES) {
+            if (names.has(`${base}${suffix}.ini`.toLowerCase()))
+                return base;
+        }
+    }
+    return null;
+}
+function gameIniBaseFromGamePath(gamePath) {
+    const trimmed = gamePath?.trim().replace(/[\\/]+$/g, "");
+    if (!trimmed)
+        return null;
+    const leaf = trimmed.split(/[\\/]/).filter(Boolean).pop();
+    return gameIniBaseFromIdentifier(leaf);
+}
+async function resolveGameIniBase(args) {
+    return (gameIniBaseFromIdentifier(args.ini.general.game) ??
+        (await gameIniBaseFromProfileFiles(join(args.mo2Root, "profiles", args.profile))) ??
+        gameIniBaseFromGamePath(args.ini.general.gamePath));
+}
 registerTool({
     name: "mo2_profile_ini_get",
     tier: "T1",
@@ -44,11 +108,14 @@ registerTool({
         const profile = args.profile ?? "Default";
         const iniName = args.ini_name;
         const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
-        const game = ini.general.game;
+        const game = await resolveGameIniBase({ mo2Root: bound.config.mo2Root, profile, ini });
         if (!game) {
             return {
                 ok: false,
-                error: { code: "no_game_set", message: "ModOrganizer.ini [General] game= missing" },
+                error: {
+                    code: "no_game_set",
+                    message: "ModOrganizer.ini [General] game= missing and no fallback game could be derived",
+                },
             };
         }
         const fileMap = {

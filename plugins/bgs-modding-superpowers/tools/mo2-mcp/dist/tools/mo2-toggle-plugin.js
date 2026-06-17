@@ -31,6 +31,11 @@ const handler = {
     toolName: "mo2_toggle_plugin",
     async buildPlan(args, ctx) {
         const profile = args.profile ?? "Default";
+        // BUG-9 fix (2026-06-17): same cross-profile guard as mo2_toggle_mod
+        // buildPlan. Without this, a plan can be minted against
+        // profiles/<other>/plugins.txt while the live broker owns plugins.txt
+        // for the active profile.
+        await assertActiveProfile(ctx, profile);
         const pluginsPath = join(resolveProfileDir(ctx, profile), "plugins.txt");
         const targets = [
             { path: pluginsPath, kind: "text-file" },
@@ -64,6 +69,8 @@ const handler = {
         const bound = requireBoundContext(ctx);
         const args = plan.args;
         const profile = args.profile ?? "Default";
+        const pluginsPath = join(resolveProfileDir(ctx, profile), "plugins.txt");
+        let brokerResult;
         if (bound.pipeClient) {
             await assertActiveProfile(ctx, profile);
             // PluginState::Active=2, Inactive=1 in mobase
@@ -74,7 +81,30 @@ const handler = {
             });
             if (!resp.ok)
                 throw new Error(resp.error?.message ?? "broker error");
-            const result = { plugin_state_set: resp.result };
+            brokerResult = resp.result;
+        }
+        // BUG-14 fix (2026-06-17): broker plugins.set_state mutates the
+        // IPluginList in-memory state but does NOT invoke
+        // Profile::writePluginsList; MO2 only flushes plugins.txt on shutdown /
+        // profile change / explicit save. The MCP contract is that an "ok"
+        // apply produces visible disk state, so we mirror the offline atomic
+        // rewrite even when the broker call succeeded. Because the broker
+        // already updated MO2's in-memory state to the value we are writing,
+        // the file and the broker stay in agreement, and MO2's eventual
+        // deferred flush is idempotent.
+        const text = await readFile(pluginsPath, "utf8");
+        const lines = text.split(/\r?\n/).map((l) => {
+            const bare = l.replace(/^\*/, "");
+            if (bare === args.name)
+                return (args.enabled ? "*" : "") + args.name;
+            return l;
+        });
+        await atomicWriteText(pluginsPath, lines.join("\n"));
+        if (bound.pipeClient) {
+            const result = {
+                plugin_state_set: brokerResult,
+                plugins_txt_flushed: true,
+            };
             if (args.also_hide_file) {
                 const espPath = plan.affectedFiles[1];
                 const hiddenPath = `${espPath}.mohidden`;
@@ -94,16 +124,8 @@ const handler = {
             }
             return result;
         }
-        // Offline: plugins.txt rewrite, no file hide (needs broker)
-        const pluginsPath = join(resolveProfileDir(ctx, profile), "plugins.txt");
-        const text = await readFile(pluginsPath, "utf8");
-        const lines = text.split(/\r?\n/).map((l) => {
-            const bare = l.replace(/^\*/, "");
-            if (bare === args.name)
-                return (args.enabled ? "*" : "") + args.name;
-            return l;
-        });
-        await atomicWriteText(pluginsPath, lines.join("\n"));
+        // Offline: plugins.txt rewrite already done above; no broker -> no
+        // file-hide path.
         return {
             name: args.name,
             enabled: args.enabled,

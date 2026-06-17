@@ -14,16 +14,19 @@ import { upsertIniValue } from "../ini-helpers.js";
 import { readMoIni } from "../mo-ini.js";
 import { detectMo2Running } from "../detection.js";
 import { requireBoundContext } from "../binding.js";
+// BUG-10 fix (2026-06-17): section + key + plan_id + lease_token gain .min(1).
+// `value` stays a free-form string — clearing an INI key to empty is a
+// legitimate use of upsertIniValue.
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("plan"),
         profile: z.string().default("Default"),
         ini_name: z.enum(["game", "prefs", "custom"]),
-        section: z.string(),
-        key: z.string(),
+        section: z.string().min(1),
+        key: z.string().min(1),
         value: z.string(),
     }),
-    z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+    z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 async function _resolveIniPath(args, ctx) {
     const mo2Root = requireBoundContext(ctx).config.mo2Root;

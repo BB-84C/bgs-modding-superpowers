@@ -12,9 +12,16 @@ import { readMoIni } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
 import { detectMo2Running } from "../detection.js";
 import { requireBoundContext } from "../binding.js";
+// BUG-10 fix (2026-06-17): identifier fields on add/edit/remove gain .min(1).
+// Add: title + binary must be non-empty (without them the entry can't even be
+// addressed by mo2_run_tool). Edit/remove: title is the lookup key; an empty
+// string would fall through to handler-level "title_not_found:" — return
+// invalid_arguments instead. `arguments`, `workingDirectory`, `steamAppID`
+// legitimately default to "" so they stay permissive. Apply branch tightens
+// plan_id + lease_token.
 const ExecutableEntrySchema = z.object({
-    title: z.string(),
-    binary: z.string(),
+    title: z.string().min(1),
+    binary: z.string().min(1),
     arguments: z.string().default(""),
     workingDirectory: z.string().default(""),
     steamAppID: z.string().default(""),
@@ -23,9 +30,11 @@ const ExecutableEntrySchema = z.object({
     toolbar: z.boolean().optional(),
     minimizeToSystemTray: z.boolean().optional(),
 });
+// Updates can set most fields to "" (clearing an override), but the title
+// field, if provided, is still a renamed identifier and must be non-empty.
 const ExecutableUpdatesSchema = z.object({
-    title: z.string().optional(),
-    binary: z.string().optional(),
+    title: z.string().min(1).optional(),
+    binary: z.string().min(1).optional(),
     arguments: z.string().optional(),
     workingDirectory: z.string().optional(),
     steamAppID: z.string().optional(),
@@ -43,18 +52,18 @@ const planSchema = z.discriminatedUnion("action", [
     z.object({
         mode: z.literal("plan"),
         action: z.literal("edit"),
-        title: z.string(),
+        title: z.string().min(1),
         updates: ExecutableUpdatesSchema,
     }),
     z.object({
         mode: z.literal("plan"),
         action: z.literal("remove"),
-        title: z.string(),
+        title: z.string().min(1),
     }),
 ]);
 const inputSchema = z.union([
     planSchema,
-    z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+    z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 const ENTRY_KEY_ORDER = [
     "arguments",

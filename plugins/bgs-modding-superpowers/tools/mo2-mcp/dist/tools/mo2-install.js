@@ -30,15 +30,19 @@ import { readMoIni } from "../mo-ini.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext } from "../binding.js";
+// BUG-10 fix (2026-06-17): FOMOD page/group/option names + archive_path +
+// mod_name + plan_id + lease_token all gain .min(1). Empty strings in any of
+// these fall through to internal "<thing> not found" handler errors today;
+// rejecting them at the Zod layer surfaces invalid_arguments instead.
 const FomodChoiceSchema = z.object({
-    page_name: z.string(),
-    selected_options: z.array(z.object({ group_name: z.string(), option_name: z.string() })),
+    page_name: z.string().min(1),
+    selected_options: z.array(z.object({ group_name: z.string().min(1), option_name: z.string().min(1) })),
 });
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("plan"),
-        archive_path: z.string(),
-        mod_name: z.string(),
+        archive_path: z.string().min(1),
+        mod_name: z.string().min(1),
         profile: z.string().default("Default"),
         target_priority: z.union([z.literal("top"), z.literal("bottom"), z.number().int()]).default("bottom"),
         fomod_choices: z.array(FomodChoiceSchema).optional(),
@@ -46,7 +50,7 @@ const inputSchema = z.discriminatedUnion("mode", [
         version: z.string().optional(),
         category: z.string().optional(),
     }),
-    z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+    z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 async function _copyDirectoryContents(sourceDir, destDir) {
     await mkdir(destDir, { recursive: true });
@@ -65,6 +69,11 @@ const handler = {
         const archivePath = args.archive_path;
         const modName = args.mod_name;
         const profile = args.profile ?? "Default";
+        // BUG-9 fix (2026-06-17): refuse plan generation when MO2 is live on a
+        // different profile (the modlist.txt that will be registered into
+        // belongs to <profile>). assertActiveProfile is a no-op when MO2 is
+        // offline (pipeClient absent).
+        await assertActiveProfile(ctx, profile);
         const modsDir = await resolveModsDir(ctx);
         const destPath = join(modsDir, modName);
         if (existsSync(destPath)) {

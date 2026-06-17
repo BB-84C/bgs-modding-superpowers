@@ -16,19 +16,30 @@ import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { requireBoundContext } from "../binding.js";
+// BUG-10 fix (2026-06-17): name+plan_id+lease_token gain .min(1) so empty
+// strings fail Zod safeParse and reach the caller as the stable
+// invalid_arguments envelope instead of falling through to the handler's
+// `mod_not_found:` internal_error.
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("plan"),
-        name: z.string(),
+        name: z.string().min(1),
         enabled: z.boolean(),
         profile: z.string().default("Default"),
     }),
-    z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+    z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 const handler = {
     toolName: "mo2_toggle_mod",
     async buildPlan(args, ctx) {
         const profile = args.profile ?? "Default";
+        // BUG-9 fix (2026-06-17): refuse plan generation when MO2 is live on a
+        // different profile. The active-profile guard was only firing at apply
+        // time, which let the planner mint a plan_id + lease_token + diff that
+        // referenced a non-active profile's modlist.txt; agents then carried
+        // that misleading plan forward. assertActiveProfile is a no-op when
+        // MO2 is offline (pipeClient absent).
+        await assertActiveProfile(ctx, profile);
         const profileDir = resolveProfileDir(ctx, profile);
         const modlistPath = join(profileDir, "modlist.txt");
         const p = await readProfile(profileDir);

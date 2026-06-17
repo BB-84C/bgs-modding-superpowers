@@ -12,9 +12,11 @@ import { atomicWriteText } from "../atomic.js";
 import { resolveModMetaPath } from "../path-helpers.js";
 import { upsertIniValue } from "../ini-helpers.js";
 import { requireBoundContext } from "../binding.js";
+// BUG-10 fix (2026-06-17): name + plan_id + lease_token gain .min(1). `notes`
+// stays a free-form string — clearing notes to empty is a legitimate use.
 const inputSchema = z.discriminatedUnion("mode", [
-    z.object({ mode: z.literal("plan"), name: z.string(), notes: z.string() }),
-    z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
+    z.object({ mode: z.literal("plan"), name: z.string().min(1), notes: z.string() }),
+    z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
 const handler = {
     toolName: "mo2_set_mod_notes",
