@@ -3,6 +3,7 @@ import { getTool } from "./tool-registry.js";
 import { hashArgs } from "./audit.js";
 import { runRules, hasBlocking } from "./pipeline/rules.js";
 import { BindingRequiredError, bindingSnapshot } from "./binding.js";
+import { BrokerEnrichedError } from "./broker-error.js";
 function jsonText(value) {
     return { type: "text", text: JSON.stringify(value) };
 }
@@ -149,6 +150,30 @@ export async function dispatchToolCall({ toolName, rawArgs, ctx, rules, }) {
                 details: { snapshot: e.snapshot },
             });
             return { content: [jsonText(env)] };
+        }
+        if (e instanceof BrokerEnrichedError) {
+            // ENRICHMENT-DESIGN.md Lane B: broker failures arrive carrying the L1
+            // process responsiveness probe + L2 mo2.log tail in `details`. Surface
+            // those to the agent and audit them with the structured code so
+            // BUG-16-class hangs become diagnosable instead of opaque timeouts.
+            await ctx.audit.log({
+                ts: new Date().toISOString(),
+                sessionId: ctx.sessionId,
+                tool: tool.name,
+                argsHash: hashArgs(argsForParse),
+                decision: "refused",
+                durationMs: Date.now() - t0,
+                error: { code: e.code, message: e.message },
+                details: e.details,
+            });
+            return {
+                content: [
+                    jsonText({
+                        ok: false,
+                        error: { code: e.code, message: e.message, details: e.details },
+                    }),
+                ],
+            };
         }
         const msg = e instanceof Error ? e.message : String(e);
         await ctx.audit.log({
