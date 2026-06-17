@@ -119,8 +119,44 @@ describe("mo2_toggle_mod", () => {
     expect(apply.error?.code).toBe("lease_violation");
   });
 
-  it("live apply blocks when requested profile is not the active MO2 profile", async () => {
+  // BUG-9 fix (2026-06-17): the active-profile guard now fires at BOTH plan
+  // and apply time, so a cross-profile request never produces a usable
+  // plan_id + lease_token + diff. Phase 4 evidence (C.4.1) showed a plan
+  // returning ok:true with a real modlist diff against a non-active profile
+  // while MO2 was alive on Default; this test guards the regression.
+  it("BUG-9: live plan blocks when requested profile is not the active MO2 profile", async () => {
     const { ctx } = await _fixture();
+    ctx.pipeClient = {
+      call: async (method: string) => {
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+        throw new Error(`unexpected broker call during plan: ${method}`);
+      },
+      close: () => {},
+      discoverAndConnect: async () => {},
+      isConnected: () => true,
+    } as unknown as ToolContext["pipeClient"];
+    const tool = getTool("mo2_toggle_mod")!;
+
+    await expect(tool.handler(
+      { mode: "plan", name: "TopMod", enabled: false, profile: "BB84自用" },
+      ctx,
+    )).rejects.toThrow(/cross_profile_live_mutation_blocked/);
+  });
+
+  // Defense-in-depth: if a plan was minted while MO2 was offline (no
+  // pipeClient) and the broker comes online on a different profile before
+  // apply, the apply-time guard catches the cross-profile mutation.
+  it("live apply blocks when broker comes online on a different profile after plan", async () => {
+    const { ctx } = await _fixture();
+    // Plan without a pipeClient — guard is a no-op, plan succeeds.
+    const tool = getTool("mo2_toggle_mod")!;
+    const plan = (await tool.handler(
+      { mode: "plan", name: "TopMod", enabled: false, profile: "BB84自用" },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+    expect(plan.ok).toBe(true);
+
+    // Now MO2 comes online on Default; the apply must refuse.
     ctx.pipeClient = {
       call: async (method: string) => {
         if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
@@ -130,11 +166,6 @@ describe("mo2_toggle_mod", () => {
       discoverAndConnect: async () => {},
       isConnected: () => true,
     } as unknown as ToolContext["pipeClient"];
-    const tool = getTool("mo2_toggle_mod")!;
-    const plan = (await tool.handler(
-      { mode: "plan", name: "TopMod", enabled: false, profile: "BB84自用" },
-      ctx,
-    )) as { ok: boolean; result: { planId: string; lease_token: string } };
 
     await expect(tool.handler(
       { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },

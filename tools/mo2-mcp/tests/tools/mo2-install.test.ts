@@ -241,13 +241,17 @@ describe("mo2_install", () => {
     expect(meta).toContain("installationFile=live.7z");
     const modlist = await readFile(join(root, "profiles", "Default", "modlist.txt"), "utf8");
     expect(modlist).toContain("+LiveMod");
+    // BUG-9 fix (2026-06-17): buildPlan now also runs assertActiveProfile,
+    // which adds an extra profile.active call before the apply guard.
     expect(brokerCalls.map((call) => call.method)).toEqual([
-      "profile.active",
+      "profile.active", // buildPlan guard
+      "profile.active", // applyMutation guard
       "installation.create_mod_from_directory",
     ]);
   });
 
-  it("live apply blocks when requested profile is not the active MO2 profile", async () => {
+  // BUG-9 fix (2026-06-17): cross-profile request is rejected at plan time.
+  it("BUG-9: live plan blocks when requested profile is not the active MO2 profile", async () => {
     const { ctx } = await _fixture((rootDir) => ({
       call: async (method, params) => {
         if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
@@ -273,13 +277,9 @@ describe("mo2_install", () => {
       isConnected: () => true,
     } as unknown as ToolContext["pipeClient"];
     const tool = getTool("mo2_install")!;
-    const plan = (await tool.handler(
-      { mode: "plan", archive_path: "/tmp/blocked.7z", mod_name: "BlockedLive", profile: "BB84自用" },
-      ctx,
-    )) as { ok: boolean; result: { planId: string; lease_token: string } };
 
     await expect(tool.handler(
-      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      { mode: "plan", archive_path: "/tmp/blocked.7z", mod_name: "BlockedLive", profile: "BB84自用" },
       ctx,
     )).rejects.toThrow(/cross_profile_live_mutation_blocked/);
     expect(existsSync(join(ctx.config.mo2Root, "mods", "BlockedLive"))).toBe(false);

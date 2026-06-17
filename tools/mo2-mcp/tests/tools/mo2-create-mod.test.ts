@@ -129,8 +129,11 @@ describe("mo2_create_mod", () => {
     )) as { ok: boolean; result: { name: string; created: boolean; priority: number } };
 
     expect(apply.ok).toBe(true);
+    // BUG-9 fix (2026-06-17): buildPlan now also runs assertActiveProfile,
+    // which adds an extra profile.active call before the apply-time guard.
     expect(pipeCalls).toEqual([
-      { method: "profile.active", params: {} },
+      { method: "profile.active", params: {} }, // buildPlan guard
+      { method: "profile.active", params: {} }, // applyMutation guard
       { method: "mods.create", params: { name: "NewEmpty", priority: 2 } },
     ]);
     expect(existsSync(join(root, "mods", "NewEmpty"))).toBe(true);
@@ -139,25 +142,24 @@ describe("mo2_create_mod", () => {
     ]);
   });
 
-  it("live apply blocks when requested profile is not the active MO2 profile", async () => {
+  // BUG-9 fix (2026-06-17): cross-profile request is rejected at plan time,
+  // not only at apply time. The plan envelope never lands in the agent's
+  // hand if MO2 is live on a different profile.
+  it("BUG-9: live plan blocks when requested profile is not the active MO2 profile", async () => {
     const { ctx } = await _fixture();
     ctx.pipeClient = {
       call: async (method: string) => {
         if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
-        throw new Error(`unexpected live mutation: ${method}`);
+        throw new Error(`unexpected broker call during plan: ${method}`);
       },
       close: () => {},
       discoverAndConnect: async () => {},
       isConnected: () => true,
     } as unknown as ToolContext["pipeClient"];
     const tool = getTool("mo2_create_mod")!;
-    const plan = (await tool.handler(
-      { mode: "plan", name: "NewEmpty", above: "AnchorMod", profile: "BB84自用" },
-      ctx,
-    )) as { ok: boolean; result: { planId: string; lease_token: string } };
 
     await expect(tool.handler(
-      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      { mode: "plan", name: "NewEmpty", above: "AnchorMod", profile: "BB84自用" },
       ctx,
     )).rejects.toThrow(/cross_profile_live_mutation_blocked/);
   });

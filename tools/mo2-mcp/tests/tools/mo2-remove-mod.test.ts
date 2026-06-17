@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, readFile, rm, cp } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getTool, _clearToolsForTests } from "../../src/tool-registry.js";
@@ -212,5 +213,48 @@ describe("mo2_remove_mod", () => {
       .toBe("+Keep\n");
     expect(await readFile(join(root, "profiles", "Other", "modlist.txt"), "utf8"))
       .toBe("+Different\n");
+  });
+
+  // BUG-15 fix (2026-06-17): broker-alive apply with backup_first=false used
+  // to take the broker-ok branch and skip _scrubAllProfileModlists, leaving
+  // orphan +Target / -Target rows in profiles/<*>/modlist.txt. After the
+  // unified fix, the filesystem scrub runs regardless of the broker code
+  // path. Phase 4 evidence: phase4final-beta-B.3.8.json (backup_first=false
+  // returned profiles_updated:[] while +E2E-Throwaway-232817 lingered in
+  // modlist.txt).
+  it("BUG-15: live apply with backup_first:false scrubs orphan modlist rows from all profiles", async () => {
+    const { root, ctx, pipeCalls } = await fixture({ createMod: true, withPipe: true });
+    const tool = getTool("mo2_remove_mod")!;
+    const plan = (await tool.handler(
+      { mode: "plan", name: "Target", backup_first: false },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+    vi.clearAllMocks();
+
+    const apply = (await tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )) as {
+      ok: boolean;
+      result: { removed: string; backup_name?: string; profiles_updated: string[] };
+    };
+
+    expect(apply.ok).toBe(true);
+    expect(apply.result.backup_name).toBeUndefined();
+    // Broker is still called (informational), but the filesystem scrub is
+    // what guarantees on-disk durability.
+    expect(pipeCalls.map((c) => c.method)).toContain("mods.remove");
+    // Mod folder is gone, even though the broker mock did not delete it.
+    expect(existsSync(join(root, "mods", "Target"))).toBe(false);
+    // Every profile modlist that referenced Target had the row scrubbed.
+    expect(await readFile(join(root, "profiles", "Default", "modlist.txt"), "utf8"))
+      .toBe("+Keep\n-TargetExtra\n");
+    expect(await readFile(join(root, "profiles", "Alt", "modlist.txt"), "utf8"))
+      .toBe("+Keep\n");
+    expect(await readFile(join(root, "profiles", "Other", "modlist.txt"), "utf8"))
+      .toBe("+Different\n");
+    // profiles_updated reflects the actual on-disk changes (Default + Alt
+    // had Target rows; Other did not).
+    expect([...apply.result.profiles_updated].sort()).toEqual(["Alt", "Default"]);
   });
 });

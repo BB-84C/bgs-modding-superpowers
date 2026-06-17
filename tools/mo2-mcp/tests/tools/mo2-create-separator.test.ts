@@ -131,8 +131,10 @@ describe("mo2_create_separator", () => {
 
     expect(apply.ok).toBe(true);
     expect(apply.result).toMatchObject({ separator_name: "Section_separator", color_set: true });
+    // BUG-9 fix (2026-06-17): buildPlan now also runs assertActiveProfile.
     expect(pipeCalls).toEqual([
-      { method: "profile.active", params: {} },
+      { method: "profile.active", params: {} }, // buildPlan guard
+      { method: "profile.active", params: {} }, // applyMutation guard
       { method: "mods.create", params: { name: "Section_separator", priority: 2 } },
     ]);
     expect(await readFile(join(root, "mods", "Section_separator", "meta.ini"), "utf8"))
@@ -178,8 +180,10 @@ describe("mo2_create_separator", () => {
 
     expect(apply.ok).toBe(true);
     expect(apply.result).toMatchObject({ separator_name: "Plain_separator", color_set: false });
+    // BUG-9 fix (2026-06-17): buildPlan now also runs assertActiveProfile.
     expect(pipeCalls).toEqual([
-      { method: "profile.active", params: {} },
+      { method: "profile.active", params: {} }, // buildPlan guard
+      { method: "profile.active", params: {} }, // applyMutation guard
       { method: "mods.create", params: { name: "Plain_separator" } },
     ]);
     expect(sidecarCalls).toEqual([
@@ -188,25 +192,22 @@ describe("mo2_create_separator", () => {
     expect(existsSync(join(root, "mods", "Plain_separator", "meta.ini"))).toBe(false);
   });
 
-  it("live apply blocks when requested profile is not the active MO2 profile", async () => {
+  // BUG-9 fix (2026-06-17): cross-profile request is rejected at plan time.
+  it("BUG-9: live plan blocks when requested profile is not the active MO2 profile", async () => {
     const { ctx } = await _fixture();
     ctx.pipeClient = {
       call: async (method: string) => {
         if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
-        throw new Error(`unexpected live mutation: ${method}`);
+        throw new Error(`unexpected broker call during plan: ${method}`);
       },
       close: () => {},
       discoverAndConnect: async () => {},
       isConnected: () => true,
     } as unknown as ToolContext["pipeClient"];
     const tool = getTool("mo2_create_separator")!;
-    const plan = (await tool.handler(
-      { mode: "plan", name: "Section", above: "AnchorMod", profile: "BB84自用" },
-      ctx,
-    )) as { ok: boolean; result: { planId: string; lease_token: string } };
 
     await expect(tool.handler(
-      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      { mode: "plan", name: "Section", above: "AnchorMod", profile: "BB84自用" },
       ctx,
     )).rejects.toThrow(/cross_profile_live_mutation_blocked/);
   });
