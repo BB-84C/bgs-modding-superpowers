@@ -80,6 +80,30 @@ function stripParentFormIdPrefix(args: Record<string, unknown>): Record<string, 
     : args;
 }
 
+/**
+ * Daemon `records.apply_filter` requires `files: string[]` (array of plugin names),
+ * NOT `file: string`. Our intent-tool schema accepts a singular `file` for ergonomic
+ * single-plugin calls; translate it here before forwarding. Empirically verified
+ * 2026-06-18 against daemon contract 0.20: omitting `files` triggers
+ * `invalid_request: 'files' must contain at least one plugin name` even when the
+ * caller meant "all loaded files" — the daemon does NOT default-include all files.
+ *
+ * Translation rules:
+ *   - If caller passed `file: "X"`, send `files: ["X"]` and drop `file`.
+ *   - If caller omitted `file`, leave `files` absent. Daemon will reject; caller
+ *     must specify at least one plugin scope. (We surface that error directly.)
+ *   - Pass-through `files` array if the caller already provided it (future-proof).
+ */
+function wrapFileAsFiles(args: Record<string, unknown>): Record<string, unknown> {
+  if (Array.isArray(args.files) && args.files.length > 0) return args;
+  if (typeof args.file === "string" && args.file.length > 0) {
+    const out: Record<string, unknown> = { ...args, files: [args.file] };
+    delete out.file;
+    return out;
+  }
+  return args;
+}
+
 export interface FindRecordsByPatternOptions {
   adapter: DaemonAdapter;
   registry: Registry;
@@ -129,7 +153,7 @@ export function makeFindRecordsByPatternHandler(opts: FindRecordsByPatternOption
       return r.refusal;
     }
 
-    const daemonArgs = stripParentFormIdPrefix(args);
+    const daemonArgs = wrapFileAsFiles(stripParentFormIdPrefix(args));
     const native = await opts.adapter.call({
       command: "records.apply_filter",
       args: daemonArgs,
