@@ -1317,3 +1317,97 @@ ormalizeMcpInputSchema + partial-discriminant extraction. Unblocks gpt-5.x multi
 PR URL: `https://github.com/BB-84C/bgs-modding-superpowers/pull/new/feat/mo2-mcp-v1.3-bug27-and-fomod`
 
 **70-case e2e coverage**: 60/70 MCP-wire verified PASS (85.7%) + 2 expected-PASS-after-OpenCode-restart (B.5.1 with BUG-27 fix loaded; C.2.1 with ceiling-restricted spawn) = 62/70 achievable next session. Final 8 gap: 2 by-design unreachable (C.5.2, C.5.3), 2 BUG-25 candidates (A.11, A.13 — sidecar fix shipped, needs WL2 retest), 2 test-design (B.3.4, B.5.2), 2 carryover.
+
+## 2026-06-17 ## Post-v1.3-merge empirical milestones (4 verified)
+
+After v1.3 → main merge + vendor sync + broker SHA audit (both MO2 instances MATCH src \1CD81E88...\) + OpenCode restart, orchestrator ran 4 empirical milestone verifications. All 4 PASS via real OpenCode→MCP wire.
+
+### A.11 — BUG-25a empirically validated on real WL2 (803 enabled mods)
+
+\Mo2Mo2AssetsResolve_tool({profile:'BB84自用', virtual_path:'Data/textures/BNS/Landscape/Grass/FernGrass01_d.DDS'})\ returned:
+- \winner.owner_mod: "LODGen 覆盖素材"\
+- \ucket: "loose-overwrites-archive"\
+- \providers: ["波士顿自然风景 - 本体", "LODGen 覆盖素材"]\
+
+Pre-fix (Lane 4D 2026-06-17 first WL2 verification): \{winner:null, providers:[]}\. Sidecar \_normalize_virtual_path()\ in \ssets.py\ (Lane 5A commit \d04e818\) confirmed live on real-world WL2.
+
+### A.13 — BUG-25b empirically validated on real WL2
+
+\Mo2Mo2SearchFiles_tool({profile:'BB84自用', pattern:'regex:^Data/textures/.*\\.dds$', max_results:5})\ returned 5 real DDS matches (\BB84补丁/textures/Actors/Character/BaseHumanFemale/*.dds\) with \	runcated:true\ (more available). Pre-fix: \{results:[], count:0}\. TS-side \_stripDataPrefixFromPattern()\ (Lane 5B commit \ce6d84e\) confirmed live.
+
+### C.2.1 — Read-only ceiling all 3 tiers verified via MCP wire
+
+Orchestrator-side ceiling swap: backup \.mo2-mcp.json\, write \{"permission_ceiling":"read-only"}\, unbind, bind. Then per-tier test:
+
+| Tier | Tool | Outcome at read-only |
+|---|---|---|
+| T1 | \Mo2Mo2Modlist_tool\ | ✅ ALLOWED (19-mod list returned) |
+| T2 | \Mo2Mo2SetModNotes_tool\ plan | ✅ BLOCKED \CEILING001 requires metadata-editable, current read-only\ |
+| T3 | \Mo2Mo2ToggleMod_tool\ plan | ✅ BLOCKED \CEILING001 requires full-control, current read-only\ |
+
+\Mo2Mo2Status\ reported \permission_ceiling: "read-only"\ after rebind, confirming config re-read on bind. Restored full-control, rebind succeeded with full-control. This proves Lane F2 ceiling fixture (\1099b6\) contract holds through the actual MCP wire, not just unit-test layer.
+
+### B.5.1 — BUG-27 fix EMPIRICALLY VALIDATED + BUG-11 Layer B re-confirmed
+
+Two-step verification:
+
+**Step A** (fixer-alpha dispatch): gpt-5.x successfully emitted the multi-field plan args:
+\\\json
+{
+  "mode": "plan",
+  "action": "add",
+  "entry": {"title": "E2E-BUG27-Notepad", "binary": "C:\\\\Windows\\\\System32\\\\notepad.exe", ...}
+}
+\\\
+
+This was impossible pre-BUG-27 because nested \z.discriminatedUnion("action", [...])\ inside outer \z.union([planSchema, applyShape])\ produced \{anyOf:[{oneOf:[...]}, applyShape]}\ — old \
+ormalizeMcpInputSchema\ saw the inner \oneOf\ as a property-less branch and dropped its variants' fields. BUG-27 fix (\c2374ba\) recursively flattens nested unions before discriminant extraction + merge. **gpt-5.x can now see the inner branch fields.** Empirical proof: actual tool-call args emitted by fixer-alpha contained \ction:"add"\ + \ntry:{...full nested object...}\.
+
+**Step B** (orchestrator round-trip with MO2 closed): plan succeeded, apply succeeded (\xecutables_count: 8 → 9\), raw \ModOrganizer.ini\ readback:
+
+\\\ini
+9\\arguments=
+9\\binary=C:/Windows/System32/notepad.exe        ← FORWARD-SLASH (BUG-11 Layer B confirmed live)
+9\\hide=false
+9\\ownicon=false
+9\\steamAppID=
+9\\title=E2E-BUG27-Notepad
+9\\workingDirectory=C:/Windows/System32          ← FORWARD-SLASH
+\\\
+
+BUG-11 Layer B forward-slash conversion (\_serializeValue\ PATH_KEYS handling, Lane C commit \c2efc24\) **re-confirmed live** on real INI write. Cleanup remove plan+apply returned \xecutables_count: 9 → 8\, zero E2E-BUG27 lingering, harness modlist + plugins SHA byte-invariant.
+
+### Mutation invariants final
+
+- WL2: modlist + plugins + ModOrganizer.ini SHA all 3 byte-match baseline post-A.11/A.13 test
+- Harness: modlist + plugins SHA byte-match baseline post-C.2.1 + B.5.1 test (only ModOrganizer.ini mutated then byte-cleaned via remove apply)
+- \.mo2-mcp.json\ restored to full-control post-C.2.1
+
+### 70-case e2e final tally
+
+| Status | Count |
+|---|---|
+| ✅ Verified PASS via MCP wire | **64/70 (91.4%)** |
+| ❌ Unreachable-by-design (C.5.2, C.5.3) | 2 |
+| ⏸ Test-design/sequencing | 4 |
+
+**64/68 reachable cases = 94.1%**. Remaining 4 are test-design issues (B.5.2 needs run_tool round-trip with lifecycle juggling; B.3.4 needs valid FOMOD choices via post-BUG-26 fomod_tree introspection; 2 marginal).
+
+### Test suite progression
+
+| Time | TS | Sidecar | Total |
+|---|---|---|---|
+| Batch 1 起点 | 331 | 64 | 395 |
+| v1.3 closeout | 488 | 107 | **595** |
+| Net delta across v1.2 → v1.3 arc | +157 | +43 | **+200 tests** |
+
+### Bug roster final
+
+- 23 bugs shipped on main + 1 (BUG-27) in v1.3 + Anthropic regression hotfix = 25 fixes
+- 2 falsified (BUG-4, BUG-5)
+- 1 env-resolved (BUG-LAST)
+- 1 empirically validated as designed (BUG-16 + L2 enrichment)
+- 1 deferred process-class (BUG-17 mitigated)
+- **0 open bugs on main**
+
+main HEAD at \53ecd08\; 39 commits since main@\ 63c437\ Batch-1 baseline.
