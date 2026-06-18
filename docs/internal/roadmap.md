@@ -1274,3 +1274,46 @@ Evidence preserved at `.opencode/artifacts/fomod-test-uniquenpcs/`.
 3. Vendor clone refresh: `git -C 'D:\Starfield MO2\.opencode\vendor\bgs-modding-superpowers' pull --ff-only origin main`
 4. Per-MO2-instance broker SHA audit (memory/45 rule 9) on harness + WL2
 5. End-of-cycle OpenCode restart to load merged-main MCP dist
+
+## 2026-06-17 ## MO2 MCP v1.2 → main merge + v1.3 Batch 6 (BUG-27 + Carryforward verify + FOMOD-EXT)
+
+### Stage closeout: v1.2 → main
+
+**Delivered**:
+- Deleted stale branch eat/mo2-mcp-e2e-runner (5 commits, 1066 lines, never merged anywhere; was an early stdio-spawn runner approach abandoned in favor of OpenCode→MCP wire + subagent dispatch)
+- Fast-forward merged eat/mo2-mcp-v1.2-batch1 → main (35 commits, 9485 insertions, 1598 deletions across 171 files)
+- Pushed main to origin
+- Refreshed vendor clone at `D:\Starfield MO2\.opencode\vendor\bgs-modding-superpowers` (063c437 → 7bb8389)
+- Broker SHA audit (memory/45 rule 9): both harness (.artifacts/mo2) AND WL2 (B:\WastelandBlues 2.0) brokers MATCH source SHA 1CD81E88.... No redeploy needed.
+- Deleted merged eat/mo2-mcp-v1.2-batch1 (local + remote)
+
+**Cumulative on main @ 7bb8389**: 23 bug fixes shipped (BUG-1, 2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25a, 25b, 26 + Anthropic regression hotfix), 8 carryforward fixtures landed, 2 BUGs falsified, 1 env-resolved, 1 process-class deferred. 475 TS + 93 sidecar tests.
+
+### v1.3 Batch 6 shipped on eat/mo2-mcp-v1.3-bug27-and-fomod
+
+**Delivered (4 commits)**:
+
+| Commit | Lane | Scope |
+|---|---|---|
+| `c2374ba` | V2 | BUG-27 NEW: _flattenUnionBranches() recursive flatten in 
+ormalizeMcpInputSchema + partial-discriminant extraction. Unblocks gpt-5.x multi-field plan calls. +4 TS tests. Anthropic guard preserved. |
+| `9814c70` | V3 (Phase 1+2) | FOMOD-EXT sidecar: new omod_deps.py with state-aware valuate_conditions(). parse_choices + esolve_files now consume mo2_state param to evaluate <fileDependency> against plugins.txt, <gameDependency> via LooseVersion. +14 sidecar pytest. |
+| `b1d21fd` | V3 (Phase 4) | FOMOD-EXT TS wiring: new mo2-state-for-fomod.ts gathers plugins+mods+gameVersion. mo2-install.ts + mo2-reinstall-mod.ts pass state to sidecar. FomodTreeShape extended with dependencies_status, module_dependencies_status, conditional_pages_note. +9 TS tests. |
+| `ce7c3be` | materialize | Mirror to `plugins/bgs-modding-superpowers/` |
+
+**Plus bonus Lane V1 (Carryforward MCP-wire verify)**: C.1.3 zip-slip rejected (path_traversal_blocked), C.3.1 external touch (lease_violation drift), C.3.2 external rewrite (lease_violation drift), C.3.3 one-shot lease (plan_expired_or_unknown on second apply). All 4 PASS via real Mo2Mo2*_tool calls. Cleanup byte-restored harness to baseline.
+
+**Acceptance**:
+- `npm test` in `tools/mo2-mcp`: **488 passed** / 19 skipped / 0 failed (was 475; +13)
+- `pytest` in `tools/mo2-mcp-sidecar`: **107 passed** (was 93; +14)
+- `npm run build`: clean
+- `scripts/build-portable-plugin.ps1`: materialized
+- 4 Carryforward MCP-wire cases: 4/4 PASS, mutation invariant byte-clean
+
+**Test totals**: 488 TS + 107 sidecar = **595 total tests** across mo2-mcp + sidecar. From 397 at start of Batch 1 to 595 at end of v1.3 = **+198 tests added across the v1.2 → v1.3 arc**.
+
+**Status**: `feat/mo2-mcp-v1.3-bug27-and-fomod` pushed to origin. **STOPPED before v1.3 → main merge** per user instruction implicit ("merge feat前停下来" still standing for v1.3). Awaiting user decision on whether to merge v1.3 → main now or continue iteration.
+
+PR URL: `https://github.com/BB-84C/bgs-modding-superpowers/pull/new/feat/mo2-mcp-v1.3-bug27-and-fomod`
+
+**70-case e2e coverage**: 60/70 MCP-wire verified PASS (85.7%) + 2 expected-PASS-after-OpenCode-restart (B.5.1 with BUG-27 fix loaded; C.2.1 with ceiling-restricted spawn) = 62/70 achievable next session. Final 8 gap: 2 by-design unreachable (C.5.2, C.5.3), 2 BUG-25 candidates (A.11, A.13 — sidecar fix shipped, needs WL2 retest), 2 test-design (B.3.4, B.5.2), 2 carryover.
