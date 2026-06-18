@@ -50,12 +50,30 @@ export async function buildContext(opts: BuildContextOptions): Promise<ToolConte
     fetchedAt: new Date().toISOString(),
   };
 
+  // Consent is advertised by the daemon under the supports tree, but NOT at the
+  // top level. xEdit r6 places the same boolean under TWO nested keys (both
+  // reflect the single `-IKnowWhatImDoing` CLI flag):
+  //   supports.elementsMutation.iKnowWhatImDoing
+  //   supports.scripts.execution.iKnowWhatImDoing
+  // Empirically verified 2026-06-18 against FO4Edit 4.1.6r6 daemon: launching
+  // with the flag set both nested keys to `true` and left `supports.iKnowWhatImDoing`
+  // (top-level) undefined. The pre-r6 code path read the non-existent top-level
+  // field and projected `consentEnabled: false` regardless of the flag — that
+  // bug was invisible until issue #8 wired the flag forwarding end-to-end. Read
+  // either nested path (we OR them for robustness against future schema shifts).
+  const elementsMutation = (supports.elementsMutation ?? {}) as Record<string, unknown>;
+  const scriptsBlock = (supports.scripts ?? {}) as Record<string, unknown>;
+  const scriptsExec = (scriptsBlock.execution ?? {}) as Record<string, unknown>;
+  const consentEnabled =
+    elementsMutation.iKnowWhatImDoing === true ||
+    scriptsExec.iKnowWhatImDoing === true;
+
   return {
     sessionId,
     daemonPid: opts.daemonPid,
     mcpModeActive: opts.mcpModeActive ?? false,
     loadOrder,
-    consentEnabled: supports.iKnowWhatImDoing === true,
+    consentEnabled,
     capabilities,
   };
 }

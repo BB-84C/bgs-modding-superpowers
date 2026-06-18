@@ -11,7 +11,10 @@ const happyMocks = {
   "system.capabilities": () => ({
     contractVersion: "0.10",
     commands: ["records.get"],
-    supports: { iKnowWhatImDoing: true },
+    // r6 nests iKnowWhatImDoing under elementsMutation; xedit-mcp's
+    // buildContext reads from elementsMutation.iKnowWhatImDoing or
+    // scripts.execution.iKnowWhatImDoing. Top-level was never the real shape.
+    supports: { elementsMutation: { iKnowWhatImDoing: true } },
   }),
   "files.list": () => ({ files: ["Fallout4.esm", "MyPatch.esp"] }),
   "session.get_dirty_state": () => ({ dirtyFiles: [], unsavedChangeCount: 0, dirty: false }),
