@@ -12,14 +12,18 @@ import { TOOL_DEFINITIONS } from "../../src/index.js";
 // Sibling fix that landed the same rule on bgs-kb-mcp: commit 15adaa7.
 
 describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
-  test("exposes the stable Batch 1 tool set", () => {
+  test("exposes the stable Batch 1 tool set plus the r6 intent-tool extensions", () => {
     expect(TOOL_DEFINITIONS.map((tool) => tool.name).sort()).toEqual([
       "xedit_call",
+      "xedit_create_child_record",
       "xedit_dirty",
       "xedit_find_record",
+      "xedit_find_records_by_pattern",
       "xedit_health",
       "xedit_inspect_conflicts",
+      "xedit_inspect_conflicts_deep",
       "xedit_list_capabilities",
+      "xedit_navigate_ancestry",
       "xedit_read_record",
       "xedit_restart",
       "xedit_session",
@@ -27,7 +31,7 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
       "xedit_status",
       "xedit_stop",
     ]);
-    expect(TOOL_DEFINITIONS).toHaveLength(12);
+    expect(TOOL_DEFINITIONS).toHaveLength(16);
   });
 
   test("every tool inputSchema is an object schema with explicit properties (no loose additionalProperties:true escape)", () => {
@@ -140,6 +144,87 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
     };
     expect(Object.keys(schema.properties).sort()).toEqual(["file", "formId"]);
     expect(schema.required.sort()).toEqual(["file", "formId"]);
+  });
+
+  test("xedit_inspect_conflicts_deep requires file + formId and accepts optional includeReferences boolean", () => {
+    const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_inspect_conflicts_deep")!;
+    const schema = tool.inputSchema as {
+      properties: Record<string, { type: string; pattern?: string; minLength?: number }>;
+      required: string[];
+    };
+    expect(Object.keys(schema.properties).sort()).toEqual(["file", "formId", "includeReferences"]);
+    expect(schema.required.sort()).toEqual(["file", "formId"]);
+    expect(schema.properties.file.minLength).toBe(1);
+    expect(schema.properties.formId.pattern).toBe("^(0x)?[0-9a-fA-F]{1,8}$");
+    expect(schema.properties.includeReferences.type).toBe("boolean");
+  });
+
+  test("xedit_find_records_by_pattern declares the full r6 filter surface with no required fields (refinement is Zod-side)", () => {
+    const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_find_records_by_pattern")!;
+    const schema = tool.inputSchema as {
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(Object.keys(schema.properties).sort()).toEqual([
+      "baseDisplayNameRegex",
+      "baseEditorIdRegex",
+      "displayNameRegex",
+      "displayNamePattern",
+      "editorIdPattern",
+      "editorIdRegex",
+      "file",
+      "fullNameRegex",
+      "limit",
+      "offset",
+      "parentFormId",
+      "signatures",
+    ].sort());
+    // No top-level required; at-least-one-predicate is enforced by the Zod
+    // refinement inside the handler (handler is the real gate).
+    expect(schema.required ?? []).toEqual([]);
+  });
+
+  test("xedit_create_child_record requires targetFile + signature + parent, declares the flat parent shape", () => {
+    const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_create_child_record")!;
+    const schema = tool.inputSchema as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    expect(Object.keys(schema.properties).sort()).toEqual([
+      "editorId",
+      "formData",
+      "parent",
+      "signature",
+      "targetFile",
+    ]);
+    expect(schema.required.sort()).toEqual(["parent", "signature", "targetFile"]);
+
+    const parent = schema.properties.parent as {
+      type: string;
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    expect(parent.type).toBe("object");
+    expect(Object.keys(parent.properties).sort()).toEqual(["coords", "parentFile", "parentFormId", "subGroup"]);
+    expect(parent.required.sort()).toEqual(["parentFile", "parentFormId"]);
+    // coords is a [number, number] tuple (no anyOf union).
+    const coords = parent.properties.coords as { type: string; minItems: number; maxItems: number };
+    expect(coords.type).toBe("array");
+    expect(coords.minItems).toBe(2);
+    expect(coords.maxItems).toBe(2);
+  });
+
+  test("xedit_navigate_ancestry declares both modes flat and lets the handler route", () => {
+    const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_navigate_ancestry")!;
+    const schema = tool.inputSchema as {
+      properties: Record<string, { type: string; minLength?: number; pattern?: string }>;
+      required?: string[];
+    };
+    expect(Object.keys(schema.properties).sort()).toEqual(["editorId", "file", "formId", "signature"]);
+    expect(schema.required ?? []).toEqual([]);
+    expect(schema.properties.file.minLength).toBe(1);
+    expect(schema.properties.editorId.minLength).toBe(1);
+    expect(schema.properties.formId.pattern).toBe("^(0x)?[0-9a-fA-F]{1,8}$");
   });
 
   test("xedit_call requires command and exposes args as a pass-through object", () => {

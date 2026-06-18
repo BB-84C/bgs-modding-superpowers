@@ -15,6 +15,10 @@ import { xeditListCapabilitiesTool } from "./tools/list-capabilities.js";
 import { makeFindRecordHandler } from "./tools/find-record.js";
 import { makeReadRecordHandler } from "./tools/read-record.js";
 import { makeInspectConflictsHandler } from "./tools/inspect-conflicts.js";
+import { makeInspectConflictsDeepHandler } from "./tools/inspect-conflicts-deep.js";
+import { makeFindRecordsByPatternHandler } from "./tools/find-records-by-pattern.js";
+import { makeCreateChildRecordHandler } from "./tools/create-child-record.js";
+import { makeNavigateAncestryHandler } from "./tools/navigate-ancestry.js";
 import { makeCallHandler } from "./tools/call.js";
 import { refuse } from "./envelope.js";
 import { MCP_ERROR_CODES } from "./types.js";
@@ -51,6 +55,10 @@ export function buildServerToolset(opts: ServerToolsetOptions): ServerToolset {
   const find = makeFindRecordHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
   const read = makeReadRecordHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
   const inspect = makeInspectConflictsHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
+  const inspectDeep = makeInspectConflictsDeepHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
+  const findByPattern = makeFindRecordsByPatternHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
+  const createChild = makeCreateChildRecordHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
+  const navigateAncestry = makeNavigateAncestryHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
   const call = makeCallHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
 
   const handlers: Record<string, (a: Record<string, unknown>) => Promise<Envelope>> = {
@@ -59,6 +67,10 @@ export function buildServerToolset(opts: ServerToolsetOptions): ServerToolset {
     xedit_find_record: find,
     xedit_read_record: read,
     xedit_inspect_conflicts: inspect,
+    xedit_inspect_conflicts_deep: inspectDeep,
+    xedit_find_records_by_pattern: findByPattern,
+    xedit_create_child_record: createChild,
+    xedit_navigate_ancestry: navigateAncestry,
     xedit_call: call,
   };
 
@@ -415,6 +427,213 @@ export const TOOL_DEFINITIONS = [
         },
       },
       required: ["file", "formId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "xedit_inspect_conflicts_deep",
+    description:
+      "Requires the daemon to be ready. Like xedit_inspect_conflicts, but also returns the new r6 child-group conflict sub-block (supports.conflictStatusChildGroup, contract 0.15) and — when includeReferences=true — chains records.references {recursive:true} (supports.referencesRecursive, contract 0.15) so the agent gets the outgoing reference tree in the same call. Use this for full Phase-15-style conflict + reference audits; use xedit_inspect_conflicts for the lighter envelope.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        file: {
+          type: "string" as const,
+          minLength: 1,
+          description: "Plugin filename including extension, e.g. 'kinggathcreations_spaceship.esm'.",
+        },
+        formId: {
+          type: "string" as const,
+          pattern: FORM_ID_PATTERN,
+          description:
+            "FormID as hex, with or without 0x prefix, e.g. '0000003C' or '0x0000003C'. Up to 8 hex digits.",
+        },
+        includeReferences: {
+          type: "boolean" as const,
+          description:
+            "If true, also call records.references {recursive:true} and attach the result under data.references. Default false.",
+        },
+      },
+      required: ["file", "formId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "xedit_find_records_by_pattern",
+    description:
+      "Requires the daemon to be ready. Wraps records.apply_filter with the r6 filter args (supports.applyFilterExtensions, contract 0.14 + 0.20 multi-pattern). At least one filter predicate is required: parentFormId, signatures, or any of *Regex / *Pattern. For multi-pattern OR, pass either a single regex string or a JSON array of strings; *Pattern and *Regex for the same logical name (editorId / displayName) are mutually exclusive.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        file: {
+          type: "string" as const,
+          minLength: 1,
+          description: "Optional plugin filename to scope the filter to a single file.",
+        },
+        parentFormId: {
+          type: "string" as const,
+          pattern: FORM_ID_PATTERN,
+          description:
+            "Optional parent record FormID (e.g. a CELL FormID) to restrict matches to children of that record (supports.applyFilterExtensions).",
+        },
+        signatures: {
+          type: "array" as const,
+          items: { type: "string" as const, minLength: 1 },
+          minItems: 1,
+          description:
+            "Optional list of 4-char record signatures to include, e.g. ['REFR','ACHR'].",
+        },
+        editorIdRegex: {
+          type: "string" as const,
+          description:
+            "Regex against EditorID. Pass an array of strings instead of a single string to OR multiple patterns (contract 0.20 multiPattern). Mutually exclusive with editorIdPattern.",
+        },
+        displayNameRegex: {
+          type: "string" as const,
+          description:
+            "Regex against display name. Multi-pattern: pass an array. Mutually exclusive with displayNamePattern.",
+        },
+        fullNameRegex: {
+          type: "string" as const,
+          description: "Regex against FULL name. Multi-pattern: pass an array.",
+        },
+        baseEditorIdRegex: {
+          type: "string" as const,
+          description: "Regex against base record's EditorID. Multi-pattern: pass an array.",
+        },
+        baseDisplayNameRegex: {
+          type: "string" as const,
+          description: "Regex against base record's display name. Multi-pattern: pass an array.",
+        },
+        editorIdPattern: {
+          type: "string" as const,
+          description:
+            "Simple wildcard pattern against EditorID (no regex metachars). Mutually exclusive with editorIdRegex.",
+        },
+        displayNamePattern: {
+          type: "string" as const,
+          description:
+            "Simple wildcard pattern against display name. Mutually exclusive with displayNameRegex.",
+        },
+        limit: {
+          type: "integer" as const,
+          minimum: 1,
+          maximum: 10000,
+          description: "Maximum matches to return (server-side cap applies).",
+        },
+        offset: {
+          type: "integer" as const,
+          minimum: 0,
+          description: "Skip this many matches before returning results (pagination).",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "xedit_create_child_record",
+    description:
+      "MUTATING. Requires the daemon to be ready AND launched with -IKnowWhatImDoing (data.consentEnabled=true on xedit_session). Wraps records.create with the r6 parent shape (supports.createParentSpec, contract 0.16, WRLD coords extension 0.18). " +
+      "Three valid parent shapes: " +
+      "CELL/DIAL/QUST child = { parentFile, parentFormId, subGroup? }; " +
+      "WRLD persistent child = { parentFile, parentFormId, subGroup: 'Persistent' }; " +
+      "WRLD exterior child = { parentFile, parentFormId, coords: [x, y] }. " +
+      "subGroup and coords are mutually exclusive. Fast-fails with code='mutation_requires_iknowwhatimdoing' if consent is not active.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        targetFile: {
+          type: "string" as const,
+          minLength: 1,
+          description: "Plugin filename to create the new record in.",
+        },
+        signature: {
+          type: "string" as const,
+          minLength: 4,
+          maxLength: 4,
+          description:
+            "4-char xEdit record signature, e.g. 'REFR', 'NPC_', 'ACHR'. Must match a supported signature for the chosen parent type.",
+        },
+        parent: {
+          type: "object" as const,
+          description:
+            "Parent locator + sub-group selector. Use subGroup for CELL/DIAL/QUST/WRLD-persistent, coords for WRLD-exterior cells. Exactly one of (subGroup, coords) — never both.",
+          properties: {
+            parentFile: {
+              type: "string" as const,
+              minLength: 1,
+              description: "Plugin filename of the parent record.",
+            },
+            parentFormId: {
+              type: "string" as const,
+              pattern: FORM_ID_PATTERN,
+              description: "FormID of the parent record, hex with or without 0x prefix.",
+            },
+            subGroup: {
+              type: "string" as const,
+              minLength: 1,
+              description:
+                "Sub-group selector, e.g. 'Persistent' for a WRLD persistent child or 'Temporary' for CELL temporary children. Mutually exclusive with coords.",
+            },
+            coords: {
+              type: "array" as const,
+              items: { type: "number" as const },
+              minItems: 2,
+              maxItems: 2,
+              description:
+                "[x, y] exterior cell coordinates for a WRLD exterior child. Mutually exclusive with subGroup.",
+            },
+          },
+          required: ["parentFile", "parentFormId"],
+          additionalProperties: false,
+        },
+        editorId: {
+          type: "string" as const,
+          minLength: 1,
+          description: "Optional EditorID to set on the new record.",
+        },
+        formData: {
+          type: "object" as const,
+          description: "Optional initial element payload for the new record (passed through to records.create).",
+          additionalProperties: true,
+        },
+      },
+      required: ["targetFile", "signature", "parent"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "xedit_navigate_ancestry",
+    description:
+      "Requires the daemon to be ready. Resolves the ancestor chain (CELL > WRLD parents, DIAL > INFO parents, QUST sub-tree, etc.) for a single record by forcing includeParents=true on records.get / records.find_by_editor_id (supports.reverseNavigation + supports.childGroupNavigation, contract 0.19 + 0.13). " +
+      "Pass EITHER {file, formId} OR {editorId, signature?}. Returns a flat ancestors array, nearest-first, depth-capped at 16 per the r6 contract.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        file: {
+          type: "string" as const,
+          minLength: 1,
+          description:
+            "Plugin filename for {file, formId} mode. OMIT in editorId mode — do not pass an empty string.",
+        },
+        formId: {
+          type: "string" as const,
+          pattern: FORM_ID_PATTERN,
+          description:
+            "FormID as hex, with or without 0x prefix. OMIT in editorId mode — do not pass a zero placeholder.",
+        },
+        editorId: {
+          type: "string" as const,
+          minLength: 1,
+          description:
+            "EditorID for {editorId} mode. OMIT in {file, formId} mode.",
+        },
+        signature: {
+          type: "string" as const,
+          description:
+            "Optional 4-char record signature filter for editorId search, e.g. 'CELL', 'REFR'. Only meaningful in {editorId} mode.",
+        },
+      },
       additionalProperties: false,
     },
   },

@@ -20,9 +20,13 @@ describe("MCP server toolset", () => {
     const ts = buildServerToolset({ adapter, sessionId: "test", auditDir: undefined });
     expect(ts.list().sort()).toEqual([
       "xedit_call",
+      "xedit_create_child_record",
       "xedit_find_record",
+      "xedit_find_records_by_pattern",
       "xedit_inspect_conflicts",
+      "xedit_inspect_conflicts_deep",
       "xedit_list_capabilities",
+      "xedit_navigate_ancestry",
       "xedit_read_record",
       "xedit_session",
     ]);
