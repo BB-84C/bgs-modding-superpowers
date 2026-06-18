@@ -62,6 +62,13 @@ export async function launchDaemon(opts) {
         if (opts.pluginsFile) {
             launchArgs.push("--plugins-file", opts.pluginsFile);
         }
+        if (opts.iKnowWhatImDoing) {
+            // PS-side sentinel: "1" means "append -IKnowWhatImDoing to spawned xEdit
+            // argv". Any other value (including absent) leaves consent OFF. See
+            // xedit-client.launch.ps1 AllowedNames + the Invoke-XeditClientProcessLaunch
+            // ArgumentList branch that mirrors the `-automation-serve` append pattern.
+            launchArgs.push("--i-know-what-im-doing", "1");
+        }
         const launchOut = await runPwshCapture(pwsh, launchArgs);
         pid = parseLaunchPid(launchOut);
         if (!pid) {
