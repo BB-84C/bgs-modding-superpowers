@@ -49,6 +49,20 @@ export interface LaunchOptions {
    * See: skills/writing-bgs-load-order/SKILL.md for the file format.
    */
   pluginsFile?: string;
+  /**
+   * If true, launches xEdit with the `-IKnowWhatImDoing` flag, which enables
+   * mutating automation commands (records.create, records.copy_into,
+   * records.delete, records.mark_deleted, files.create header writes,
+   * elements.set_value, etc.). When false/omitted, the daemon reports
+   * `consentEnabled: false` in `xedit_session` and the xedit-mcp dispatch
+   * layer fast-fails any mutating intent tool with
+   * `mutation_requires_iknowwhatimdoing` BEFORE forwarding to the daemon.
+   *
+   * Forwarded to xedit-client.ps1 as `--i-know-what-im-doing 1`, then appended
+   * to the spawned xEdit argv as `-IKnowWhatImDoing` (xEdit's own flag).
+   * Verify post-launch via `xedit_session.data.consentEnabled === true`.
+   */
+  iKnowWhatImDoing?: boolean;
   /** Total wait budget for daemon-ready + plugins-loaded; defaults to 180 seconds. */
   readyTimeoutMs?: number;
   /** PowerShell executable; defaults to "pwsh". */
@@ -120,6 +134,13 @@ export async function launchDaemon(opts: LaunchOptions): Promise<LaunchedDaemon>
     }
     if (opts.pluginsFile) {
       launchArgs.push("--plugins-file", opts.pluginsFile);
+    }
+    if (opts.iKnowWhatImDoing) {
+      // PS-side sentinel: "1" means "append -IKnowWhatImDoing to spawned xEdit
+      // argv". Any other value (including absent) leaves consent OFF. See
+      // xedit-client.launch.ps1 AllowedNames + the Invoke-XeditClientProcessLaunch
+      // ArgumentList branch that mirrors the `-automation-serve` append pattern.
+      launchArgs.push("--i-know-what-im-doing", "1");
     }
     const launchOut = await runPwshCapture(pwsh, launchArgs);
 

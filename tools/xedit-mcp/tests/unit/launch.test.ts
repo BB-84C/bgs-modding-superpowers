@@ -66,4 +66,50 @@ describe("launchDaemon readiness-timeout cleanup", () => {
     expect(spawnCalls[1]?.args).toContain("--xedit-pid");
     expect(spawnCalls[1]?.args).toContain("4242");
   });
+
+  it("forwards iKnowWhatImDoing as --i-know-what-im-doing 1 to xedit-client.ps1 when set", async () => {
+    const { launchDaemon } = await import("../../src/launch.js");
+
+    // readyTimeoutMs:0 causes a clean timeout-and-stop after launch, which is
+    // fine — we only care about the args of the FIRST spawn (the `launch`
+    // invocation). The stop spawn afterwards is exercised by the test above.
+    await expect(
+      launchDaemon({
+        clientScript: "D:/awesome-bgs-mod-master/tools/mo2-vfs-launcher/xedit-client.ps1",
+        launcherPath: "D:/awesome-bgs-mod-master/.artifacts/mo2/Stock Game/Fallout 4/Tools/OpenCodeXEdit/xEdit.exe",
+        gameMode: "Fallout4",
+        moProfile: "Default",
+        iKnowWhatImDoing: true,
+        readyTimeoutMs: 0,
+      }),
+    ).rejects.toThrow(/Daemon not ready within 0 ms/);
+
+    const launchSpawn = spawnCalls.find((c) => c.args.includes("launch"));
+    expect(launchSpawn).toBeDefined();
+    // The consent forwarding pair must appear adjacent: `--i-know-what-im-doing
+    // 1`. xedit-client.launch.ps1's ConvertTo-XeditClientOptionMap reads the
+    // value (sentinel "1"); any other value silently leaves consent OFF.
+    const idx = launchSpawn!.args.indexOf("--i-know-what-im-doing");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(launchSpawn!.args[idx + 1]).toBe("1");
+  });
+
+  it("omits --i-know-what-im-doing entirely when iKnowWhatImDoing is false/undefined", async () => {
+    const { launchDaemon } = await import("../../src/launch.js");
+
+    await expect(
+      launchDaemon({
+        clientScript: "D:/awesome-bgs-mod-master/tools/mo2-vfs-launcher/xedit-client.ps1",
+        launcherPath: "D:/awesome-bgs-mod-master/.artifacts/mo2/Stock Game/Fallout 4/Tools/OpenCodeXEdit/xEdit.exe",
+        gameMode: "Fallout4",
+        moProfile: "Default",
+        // iKnowWhatImDoing intentionally omitted
+        readyTimeoutMs: 0,
+      }),
+    ).rejects.toThrow(/Daemon not ready within 0 ms/);
+
+    const launchSpawn = spawnCalls.find((c) => c.args.includes("launch"));
+    expect(launchSpawn).toBeDefined();
+    expect(launchSpawn!.args).not.toContain("--i-know-what-im-doing");
+  });
 });

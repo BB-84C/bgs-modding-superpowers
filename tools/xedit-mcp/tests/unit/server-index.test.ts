@@ -66,18 +66,22 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
       required?: string[];
     };
     expect(Object.keys(schema.properties).sort()).toEqual(
-      ["dataPath", "gameMode", "launcherPath", "moProfile", "moRoot", "pluginsFile"].sort(),
+      ["dataPath", "gameMode", "iKnowWhatImDoing", "launcherPath", "moProfile", "moRoot", "pluginsFile"].sort(),
     );
     expect(schema.required ?? []).toEqual([]);
+    // iKnowWhatImDoing is the consent gate for mutating intent tools — must
+    // be a boolean so callers can pass `iKnowWhatImDoing: true` without coercion.
+    expect((schema.properties.iKnowWhatImDoing as { type: string }).type).toBe("boolean");
   });
 
   test("xedit_restart accepts launch overrides plus force flag", () => {
     const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_restart")!;
     const schema = tool.inputSchema as { properties: Record<string, unknown> };
     expect(Object.keys(schema.properties).sort()).toEqual(
-      ["dataPath", "force", "gameMode", "launcherPath", "moProfile", "moRoot", "pluginsFile"].sort(),
+      ["dataPath", "force", "gameMode", "iKnowWhatImDoing", "launcherPath", "moProfile", "moRoot", "pluginsFile"].sort(),
     );
     expect((schema.properties.force as { type: string }).type).toBe("boolean");
+    expect((schema.properties.iKnowWhatImDoing as { type: string }).type).toBe("boolean");
   });
 
   test("xedit_stop accepts a force boolean", () => {

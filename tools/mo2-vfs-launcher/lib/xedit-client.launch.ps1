@@ -344,7 +344,7 @@ function Invoke-XeditClientProcessLaunch {
 
     $processId = $null
     try {
-        $options = ConvertTo-XeditClientOptionMap -Arguments $Arguments -AllowedNames @('--launcher-path', '--game-mode', '--plugins-file', '--mo-profile', '--load-mode', '--plugin', '--data-path', '--mo2-root')
+        $options = ConvertTo-XeditClientOptionMap -Arguments $Arguments -AllowedNames @('--launcher-path', '--game-mode', '--plugins-file', '--mo-profile', '--load-mode', '--plugin', '--data-path', '--mo2-root', '--i-know-what-im-doing')
         if ($null -eq (Get-XeditClientRequiredOptionValues -Options $options -Names @('--launcher-path', '--game-mode'))) { return 1 }
         $unsupportedLegacyOptions = @(Get-XeditClientUnsupportedLegacyLaunchOptions -Options $options)
         if ($unsupportedLegacyOptions.Count -gt 0) { Write-Host "Legacy options are no longer supported: $($unsupportedLegacyOptions -join ', ')"; return 1 }
@@ -389,6 +389,18 @@ function Invoke-XeditClientProcessLaunch {
                 $normalizedLauncherCommand.ArgumentList = @($normalizedLauncherCommand.ArgumentList + @('-D:' + $dataPathArg))
                 $nativeTargetArgumentList = @(ConvertTo-XeditClientFlatStringArray -Values @($nativeTargetArgumentList + @('-D:' + $dataPathArg)))
             }
+        }
+
+        # --i-know-what-im-doing (optional, sentinel "1") translates to xEdit's
+        # -IKnowWhatImDoing startup flag, which the daemon then advertises via
+        # `consentEnabled: true` in system.describe. xedit-mcp's TS side gates
+        # mutating intent tools on this flag — without it, requests fast-fail
+        # with `mutation_requires_iknowwhatimdoing` BEFORE the daemon is hit.
+        # Adding the flag is explicit, per-launch, and audited at the MCP call
+        # site (no env-var fallback by design).
+        if ($options.ContainsKey('--i-know-what-im-doing') -and [string]$options['--i-know-what-im-doing'] -eq '1') {
+            $normalizedLauncherCommand.ArgumentList = @($normalizedLauncherCommand.ArgumentList + @('-IKnowWhatImDoing'))
+            $nativeTargetArgumentList = @(ConvertTo-XeditClientFlatStringArray -Values @($nativeTargetArgumentList + @('-IKnowWhatImDoing')))
         }
 
         $mo2LaunchRequest = $null

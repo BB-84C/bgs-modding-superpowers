@@ -157,6 +157,7 @@ interface LaunchOverrides {
   dataPath?: string;
   pluginsFile?: string;
   moProfile?: string;
+  iKnowWhatImDoing?: boolean;
 }
 
 function resolveLaunchOpts(overrides: LaunchOverrides = {}): ResolvedLaunchOpts | { error: string } {
@@ -174,6 +175,10 @@ function resolveLaunchOpts(overrides: LaunchOverrides = {}): ResolvedLaunchOpts 
   const moProfile = overrides.moProfile ?? envProfile;
   const dataPath = overrides.dataPath ?? envDataPath;
   const pluginsFile = overrides.pluginsFile ?? envPluginsFile;
+  // Consent is per-launch and explicit only. No env-var fallback by design:
+  // the dev workflow must opt into mutations via the MCP tool arg so the
+  // audit log captures the consent decision at the call site.
+  const iKnowWhatImDoing = overrides.iKnowWhatImDoing === true ? true : undefined;
   // launcherPath default: explicit override > env > <moRoot>/tools/xEdit/xEdit.exe
   const launcherPath = overrides.launcherPath
     ?? envLauncher
@@ -188,6 +193,7 @@ function resolveLaunchOpts(overrides: LaunchOverrides = {}): ResolvedLaunchOpts 
       moRoot,
       dataPath,
       pluginsFile,
+      iKnowWhatImDoing,
     };
   }
 
@@ -212,6 +218,7 @@ function resolveLaunchOpts(overrides: LaunchOverrides = {}): ResolvedLaunchOpts 
       moRoot: candidateMoRoot,
       dataPath,
       pluginsFile,
+      iKnowWhatImDoing,
     };
   } catch {
     return {
@@ -269,6 +276,11 @@ const LAUNCH_OVERRIDE_PROPERTIES = {
   moProfile: {
     type: "string" as const,
     description: "MO2 profile name, e.g. 'Default'. Defaults to $env:BGS_MO2_PROFILE or 'Default'.",
+  },
+  iKnowWhatImDoing: {
+    type: "boolean" as const,
+    description:
+      "If true, launches xEdit with the -IKnowWhatImDoing flag, enabling mutating automation commands (records.create, records.copy_into, records.delete, records.mark_deleted, elements.set_value, files.create header writes, etc.). Default false; mutating intent tools (e.g. xedit_create_child_record) fast-fail with mutation_requires_iknowwhatimdoing when consent is off. Verify via xedit_session.data.consentEnabled === true after launch.",
   },
 };
 
@@ -864,6 +876,7 @@ export async function main(): Promise<void> {
         gameMode: typeof args.gameMode === "string" ? args.gameMode : undefined,
         dataPath: typeof args.dataPath === "string" ? args.dataPath : undefined,
         pluginsFile: typeof args.pluginsFile === "string" ? args.pluginsFile : undefined,
+        iKnowWhatImDoing: args.iKnowWhatImDoing === true ? true : undefined,
         moProfile: typeof args.moProfile === "string" ? args.moProfile : undefined,
       };
       const kick = kickoffLaunch(overrides);
@@ -981,6 +994,7 @@ export async function main(): Promise<void> {
         gameMode: typeof args.gameMode === "string" ? args.gameMode : undefined,
         dataPath: typeof args.dataPath === "string" ? args.dataPath : undefined,
         pluginsFile: typeof args.pluginsFile === "string" ? args.pluginsFile : undefined,
+        iKnowWhatImDoing: args.iKnowWhatImDoing === true ? true : undefined,
         moProfile: typeof args.moProfile === "string" ? args.moProfile : undefined,
       };
 

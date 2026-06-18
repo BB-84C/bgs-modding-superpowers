@@ -177,6 +177,35 @@ Never do any of the following. Each ban is encoded as an MCP rule or daemon-side
 4. **Do not page `system.capabilities` every session.** The digest in `xedit_list_capabilities` already carries the curated map; only call live capabilities once to check drift.
 5. **Do not delete or mark-deleted a record that is referenced by other plugins** without first calling `xedit_call records.referenced_by` and accepting the consequences. Snapshot does not cleanly recover deletions.
 
+## Enabling consent (`-IKnowWhatImDoing`)
+
+Mutating intent tools (`xedit_create_child_record`, `xedit_call records.create`,
+`xedit_call records.delete`, `xedit_call records.copy_into`, etc.) require the
+xEdit daemon to be launched in consent mode — otherwise they fast-fail with
+`code: "mutation_requires_iknowwhatimdoing"` BEFORE the daemon is contacted.
+
+Enable consent at launch time via the MCP arg:
+
+```
+xedit_start({ iKnowWhatImDoing: true, ...other overrides })
+xedit_restart({ iKnowWhatImDoing: true, ...other overrides })  # if already running
+```
+
+The flag is forwarded as `--i-know-what-im-doing 1` to `xedit-client.ps1`, which
+appends `-IKnowWhatImDoing` to xEdit's startup argv. Verify post-launch:
+
+```
+xedit_session()  # data.consentEnabled === true ?
+```
+
+If `consentEnabled` is still `false` after passing `iKnowWhatImDoing: true`,
+the flag did not propagate — check that the MCP is on a build that includes
+the consent forwarding (commit `xxx` and later; see `RELEASE-NOTES.md`).
+
+Consent is per-launch and explicit only: there is no env-var fallback, no
+runtime toggle, and the audit log captures the consent decision at the call
+site. To revoke consent, call `xedit_stop` then `xedit_start` without the flag.
+
 ## Confidence + dry-run discipline (borrowed from skyrimvr-claude-toolkit)
 
 Before any mutating action:
