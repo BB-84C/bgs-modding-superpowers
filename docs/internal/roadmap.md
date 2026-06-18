@@ -1507,3 +1507,90 @@ End-to-end pipeline validated: configure_executable → MO2 boot → mo2_run_too
 ### v1.2 → v1.3 arc summary
 
 Started Batch 1 at main@\ 63c437\ with 395 tests. Ended at main@\<this commit>\ with 595 tests (+200). Closeout: **24 bugs fixed shipped on main, 0 critical open, 1 low-severity housekeeping-debt (BUG-28) deferred**. 66/70 e2e cases verified PASS via real OpenCode→MCP wire. mo2-mcp v1.3 is the stable mainline for downstream BGS modding workflows.
+
+---
+
+## 2026-06-18 ## r6 alignment + #8 consent forwarding + post-r6 wire-verification cascade
+
+### What this round delivered
+
+End-to-end alignment of xedit-mcp + bgs-kb-mcp to TES5Edit-contrib `v4.1.6-automation.r6` (contract `0.20`), plus the wave of follow-up fixes surfaced by real-daemon semantic acceptance.
+
+**16 commits on `main` since `0202943`:**
+
+```
+ed74f92 docs(release-notes): surface 4 post-r6 wire-verification fixes
+5c370e0 build (wrapper schema realign + glossary skip)
+4bbb562 fix: align create_child_record schema with KB + daemon; skip glossary packs in bgs_kb_query
+0663322 build (create_child_record parent shape fix)
+f6b35b9 fix(xedit-mcp): translate parent spec keys to daemon shape (superseded by 4bbb562)
+8dd0214 build (consentEnabled nested path fix)
+25b2e18 fix(xedit-mcp): read consentEnabled from nested r6 supports paths
+d085c97 build (#8 consent forwarding)
+a88378d feat(xedit-mcp): forward iKnowWhatImDoing through launch chain (#8)
+96aab51 build (find-records-by-pattern fix)
+b5bc71e fix(xedit-mcp): wrap singular file arg to files[] (B2 bug)
+71ba083 build (r6 alignment closeout)
+83aef9f feat(xedit-mcp): 4 r6 intent tools (#5)
+fe21e62 feat(kb): 8 r6 capability records + contract-version-field-presence refresh (#4)
+e8df916 feat(skills): r6 progressive-disclosure + dead-link fix (#3, #6)
+627d526 feat(xedit-mcp): bump capabilities-digest to 0.20 (#2)
+d3af959 docs: README intent-tool count + RELEASE-NOTES r6 alignment (#7)
+```
+
+### Issues closed (8 of 9 filed during round)
+
+- #2 capabilities-digest 0.20 (wire-PASS via Phase A handshake)
+- #3 skill r6 progressive disclosure (content-only)
+- #4 8 KB records + contract-version refresh (122 records validate clean)
+- #5 4 intent tool wrappers (3 wire-PASS + 1 fast-fail wire-PASS, + bonus full wrapper success-path wire-verified after schema realignment)
+- #6 xedit-knowledgebase.md dead-link removed
+- #7 README + RELEASE-NOTES r6 alignment
+- #8 consent flag forwarding — full E2E: MCP arg → PS args → xEdit argv `-IKnowWhatImDoing` → `supports.elementsMutation.iKnowWhatImDoing: true` → `xedit_session.consentEnabled: true` → real mutating call → record persisted to disk
+- #9 was self-filed during verification then resolved: turned out the KB record was already correct; the wrapper schema was the misaligned side. Closed with `4bbb562` aligning wrapper to KB + daemon (`parent: { file, formId, subGroup?, coords? }`).
+
+### Empirical bugs caught only by real-daemon wire E2E
+
+All four were invisible to mock-tier unit tests and only surfaced during end-to-end verification against the FO4Edit 4.1.6r6 daemon:
+
+1. **B2** `xedit_find_records_by_pattern` — wrapper schema accepted `file: string` but daemon's `records.apply_filter` requires `files: string[]`. Wrapper never wrapped → every call failed with `invalid_request: 'files' must contain at least one plugin name`. Fixed by `wrapFileAsFiles()` translator + regression test asserting `forwarded.files === [file]`. (commit `b5bc71e`)
+2. **Hidden consent path** — `buildContext` in `session.ts` was reading `supports.iKnowWhatImDoing` at top level. r6 daemon nests it under `supports.elementsMutation.iKnowWhatImDoing` and `supports.scripts.execution.iKnowWhatImDoing`. Result: `consentEnabled` always returned `false` even with the flag set. Caught the moment #8 forwarding actually let the flag through end-to-end. Fixed to read nested-only paths with regression guard against re-introducing top-level lookup. (commit `25b2e18`)
+3. **`xedit_create_child_record` wrapper schema** — used `parent: { parentFile, parentFormId, ... }` but both the daemon AND the KB record use `parent: { file, formId, ... }`. Wrapper never reached a successful daemon call. Realigned schema to match daemon + KB, transparent 0x-prefix strip is the only translation now. (commits `f6b35b9` → superseded by `4bbb562`)
+4. **`bgs_kb_query` cross-pack abort** — glossary-schema pack `bgs-l10n-starfield-zhhans` lacks `records` / `records_fts` tables, so the cross-pack FTS UNION threw `no such table: records_fts` and aborted the entire query. Workaround was `packIds` filter. Real fix: wrap each per-pack query in try/catch, skip on `no such table: records(_fts)`, surface skipped packs in `stats.skippedPacks` so the agent can see why they were excluded. (commit `4bbb562`)
+
+### What was previously assumed and now is known
+
+- `system.describe` ok-envelope from xEdit and "consent flag present in spawned xEdit's CommandLine" do NOT imply daemon-reported `consentEnabled: true`. The MCP's session projection layer was a separate failure point.
+- Static evidence (compile passes, dist files have new symbols, vendor clones byte-identical) is decisively NOT semantic proof. Three full OpenCode restarts this round each peeled back a deeper layer of cascading bugs that mock + symbol-grep verification had concealed.
+- `xedit_call records.create` has at least three field-name traps the daemon doesn't catch in the error message helpfully: top-level `targetFile` (not `file`), `parent.file` (not `parentFile`), and CELL/WRLD parent must already exist in `targetFile` (use `records.copy_into` first to create an override).
+- Canonical bootstrap is **bare** `ModOrganizer.exe -p Default` (no `run -e`). MO2's Mo2AgentControl plugin writes `runtime/status.json` on plugin load. `OpenCode xEdit Automation Serve` customExecutable redundantly spawns a second xEdit that the daemon ignores — wastes a process per session. Documented in `.opencode/artifacts/r6-build/VERIFICATION-REPORT.md` for the next session loop.
+
+### What downstream work should do differently
+
+- New r6 capability records belong to `bgs-kb-core 2026.06.13`, now published as part of GitHub release `kb-2026.06.13`. Independent `bgs_kb_install_pack({packId:'bgs-kb-core', version:'2026.06.13'})` users can finally pick them up; bundled-plugin-tree users had them from `0202943..ed74f92`.
+- Any future intent-tool wrapper for an r6+ verb MUST wire-test the success path against the live daemon BEFORE the issue ships, not just the schema sweep + fast-fail gate. The four cascade bugs this round each looked clean at static-evidence layer.
+- bgs-kb-mcp's `bgs_kb_query` now reports `stats.skippedPacks`; downstream skills should surface that field when explaining narrow result sets to the agent.
+- xEdit binaries built before a r6+ release tag don't recognize r6 flags. Always rebuild + sync the harness `Tools/OpenCodeXEdit/xEdit.exe` after pulling the contrib repo.
+
+### KB release published
+
+GitHub release `kb-2026.06.13` published at `https://github.com/BB-84C/bgs-modding-superpowers/releases/tag/kb-2026.06.13`:
+
+- `bgs-kb-core 2026.06.13` (287 KB) — 8 new r6 records + contract-version-field-presence refresh, 122 records validate-clean
+- 5 other packs unchanged from kb-2026.06.12 (re-attached at same versions/sha256 so `bgs_kb_install_pack` resolves them under the new tag)
+- `manifest-index.json` updated, `bgs_kb_check_updates` now reports `bgs-kb-core latestVersion: 2026.06.13`
+
+### Test suite progression
+
+- xedit-mcp: 87 → 110 → 112 → 114 (+27 across the arc, including 4 regression guards for the cascade bugs)
+- bgs-kb-mcp: 126 (unchanged in count; glossary-skip code path covered by existing fixture-pack iteration)
+- 0 GitHub issues open after `kb-2026.06.13` publish
+
+### Durability evidence on disk
+
+Three test ESPs left in `.artifacts/mo2/overwrite/` as semantic-acceptance audit trail:
+- `OpenCodeR6Test.esp` (183 B) — first Phase C step 2 attempt, contains WEAP 66000001
+- `OpenCodeR6Wire.esp` (529 B) — second attempt with CELL override + passthrough REFR child
+- `OpenCodeR6Final.esp` (526 B) — final wrapper-wire-test PASS, REFR 66000001 created via `xedit_create_child_record` intent tool with the realigned schema
+
+All three TES4 + signatures verified via raw byte readback. Bundled tree byte-sync to vendor confirmed at every push.
