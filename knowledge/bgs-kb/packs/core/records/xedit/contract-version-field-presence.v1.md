@@ -7,7 +7,7 @@ appliesTo:
 canonical:
   answer: The xEdit automation contract version can drift between source and docs, so clients should prefer field-presence checks over branching on the exact version string.
   confidence: verified-project-doc
-queryKeys: [contract version, version drift, field presence, "0.10", "0.9"]
+queryKeys: [contract version, version drift, field presence, "0.20", "0.12"]
 severity: medium
 sources:
   - kind: project-skill
@@ -16,7 +16,7 @@ sources:
   - kind: project-skill
     ref: skills/xedit-automation/xedit-knowledgebase.md
     sectionPath: Known drift
-lastReviewed: "2026-06-02"
+lastReviewed: "2026-06-17"
 schemaVersion: 1
 ---
 
@@ -24,6 +24,7 @@ schemaVersion: 1
 
 The docs and fork source have disagreed on the displayed contract version string.
 That mismatch is not itself a semantic failure if the fields an MCP tool needs are present.
+The r6 release moved the additive contract surface from 0.12 through 0.20, so older pre-r6 anchors are no longer the useful diagnostic example.
 
 Adapters should detect support from response shape and capability fields rather than hard-failing on one exact string.
 Version strings still belong in diagnostics and drift reports.
