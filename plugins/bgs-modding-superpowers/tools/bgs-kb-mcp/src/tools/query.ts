@@ -126,22 +126,45 @@ export function makeQueryTool(opts: QueryToolOptions) {
     const sessions = opts.registry.all().filter((session) => packFilter.size === 0 || packFilter.has(session.pack.packId));
     const kbVersionMap = Object.fromEntries(opts.registry.all().map((session) => [session.pack.packId, session.pack.version]));
     const candidates: Candidate[] = [];
+    // Track packs the query had to skip because they don't share the
+    // standard records / records_fts schema (e.g. the glossary-schema pack
+    // `bgs-l10n-starfield-zhhans`). Surfaced in the response stats so the
+    // agent can see why a cross-pack search returned narrower-than-expected
+    // results. Captured in memory/45 KB Workflow Scope Split (2026-06-12)
+    // and 2026-06-11 known follow-up note about `no such table: records_fts`.
+    const skippedPacks: Array<{ packId: string; reason: string }> = [];
 
     for (const session of sessions) {
-      let rows = querySession(session, sanitizedQuery, {
-        games: parsed.data.games,
-        domains: parsed.data.domains,
-        limit: overfetchLimit,
-      });
-      if (rows.length === 0) {
-        const fallbackQuery = orFallbackQuery(sanitizedQuery);
-        if (fallbackQuery !== sanitizedQuery) {
-          rows = querySession(session, fallbackQuery, {
-            games: parsed.data.games,
-            domains: parsed.data.domains,
-            limit: overfetchLimit,
-          });
+      let rows: QueryRow[];
+      try {
+        rows = querySession(session, sanitizedQuery, {
+          games: parsed.data.games,
+          domains: parsed.data.domains,
+          limit: overfetchLimit,
+        });
+        if (rows.length === 0) {
+          const fallbackQuery = orFallbackQuery(sanitizedQuery);
+          if (fallbackQuery !== sanitizedQuery) {
+            rows = querySession(session, fallbackQuery, {
+              games: parsed.data.games,
+              domains: parsed.data.domains,
+              limit: overfetchLimit,
+            });
+          }
         }
+      } catch (err) {
+        // Glossary-schema packs (e.g. bgs-l10n-starfield-zhhans) do not have
+        // the standard `records` / `records_fts` tables. SQLite throws
+        // `no such table: records_fts` (or `no such table: records`) on the
+        // FTS query. Skip the pack instead of failing the entire cross-pack
+        // search. Other SQL errors are NOT silently swallowed — only the
+        // missing-records-schema case is treated as a structural skip.
+        const message = (err as Error).message ?? String(err);
+        if (/no such table:\s*records(_fts)?/i.test(message)) {
+          skippedPacks.push({ packId: session.pack.packId, reason: "no_records_schema" });
+          continue;
+        }
+        throw err;
       }
       for (const row of rows) {
         candidates.push({
@@ -180,6 +203,10 @@ export function makeQueryTool(opts: QueryToolOptions) {
           kbVersionMap,
           elapsedMs,
           totalCandidates: candidates.length,
+          // skippedPacks is empty in the standard case. Populated when one or
+          // more loaded packs ship a non-records schema (e.g. glossary packs);
+          // see the per-session try/catch in the query loop above.
+          skippedPacks: skippedPacks.length > 0 ? skippedPacks : undefined,
         },
         // Cursor support is intentionally stubbed in v1. Agents should refine
         // queries rather than page broad searches until KB-6 adds real cursors.
