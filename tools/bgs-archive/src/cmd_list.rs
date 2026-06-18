@@ -8,12 +8,7 @@ use crate::{
     model::{EntryInfo, Envelope},
 };
 
-pub fn run(
-    archive: &Path,
-    filter: Option<&str>,
-    long: bool,
-    json: bool,
-) -> Result<(), AppError> {
+pub fn run(archive: &Path, filter: Option<&str>, long: bool, json: bool) -> Result<(), AppError> {
     let opened = open_any(archive)?;
     let mut entries = opened.entries();
 

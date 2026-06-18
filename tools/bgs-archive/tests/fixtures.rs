@@ -1,8 +1,8 @@
+use assert_cmd::Command;
 use ba2::{
     fo4::{Archive, ArchiveKey, ArchiveOptions, Chunk, CompressionFormat, File, Format, Version},
     prelude::*,
 };
-use assert_cmd::Command;
 
 #[test]
 fn open_any_detects_fo4() {
@@ -114,4 +114,30 @@ fn list_json_reports_entries_and_filter_matches_glob() {
     let entries = filtered["data"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["path"], "hello.txt");
+}
+
+#[test]
+fn extract_writes_fo4_entry_bytes_to_output_directory() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let chunk = Chunk::from_decompressed(b"Hello world!\n");
+    let file: File = [chunk].into_iter().collect();
+    let key: ArchiveKey = b"hello.txt".into();
+    let archive: Archive = [(key, file)].into_iter().collect();
+    let options = ArchiveOptions::builder().strings(true).build();
+    archive.write(&mut tmp.as_file(), &options).unwrap();
+
+    let out_dir = tempfile::tempdir().unwrap();
+    Command::cargo_bin("bgs-archive")
+        .unwrap()
+        .args([
+            "extract",
+            tmp.path().to_str().unwrap(),
+            "--out",
+            out_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let extracted = std::fs::read(out_dir.path().join("hello.txt")).unwrap();
+    assert_eq!(extracted, b"Hello world!\n");
 }

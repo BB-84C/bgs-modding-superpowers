@@ -1,6 +1,7 @@
-use std::{fs::File, io::BufReader, path::Path};
+use std::{fs, fs::File, io::BufReader, path::Path};
 
 use ba2::prelude::*;
+use globset::Glob;
 
 use crate::{error::AppError, model::EntryInfo};
 
@@ -68,6 +69,88 @@ impl AnyArchive {
                 .collect(),
         }
     }
+
+    /// Extract entries (optionally glob-filtered) under `out_dir`. Returns extracted virtual paths.
+    pub fn extract(
+        &self,
+        out_dir: &Path,
+        filter: Option<&str>,
+        flatten: bool,
+    ) -> Result<Vec<String>, crate::error::AppError> {
+        let matcher = filter
+            .map(|pattern| {
+                Glob::new(pattern)
+                    .map_err(|error| AppError::Unsupported(format!("invalid glob filter: {error}")))
+                    .map(|glob| glob.compile_matcher())
+            })
+            .transpose()?;
+        let mut extracted = Vec::new();
+
+        match self {
+            AnyArchive::Tes3(archive) => {
+                for (key, file) in archive.iter() {
+                    let virtual_path = name_or_tes3_hash(key);
+                    if !matches_filter(&virtual_path, matcher.as_ref()) {
+                        continue;
+                    }
+
+                    let mut dst = create_output(out_dir, &virtual_path, flatten)?;
+                    file.write(&mut dst)?;
+                    extracted.push(virtual_path);
+                }
+            }
+            AnyArchive::Tes4(archive, meta) => {
+                let opts: ba2::tes4::FileCompressionOptions = meta.into();
+                for (directory_key, directory) in archive.iter() {
+                    for (file_key, file) in directory.iter() {
+                        let virtual_path = join_tes4_path(directory_key, file_key);
+                        if !matches_filter(&virtual_path, matcher.as_ref()) {
+                            continue;
+                        }
+
+                        let mut dst = create_output(out_dir, &virtual_path, flatten)?;
+                        file.write(&mut dst, &opts)?;
+                        extracted.push(virtual_path);
+                    }
+                }
+            }
+            AnyArchive::Fo4(archive, meta) => {
+                let opts: ba2::fo4::FileWriteOptions = meta.into();
+                for (key, file) in archive.iter() {
+                    let virtual_path = name_or_fo4_hash(key);
+                    if !matches_filter(&virtual_path, matcher.as_ref()) {
+                        continue;
+                    }
+
+                    let mut dst = create_output(out_dir, &virtual_path, flatten)?;
+                    file.write(&mut dst, &opts)?;
+                    extracted.push(virtual_path);
+                }
+            }
+        }
+
+        Ok(extracted)
+    }
+}
+
+fn matches_filter(path: &str, matcher: Option<&globset::GlobMatcher>) -> bool {
+    matcher.is_none_or(|matcher| matcher.is_match(path))
+}
+
+fn create_output(out_dir: &Path, virtual_path: &str, flatten: bool) -> Result<File, AppError> {
+    let relative_path = if flatten {
+        virtual_path
+            .rsplit('/')
+            .find(|part| !part.is_empty())
+            .unwrap_or(virtual_path)
+    } else {
+        virtual_path
+    };
+    let dest = out_dir.join(relative_path);
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    Ok(File::create(dest)?)
 }
 
 fn bstr_path(bytes: &[u8]) -> String {
