@@ -38,11 +38,9 @@ impl Game {
     pub fn family(self) -> Family {
         match self {
             Game::Morrowind => Family::Tes3,
-            Game::Oblivion
-            | Game::Fallout3
-            | Game::Falloutnv
-            | Game::Skyrimle
-            | Game::Skyrimse => Family::Tes4,
+            Game::Oblivion | Game::Fallout3 | Game::Falloutnv | Game::Skyrimle | Game::Skyrimse => {
+                Family::Tes4
+            }
             Game::Fallout4 | Game::Fallout4ng | Game::Fallout76 | Game::Starfield => Family::Fo4,
         }
     }

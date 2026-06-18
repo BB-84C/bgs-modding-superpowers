@@ -1,13 +1,6 @@
-#![allow(dead_code)]
-
-mod cli;
-mod error;
-mod game;
-mod model;
-
 use anyhow::Result;
+use bgs_archive::cli::{Cli, Command};
 use clap::Parser;
-use cli::{Cli, Command};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
