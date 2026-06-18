@@ -42,7 +42,7 @@ pub enum Command {
         format: crate::game::PackFormat,
         #[arg(long, value_enum)]
         compress: Option<crate::game::Compress>,
-        #[arg(long)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         strings: bool,
     },
     Capabilities,

@@ -24,7 +24,22 @@ fn main() -> Result<()> {
             flatten,
             cli.json,
         )?,
-        Command::Pack { .. } => println!("pack not yet implemented (task A8)"),
+        Command::Pack {
+            input_dir,
+            out_archive,
+            game,
+            format,
+            compress,
+            strings,
+        } => bgs_archive::cmd_pack::run(
+            &input_dir,
+            &out_archive,
+            game,
+            format,
+            compress,
+            strings,
+            cli.json,
+        )?,
         Command::Capabilities => println!("capabilities not yet implemented (task A3)"),
     }
 

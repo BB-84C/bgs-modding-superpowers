@@ -141,3 +141,39 @@ fn extract_writes_fo4_entry_bytes_to_output_directory() {
     let extracted = std::fs::read(out_dir.path().join("hello.txt")).unwrap();
     assert_eq!(extracted, b"Hello world!\n");
 }
+
+#[test]
+fn pack_fo4_round_trips_file_bytes_with_paths() {
+    let input_dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(input_dir.path().join("sub")).unwrap();
+    std::fs::write(input_dir.path().join("sub").join("a.txt"), b"alpha\n").unwrap();
+    std::fs::write(input_dir.path().join("b.bin"), b"\x00\x01\x02beta").unwrap();
+
+    let out_archive = tempfile::NamedTempFile::new().unwrap();
+    Command::cargo_bin("bgs-archive")
+        .unwrap()
+        .args([
+            "pack",
+            input_dir.path().to_str().unwrap(),
+            out_archive.path().to_str().unwrap(),
+            "--game",
+            "fallout4",
+        ])
+        .assert()
+        .success();
+
+    let extract_dir = tempfile::tempdir().unwrap();
+    let archive = bgs_archive::archive::open_any(out_archive.path()).unwrap();
+    let extracted = archive.extract(extract_dir.path(), None, false).unwrap();
+
+    assert!(extracted.iter().any(|path| path == "sub/a.txt"));
+    assert!(extracted.iter().any(|path| path == "b.bin"));
+    assert_eq!(
+        std::fs::read(extract_dir.path().join("sub").join("a.txt")).unwrap(),
+        b"alpha\n"
+    );
+    assert_eq!(
+        std::fs::read(extract_dir.path().join("b.bin")).unwrap(),
+        b"\x00\x01\x02beta"
+    );
+}
