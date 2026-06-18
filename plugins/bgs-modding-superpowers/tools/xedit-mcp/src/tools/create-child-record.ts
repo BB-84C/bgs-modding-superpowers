@@ -53,15 +53,40 @@ const Args = z.object({
   formData: z.record(z.unknown()).optional(),
 });
 
-/** Strip "0x" prefix from `parent.parentFormId` for daemon forwarding. */
-function stripParentFormIdPrefix(args: Record<string, unknown>): Record<string, unknown> {
+/**
+ * Translate intent-tool's parent spec to the daemon's expected shape.
+ *
+ * Our schema (intent-tool surface):
+ *   { parent: { parentFile, parentFormId, subGroup?, coords? } }
+ *
+ * Daemon `records.create`'s actual `parent` shape (empirically verified
+ * 2026-06-18 against FO4Edit 4.1.6r6):
+ *   { parent: { file, formId, subGroup?, coords? } }
+ *
+ * The `parentFile`/`parentFormId` names in our schema were inherited from
+ * issue #4's KB record draft and never wire-checked against the daemon. The
+ * old version of this function only stripped "0x" from parentFormId without
+ * renaming the keys, so the daemon rejected every call with
+ *   invalid_request: Automation arg "file" is required
+ * (meaning `parent.file`, not top-level `file`). The wrapper was therefore
+ * fully broken — fast-fail consent gate worked but no call ever reached
+ * the daemon successfully. Caught during Phase C step 2 verification.
+ *
+ * This helper also strips the "0x" prefix from formId in the same pass.
+ */
+function mapParentSpecForDaemon(args: Record<string, unknown>): Record<string, unknown> {
   const parent = args.parent;
   if (!parent || typeof parent !== "object") return args;
   const p = parent as Record<string, unknown>;
-  if (typeof p.parentFormId !== "string") return args;
-  const f = p.parentFormId;
-  if (!(f.startsWith("0x") || f.startsWith("0X"))) return args;
-  return { ...args, parent: { ...p, parentFormId: f.slice(2) } };
+  const daemonParent: Record<string, unknown> = {};
+  if (typeof p.parentFile === "string") daemonParent.file = p.parentFile;
+  if (typeof p.parentFormId === "string") {
+    const f = p.parentFormId;
+    daemonParent.formId = f.startsWith("0x") || f.startsWith("0X") ? f.slice(2) : f;
+  }
+  if (typeof p.subGroup === "string") daemonParent.subGroup = p.subGroup;
+  if (Array.isArray(p.coords)) daemonParent.coords = p.coords;
+  return { ...args, parent: daemonParent };
 }
 
 export interface CreateChildRecordOptions {
@@ -135,7 +160,7 @@ export function makeCreateChildRecordHandler(opts: CreateChildRecordOptions) {
       return r.refusal;
     }
 
-    const daemonArgs = stripParentFormIdPrefix(args);
+    const daemonArgs = mapParentSpecForDaemon(args);
     const native = await opts.adapter.call({ command: "records.create", args: daemonArgs });
     if (!native.ok) {
       const env = refuse({
