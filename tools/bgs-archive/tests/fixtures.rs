@@ -1,7 +1,8 @@
 use ba2::{
-    fo4::{Archive, ArchiveKey, ArchiveOptions, Chunk, File},
+    fo4::{Archive, ArchiveKey, ArchiveOptions, Chunk, CompressionFormat, File, Format, Version},
     prelude::*,
 };
+use assert_cmd::Command;
 
 #[test]
 fn open_any_detects_fo4() {
@@ -35,4 +36,33 @@ fn open_any_uses_hash_path_when_fo4_strings_are_absent() {
 
     assert_eq!(entries.len(), 1);
     assert!(entries[0].path.starts_with("<hash:"));
+}
+
+#[test]
+fn info_json_reports_fo4_v2_metadata() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let chunk = Chunk::from_decompressed(b"Hello world!\n");
+    let file: File = [chunk].into_iter().collect();
+    let key: ArchiveKey = b"hello.txt".into();
+    let archive: Archive = [(key, file)].into_iter().collect();
+    let options = ArchiveOptions::builder()
+        .version(Version::v2)
+        .format(Format::GNRL)
+        .compression_format(CompressionFormat::Zip)
+        .strings(true)
+        .build();
+    archive.write(&mut tmp.as_file(), &options).unwrap();
+
+    let output = Command::cargo_bin("bgs-archive")
+        .unwrap()
+        .args(["info", tmp.path().to_str().unwrap(), "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(value["data"]["family"], "fo4");
+    assert_eq!(value["data"]["version"], 2);
 }
