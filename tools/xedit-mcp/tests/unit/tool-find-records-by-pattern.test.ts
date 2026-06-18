@@ -49,6 +49,11 @@ describe("xedit_find_records_by_pattern tool", () => {
     expect(forwarded).toBeDefined();
     expect(forwarded!.signatures).toEqual(["REFR"]);
     expect(forwarded!.editorIdRegex).toBe("^(Iron|Steel)");
+    // Daemon contract 0.20 requires `files: string[]`; intent tool's singular
+    // `file` MUST be wrapped before forwarding. Verified empirically against
+    // FO4 r6 daemon 2026-06-18 — omitting `files` triggers invalid_request.
+    expect(forwarded!.files).toEqual(["Patch.esp"]);
+    expect(forwarded!.file).toBeUndefined();
     const data = env.data as { matches: unknown[]; matchCount: number; truncated: boolean };
     expect(data.matches).toHaveLength(2);
     expect(data.matchCount).toBe(2);
