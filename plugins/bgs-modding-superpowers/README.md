@@ -4,7 +4,7 @@ An agent plugin for Bethesda Game Studio modpack curation. Installs on OpenCode,
 
 ## What's in v0.2
 
-- **`xedit` MCP server** — six intent tools (`xedit_session`, `xedit_list_capabilities`, `xedit_find_record`, `xedit_read_record`, `xedit_inspect_conflicts`) plus the atomic `xedit_call` passthrough for any of 49 native xEdit daemon commands. Goes through a 7-stage harness pipeline (validate → state-check → rules → forward → envelope → audit).
+- **`xedit` MCP server** — nine intent tools (`xedit_session`, `xedit_list_capabilities`, `xedit_find_record`, `xedit_read_record`, `xedit_inspect_conflicts`, `xedit_inspect_conflicts_deep`, `xedit_find_records_by_pattern`, `xedit_create_child_record`, `xedit_navigate_ancestry`) plus the atomic `xedit_call` passthrough for the native xEdit daemon command set discovered at runtime via `system.capabilities`. Goes through a 7-stage harness pipeline (validate → state-check → rules → forward → envelope → audit).
 - **`bgs_kb` MCP server** — local SQLite + FTS5 knowledge-base lookup (`bgs_kb_status`, `bgs_kb_query`, `bgs_kb_get`) over the bundled core BGS modding KB. Works without MO2 or xEdit running.
 - **MO2 control plane** — C++ MO2 plugin DLL + Python loader + broker that lets the agent drive your MO2 instance (read profile state, run launchers, capture child PIDs). Deployed by `scripts/install-mo2-control-plane.ps1` into your own MO2.
 - **xEdit hook bridge** — owned-by-this-repo Delphi DLL that unblocks unattended xEdit launches under MO2. Ships from `tools/xedit-hook-bridge/dist/`.

@@ -1,5 +1,20 @@
+/**
+ * TES5Edit-contrib r6 (automation contract 0.20) is additive over the older
+ * digest surface. The live daemon reports the details via system.capabilities;
+ * this digest only surfaces agent-facing command names and key args.
+ *
+ * New r6 supports.* anchors tracked here:
+ * - supports.childGroupNavigation (0.13)
+ * - supports.applyFilterExtensions (0.14; 0.20 adds regex + multiPattern sub-blocks)
+ * - supports.referencesRecursive (0.15)
+ * - supports.conflictStatusChildGroup (0.15; response-only result.childGroup)
+ * - supports.createParentSpec (0.16; records.create parent={file, formId, subGroup?, coords?})
+ * - supports.createParentSpec WRLD parent/coords extension (0.18)
+ * - supports.elementsChildrenPagination (0.17)
+ * - supports.reverseNavigation (0.19)
+ */
 export const CAPABILITIES_DIGEST = {
-    contractVersionExpected: "0.10",
+    contractVersionExpected: "0.20",
     groups: [
         {
             name: "system",
@@ -40,17 +55,29 @@ export const CAPABILITIES_DIGEST = {
             blurb: "Read/search + mutating create/copy/delete/mark_deleted (15 commands).",
             commands: [
                 { name: "records.list", summary: "List records in a file/group", mutating: false, keyArgs: ["file", "signature"] },
-                { name: "records.apply_filter", summary: "Server-side filter", mutating: false },
+                {
+                    name: "records.apply_filter",
+                    summary: "Server-side filter",
+                    mutating: false,
+                    keyArgs: [
+                        "parentFormId",
+                        "editorIdRegex",
+                        "displayNameRegex",
+                        "fullNameRegex",
+                        "baseEditorIdRegex",
+                        "baseDisplayNameRegex",
+                    ],
+                },
                 { name: "records.base_record", summary: "Master record of an override", mutating: false, keyArgs: ["file", "formId"] },
-                { name: "records.find_by_form_id", summary: "Locate by FormID", mutating: false, keyArgs: ["file", "formId"] },
-                { name: "records.find_by_editor_id", summary: "Locate by EditorID", mutating: false, keyArgs: ["editorId"] },
-                { name: "records.get", summary: "Get a record + fields", mutating: false, keyArgs: ["file", "formId"] },
-                { name: "records.master_or_self", summary: "Resolve to master or self", mutating: false, keyArgs: ["file", "formId"] },
-                { name: "records.winning_override", summary: "Which file wins for this record", mutating: false, keyArgs: ["file", "formId"] },
+                { name: "records.find_by_form_id", summary: "Locate by FormID", mutating: false, keyArgs: ["file", "formId", "includeParents"] },
+                { name: "records.find_by_editor_id", summary: "Locate by EditorID", mutating: false, keyArgs: ["editorId", "includeParents"] },
+                { name: "records.get", summary: "Get a record + fields", mutating: false, keyArgs: ["file", "formId", "includeParents"] },
+                { name: "records.master_or_self", summary: "Resolve to master or self", mutating: false, keyArgs: ["file", "formId", "includeParents"] },
+                { name: "records.winning_override", summary: "Which file wins for this record", mutating: false, keyArgs: ["file", "formId", "includeParents"] },
                 { name: "records.conflict_status", summary: "Conflict label for a record", mutating: false, keyArgs: ["file", "formId"] },
-                { name: "records.references", summary: "Refs out from this record", mutating: false, keyArgs: ["file", "formId"] },
+                { name: "records.references", summary: "Refs out from this record", mutating: false, keyArgs: ["file", "formId", "recursive"] },
                 { name: "records.referenced_by", summary: "Refs in to this record", mutating: false, keyArgs: ["file", "formId"] },
-                { name: "records.create", summary: "Create record (signature support is dynamic)", mutating: true, keyArgs: ["targetFile", "signature", "editorId"] },
+                { name: "records.create", summary: "Create record (signature support is dynamic)", mutating: true, keyArgs: ["targetFile", "signature", "editorId", "parent"] },
                 { name: "records.copy_into", summary: "Copy as override into target plugin", mutating: true, keyArgs: ["source", "target", "mode"] },
                 { name: "records.delete", summary: "Delete record", mutating: true, keyArgs: ["file", "formId"] },
                 { name: "records.mark_deleted", summary: "Mark deleted flag", mutating: true, keyArgs: ["file", "formId"] },
@@ -60,8 +87,8 @@ export const CAPABILITIES_DIGEST = {
             name: "elements",
             blurb: "Read/write sub-record element tree (8 commands).",
             commands: [
-                { name: "elements.get", summary: "Get element value/struct", mutating: false, keyArgs: ["file", "formId", "path"] },
-                { name: "elements.children", summary: "List children at path", mutating: false, keyArgs: ["file", "formId", "path"] },
+                { name: "elements.get", summary: "Get element value/struct", mutating: false, keyArgs: ["file", "formId", "path", "includeParents"] },
+                { name: "elements.children", summary: "List children at path", mutating: false, keyArgs: ["file", "formId", "path", "limit", "offset", "includeParents"] },
                 { name: "elements.conflict_status", summary: "Element-level conflict", mutating: false, keyArgs: ["file", "formId", "path"] },
                 { name: "elements.required_masters", summary: "Masters required by this element", mutating: false },
                 { name: "elements.set_value", summary: "Set element value", mutating: true, keyArgs: ["file", "formId", "path", "value"] },

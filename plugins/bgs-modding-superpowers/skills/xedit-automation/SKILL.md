@@ -7,15 +7,30 @@ description: Use whenever the task involves inspecting, modifying, or building p
 
 This skill is the always-loaded entry point for any xEdit work. It is the single source of truth for "which path do I use" and "what must I never do." Specialised task skills (e.g. `xedit-conflict-audit`) inherit its routing, anti-patterns, and verification discipline; they do not restate them.
 
-## Toolbox at a glance (capability digest, Top-N)
+## Toolbox at a glance (progressive disclosure, r6-aware)
 
-The forked xEdit daemon exposes 49 commands across 7 groups (system, session, files, records, elements, jobs, scripts), all reachable through the MCP. The most common ones:
+The forked xEdit daemon is best treated as a progressive-disclosure surface:
+start with the small MCP intent tools, ask the live daemon which r6 capability
+blocks it supports, then switch to the richer one-call patterns only when the
+corresponding `system.capabilities.supports.*` key is present.
 
-- **Discovery & session** — `xedit_session`, `xedit_list_capabilities`. Call `xedit_session` first every conversation. Then call `xedit_list_capabilities` once to see the toolbox and check for drift between the curated digest and the live daemon.
-- **Reading records & conflicts** — `xedit_find_record`, `xedit_read_record`, `xedit_inspect_conflicts`. These are the W2 (conflict audit) backbone.
-- **Atomic passthrough** — `xedit_call(command, args)`. For any native daemon command that does not have an intent tool yet. Still runs the full pipeline (validation → state → rules → audit). Use it whenever the intent tools do not fit.
+- **Discovery & session** — `xedit_session`, `xedit_list_capabilities`. Call
+  `xedit_session` first every conversation. Then call `xedit_list_capabilities`
+  once to see the command digest, `contractVersionExpected`, and r6
+  `supports.*` anchors.
+- **Reading records & conflicts** — `xedit_find_record`, `xedit_read_record`,
+  `xedit_inspect_conflicts`. These are the W2 (conflict audit) backbone; branch
+  to atomic passthrough when W2 needs an r6 response block that no intent tool
+  exposes yet.
+- **Atomic passthrough** — `xedit_call(command, args)`. For any native daemon
+  command that does not have an intent tool yet. Still runs the full pipeline
+  (validation → state → rules → audit). Use it whenever the intent tools do not
+  fit.
 
-For deep reference material, query the structured BGS KB first (`bgs_kb_query` / `bgs_kb_get`). The old companion file `xedit-knowledgebase.md` is now a redirect kept only for back-compat inbound links.
+For deep reference material, query the structured BGS KB first (`bgs_kb_query`
+/ `bgs_kb_get`). Deep reference records live under
+`knowledge/bgs-kb/packs/core/records/xedit/` (queryable via `bgs_kb_query` /
+`bgs_kb_get`).
 
 ## Routing doctrine (which path to use)
 
@@ -28,6 +43,129 @@ For deep reference material, query the structured BGS KB first (`bgs_kb_query` /
 | Daemon explicitly in default (non-MCP) mode, manual debug only | Direct `xedit-client.ps1` is acceptable — but ONLY when the user has explicitly accepted the risk and the daemon is not in `-automation-mcp-mode` |
 
 **The agent should never have a reason to bypass the MCP.** Atomic passthrough exists for that.
+
+## R6 progressive-disclosure capability checks
+
+Do not assume every daemon is r6. Read `xedit_list_capabilities` once and branch
+on the support keys below. On pre-r6 daemons, fall back to the older explicit
+record-list / child-walk / per-record loop patterns; on r6+ daemons, use the
+one-call or page-aware form to reduce round-trips and preserve context.
+
+| Capability key | Contract | Prefer this pattern | KB record |
+|---|---:|---|---|
+| `supports.childGroupNavigation` | 0.13 | Navigate CELL/WRLD/DIAL/QUST ChildGroups through `elements.children` stubs | `xedit.childgroup-navigation.v1` |
+| `supports.createParentSpec` | 0.16 / 0.18 | Create records directly under parent ChildGroups with `records.create` `parent` | `xedit.records-create-parent-spec.v1` |
+| `supports.elementsChildrenPagination` | 0.17 | Page `elements.children` with `limit` / `offset` | `xedit.elements-children-pagination.v1` |
+| `supports.reverseNavigation` | 0.19 | Add `includeParents:true` and read `relations.parents` | `xedit.reverse-navigation.v1` |
+
+For the whole r6 contract delta, query KB record `xedit.r6-contract-summary.v1`.
+
+### ChildGroup navigation (`supports.childGroupNavigation`)
+
+On r6+ daemons, `elements.children` on CELL, WRLD, DIAL, and QUST records
+returns a virtual child entry with `kind: "child_group"`. Treat that entry as a
+read-only navigation stub, not as a real mutable element.
+
+Use it one generation at a time:
+
+```text
+elements.children({ file, formId, path: "\\Child Group" })
+elements.children({ file, formId, path: "\\Child Group\\Persistent" })
+elements.children({ file, formId, path: "\\Child Group\\Temporary" })
+elements.children({ file, formId, path: "\\Child Group\\Visible when Distant" })
+elements.children({ file, formId, path: "\\Child Group\\Block X, Y" })
+elements.children({ file, formId, path: "\\Child Group\\Block X, Y\\Sub-Block M, N" })
+```
+
+- Walk exactly the next level; do not ask for the whole tree when a page or one
+  ChildGroup label is enough.
+- The `\\Child Group...` paths are synthetic and READ-ONLY. Mutation verbs must
+  use flat FormID locators (`{ file, formId }`) or a `records.create.parent`
+  spec; do not pass synthetic locator paths to mutators.
+- For WRLD cells, use `Persistent` or the Block/Sub-Block/coordinate route
+  depending on the target child group.
+- Deep reference: `xedit.childgroup-navigation.v1`.
+
+### `elements.children` pagination (`supports.elementsChildrenPagination`)
+
+On r6+ daemons, `elements.children` accepts `limit` and `offset`:
+
+```text
+elements.children({ file, formId, path, limit: 200, offset: 0 })
+```
+
+- `limit` is clamped to 1-1000 and defaults to 200.
+- Responses include `count`, `total`, `offset`, and `truncated`.
+- If `truncated` is true, keep the same `limit`, add `count` to `offset`, and
+  fetch the next page until covered.
+- Do not assume CELL child groups are small: FO4 vanilla CELL `00000025`
+  `Temporary` contains 742 records.
+- Deep reference: `xedit.elements-children-pagination.v1`.
+
+### Reverse navigation (`supports.reverseNavigation`)
+
+On r6+ daemons, add `includeParents: true` when you need to know ownership or
+containment without a second verb. Supported read calls include:
+
+- `records.get`
+- `records.find_by_form_id` / `records.find_by_editor_id` and MCP wrappers such
+  as `xedit_find_record`
+- `records.master_or_self`
+- `records.winning_override`
+- `elements.get`
+- `elements.children`
+
+The response may include:
+
+```text
+relations.parents: [{ locator, object }, ...]
+```
+
+Parents are nearest-first with a daemon depth cap of 16. This is the preferred
+answer to "which CELL owns this REFR?" or "which QUST/DIAL group contains this
+child?" Use the parent chain as readback evidence; do not build a custom
+reverse-index loop unless the support key is absent. Deep reference:
+`xedit.reverse-navigation.v1`.
+
+### `records.create` parent-spec (`supports.createParentSpec`)
+
+Mutating record creation into ChildGroups is r6-gated and still requires the
+normal MCP mutation consent path. When supported, author the target parent
+explicitly instead of trying to mutate synthetic `\\Child Group` paths.
+
+CELL, DIAL, and QUST children:
+
+```text
+records.create({
+  targetFile,
+  signature,
+  editorId,
+  parent: { file, formId, subGroup? }
+})
+```
+
+WRLD children:
+
+```text
+records.create({
+  targetFile,
+  signature,
+  editorId,
+  parent: { file, formId, subGroup: "Persistent" }
+})
+
+records.create({
+  targetFile,
+  signature,
+  editorId,
+  parent: { file, formId, coords: [X, Y] }
+})
+```
+
+For `coords`, native xEdit creates the needed Block/Sub-Block groups. Validate
+with `records.get` or `elements.children({ includeParents: true })` after the
+preview/commit flow, and remember that durability still requires save + daemon
+restart + readback. Deep reference: `xedit.records-create-parent-spec.v1`.
 
 ## Anti-patterns (hard bans)
 
