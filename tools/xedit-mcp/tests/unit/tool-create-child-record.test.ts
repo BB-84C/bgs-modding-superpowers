@@ -54,9 +54,19 @@ describe("xedit_create_child_record tool", () => {
     expect(env.ok).toBe(true);
     if (!env.ok) throw new Error("expected ok");
     expect(forwarded).toBeDefined();
-    // parentFormId 0x prefix stripped before forwarding.
-    expect((forwarded!.parent as Record<string, unknown>).parentFormId).toBe("01000123");
-    expect((forwarded!.parent as Record<string, unknown>).subGroup).toBe("Temporary");
+    // Daemon's `records.create` expects parent: { file, formId, subGroup, coords },
+    // NOT the intent-tool's `parent: { parentFile, parentFormId, ... }` shape.
+    // mapParentSpecForDaemon translates the keys AND strips the "0x" prefix
+    // from formId in the same pass. Empirically verified 2026-06-18 against
+    // FO4Edit 4.1.6r6 — without this translation the daemon rejects every
+    // call with `invalid_request: Automation arg "file" is required`.
+    const parent = forwarded!.parent as Record<string, unknown>;
+    expect(parent.file).toBe("Patch.esp");
+    expect(parent.formId).toBe("01000123");
+    expect(parent.subGroup).toBe("Temporary");
+    // The old (wrong) key names MUST NOT be present after translation:
+    expect(parent.parentFile).toBeUndefined();
+    expect(parent.parentFormId).toBeUndefined();
     expect(forwarded!.editorId).toBe("MyChildRef");
   });
 
@@ -84,8 +94,13 @@ describe("xedit_create_child_record tool", () => {
     expect(env.ok).toBe(true);
     if (!env.ok) throw new Error("expected ok");
     const parent = (forwarded!.parent as Record<string, unknown>);
+    // WRLD exterior child — same translation rules: parentFile→file, parentFormId→formId.
+    expect(parent.file).toBe("Fallout4.esm");
+    expect(parent.formId).toBe("0000003C");
     expect(parent.coords).toEqual([-2, 7]);
     expect(parent.subGroup).toBeUndefined();
+    expect(parent.parentFile).toBeUndefined();
+    expect(parent.parentFormId).toBeUndefined();
   });
 
   it("fast-fails with mutation_requires_iknowwhatimdoing when consent is not active", async () => {
