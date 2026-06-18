@@ -7,7 +7,11 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Info { archive } => bgs_archive::cmd_info::run(&archive, cli.json)?,
-        Command::List { .. } => println!("list not yet implemented (task A2)"),
+        Command::List {
+            archive,
+            filter,
+            long,
+        } => bgs_archive::cmd_list::run(&archive, filter.as_deref(), long, cli.json)?,
         Command::Extract { .. } => println!("extract not yet implemented (task A4)"),
         Command::Pack { .. } => println!("pack not yet implemented (task A8)"),
         Command::Capabilities => println!("capabilities not yet implemented (task A3)"),

@@ -66,3 +66,52 @@ fn info_json_reports_fo4_v2_metadata() {
     assert_eq!(value["data"]["family"], "fo4");
     assert_eq!(value["data"]["version"], 2);
 }
+
+#[test]
+fn list_json_reports_entries_and_filter_matches_glob() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let hello: File = [Chunk::from_decompressed(b"Hello world!\n")]
+        .into_iter()
+        .collect();
+    let data: File = [Chunk::from_decompressed(&[0, 1, 2, 3])]
+        .into_iter()
+        .collect();
+    let archive: Archive = [
+        (ArchiveKey::from(&b"hello.txt"[..]), hello),
+        (ArchiveKey::from(&b"data.bin"[..]), data),
+    ]
+    .into_iter()
+    .collect();
+    let options = ArchiveOptions::builder().strings(true).build();
+    archive.write(&mut tmp.as_file(), &options).unwrap();
+
+    let output = Command::cargo_bin("bgs-archive")
+        .unwrap()
+        .args(["list", tmp.path().to_str().unwrap(), "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(value["data"].as_array().unwrap().len(), 2);
+
+    let filtered_output = Command::cargo_bin("bgs-archive")
+        .unwrap()
+        .args([
+            "list",
+            tmp.path().to_str().unwrap(),
+            "--filter",
+            "*.txt",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let filtered: serde_json::Value = serde_json::from_slice(&filtered_output).unwrap();
+    let entries = filtered["data"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["path"], "hello.txt");
+}
