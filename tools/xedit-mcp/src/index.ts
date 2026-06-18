@@ -547,9 +547,9 @@ export const TOOL_DEFINITIONS = [
     description:
       "MUTATING. Requires the daemon to be ready AND launched with -IKnowWhatImDoing (data.consentEnabled=true on xedit_session). Wraps records.create with the r6 parent shape (supports.createParentSpec, contract 0.16, WRLD coords extension 0.18). " +
       "Three valid parent shapes: " +
-      "CELL/DIAL/QUST child = { parentFile, parentFormId, subGroup? }; " +
-      "WRLD persistent child = { parentFile, parentFormId, subGroup: 'Persistent' }; " +
-      "WRLD exterior child = { parentFile, parentFormId, coords: [x, y] }. " +
+      "CELL/DIAL/QUST child = { file, formId, subGroup? }; " +
+      "WRLD persistent child = { file, formId, subGroup: 'Persistent' }; " +
+      "WRLD exterior child = { file, formId, coords: [x, y] }. " +
       "subGroup and coords are mutually exclusive. Fast-fails with code='mutation_requires_iknowwhatimdoing' if consent is not active.",
     inputSchema: {
       type: "object" as const,
@@ -571,15 +571,15 @@ export const TOOL_DEFINITIONS = [
           description:
             "Parent locator + sub-group selector. Use subGroup for CELL/DIAL/QUST/WRLD-persistent, coords for WRLD-exterior cells. Exactly one of (subGroup, coords) — never both.",
           properties: {
-            parentFile: {
+            file: {
               type: "string" as const,
               minLength: 1,
-              description: "Plugin filename of the parent record.",
+              description: "Plugin filename of the parent record (matches daemon records.create parent.file).",
             },
-            parentFormId: {
+            formId: {
               type: "string" as const,
               pattern: FORM_ID_PATTERN,
-              description: "FormID of the parent record, hex with or without 0x prefix.",
+              description: "FormID of the parent record, hex with or without 0x prefix (matches daemon records.create parent.formId).",
             },
             subGroup: {
               type: "string" as const,
@@ -596,7 +596,7 @@ export const TOOL_DEFINITIONS = [
                 "[x, y] exterior cell coordinates for a WRLD exterior child. Mutually exclusive with subGroup.",
             },
           },
-          required: ["parentFile", "parentFormId"],
+          required: ["file", "formId"],
           additionalProperties: false,
         },
         editorId: {

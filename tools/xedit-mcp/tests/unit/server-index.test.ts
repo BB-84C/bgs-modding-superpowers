@@ -209,8 +209,8 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
       required: string[];
     };
     expect(parent.type).toBe("object");
-    expect(Object.keys(parent.properties).sort()).toEqual(["coords", "parentFile", "parentFormId", "subGroup"]);
-    expect(parent.required.sort()).toEqual(["parentFile", "parentFormId"]);
+    expect(Object.keys(parent.properties).sort()).toEqual(["coords", "file", "formId", "subGroup"]);
+    expect(parent.required.sort()).toEqual(["file", "formId"]);
     // coords is a [number, number] tuple (no anyOf union).
     const coords = parent.properties.coords as { type: string; minItems: number; maxItems: number };
     expect(coords.type).toBe("array");

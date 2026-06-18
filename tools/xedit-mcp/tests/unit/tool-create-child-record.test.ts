@@ -48,25 +48,20 @@ describe("xedit_create_child_record tool", () => {
     const env = await handler({
       targetFile: "Patch.esp",
       signature: "REFR",
-      parent: { parentFile: "Patch.esp", parentFormId: "0x01000123", subGroup: "Temporary" },
+      parent: { file: "Patch.esp", formId: "0x01000123", subGroup: "Temporary" },
       editorId: "MyChildRef",
     });
     expect(env.ok).toBe(true);
     if (!env.ok) throw new Error("expected ok");
     expect(forwarded).toBeDefined();
-    // Daemon's `records.create` expects parent: { file, formId, subGroup, coords },
-    // NOT the intent-tool's `parent: { parentFile, parentFormId, ... }` shape.
-    // mapParentSpecForDaemon translates the keys AND strips the "0x" prefix
-    // from formId in the same pass. Empirically verified 2026-06-18 against
-    // FO4Edit 4.1.6r6 — without this translation the daemon rejects every
-    // call with `invalid_request: Automation arg "file" is required`.
+    // Intent-tool schema and daemon record.create's parent shape are aligned:
+    // both use { file, formId, subGroup?, coords? }. Wrapper just strips the
+    // "0x" prefix from formId before forwarding; no key renaming.
+    // Empirically verified 2026-06-18 against FO4Edit 4.1.6r6.
     const parent = forwarded!.parent as Record<string, unknown>;
     expect(parent.file).toBe("Patch.esp");
     expect(parent.formId).toBe("01000123");
     expect(parent.subGroup).toBe("Temporary");
-    // The old (wrong) key names MUST NOT be present after translation:
-    expect(parent.parentFile).toBeUndefined();
-    expect(parent.parentFormId).toBeUndefined();
     expect(forwarded!.editorId).toBe("MyChildRef");
   });
 
@@ -89,18 +84,16 @@ describe("xedit_create_child_record tool", () => {
     const env = await handler({
       targetFile: "Patch.esp",
       signature: "REFR",
-      parent: { parentFile: "Fallout4.esm", parentFormId: "0x0000003C", coords: [-2, 7] },
+      parent: { file: "Fallout4.esm", formId: "0x0000003C", coords: [-2, 7] },
     });
     expect(env.ok).toBe(true);
     if (!env.ok) throw new Error("expected ok");
     const parent = (forwarded!.parent as Record<string, unknown>);
-    // WRLD exterior child — same translation rules: parentFile→file, parentFormId→formId.
+    // WRLD exterior child — same shape, just 0x stripped on formId.
     expect(parent.file).toBe("Fallout4.esm");
     expect(parent.formId).toBe("0000003C");
     expect(parent.coords).toEqual([-2, 7]);
     expect(parent.subGroup).toBeUndefined();
-    expect(parent.parentFile).toBeUndefined();
-    expect(parent.parentFormId).toBeUndefined();
   });
 
   it("fast-fails with mutation_requires_iknowwhatimdoing when consent is not active", async () => {
@@ -122,7 +115,7 @@ describe("xedit_create_child_record tool", () => {
     const env = await handler({
       targetFile: "Patch.esp",
       signature: "REFR",
-      parent: { parentFile: "Patch.esp", parentFormId: "0x01000123", subGroup: "Temporary" },
+      parent: { file: "Patch.esp", formId: "0x01000123", subGroup: "Temporary" },
     });
     expect(env.ok).toBe(false);
     if (env.ok) throw new Error("expected refusal");
@@ -143,8 +136,8 @@ describe("xedit_create_child_record tool", () => {
       targetFile: "Patch.esp",
       signature: "REFR",
       parent: {
-        parentFile: "Patch.esp",
-        parentFormId: "0x01000123",
+        file: "Patch.esp",
+        formId: "0x01000123",
         subGroup: "Persistent",
         coords: [0, 0],
       },
@@ -166,7 +159,7 @@ describe("xedit_create_child_record tool", () => {
     const env = await handler({
       targetFile: "Patch.esp",
       signature: "ref", // wrong length / case
-      parent: { parentFile: "Patch.esp", parentFormId: "0x01000123" },
+      parent: { file: "Patch.esp", formId: "0x01000123" },
     });
     expect(env.ok).toBe(false);
     if (env.ok) throw new Error("expected refusal");

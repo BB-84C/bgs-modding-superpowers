@@ -11,16 +11,19 @@ import { runRules } from "../pipeline/rules.js";
 import { emitAudit } from "../audit-line.js";
 
 // r6 supports.createParentSpec (contract 0.16; WRLD coords extension in 0.18).
-// records.create now accepts a `parent` object with three valid shapes:
+// records.create accepts a `parent` object with three valid shapes (all field
+// names match the daemon's records.create exactly — `file`, `formId`,
+// `subGroup`, `coords` — so what the agent passes in is what the daemon sees,
+// modulo a transparent "0x" prefix strip on formId):
 //
 //   CELL / DIAL / QUST child:
-//     { parentFile, parentFormId, subGroup? }
+//     { file, formId, subGroup? }
 //
 //   WRLD persistent child:
-//     { parentFile, parentFormId, subGroup: "Persistent" }
+//     { file, formId, subGroup: "Persistent" }
 //
 //   WRLD exterior child (cell at coords):
-//     { parentFile, parentFormId, coords: [number, number] }
+//     { file, formId, coords: [number, number] }
 //
 // Per AGENTS.md "MCP inputSchema Anthropic Compatibility (2026-06-17)" the
 // inputSchema must NOT use top-level anyOf/oneOf/allOf — and we extend that
@@ -28,10 +31,20 @@ import { emitAudit } from "../audit-line.js";
 // Zod-side refinement enforces the discriminated-union shape (subGroup XOR
 // coords). Bad shapes are rejected as `invalid_request` with a clear hint.
 
+// Intent-tool parent spec MUST match the daemon's records.create parent
+// shape — `{ file, formId, subGroup?, coords? }`. Empirically verified against
+// FO4Edit 4.1.6r6 daemon 2026-06-18. The KB record
+// `xedit-records-create-parent-spec.v1.md` documents the same shape; agents
+// reading the KB and calling this wrapper should not need to remap anything.
+//
+// Earlier drafts of this schema used `parentFile`/`parentFormId` (inherited
+// from issue #4's initial wording) which mismatched both the daemon AND the
+// KB; the wrapper never produced a successful records.create call against
+// the live daemon until this alignment landed.
 const ParentSpec = z
   .object({
-    parentFile: z.string().min(1),
-    parentFormId: z.string().regex(/^(0x)?[0-9a-fA-F]{1,8}$/),
+    file: z.string().min(1),
+    formId: z.string().regex(/^(0x)?[0-9a-fA-F]{1,8}$/),
     subGroup: z.string().min(1).optional(),
     coords: z.tuple([z.number(), z.number()]).optional(),
   })
@@ -54,39 +67,18 @@ const Args = z.object({
 });
 
 /**
- * Translate intent-tool's parent spec to the daemon's expected shape.
- *
- * Our schema (intent-tool surface):
- *   { parent: { parentFile, parentFormId, subGroup?, coords? } }
- *
- * Daemon `records.create`'s actual `parent` shape (empirically verified
- * 2026-06-18 against FO4Edit 4.1.6r6):
- *   { parent: { file, formId, subGroup?, coords? } }
- *
- * The `parentFile`/`parentFormId` names in our schema were inherited from
- * issue #4's KB record draft and never wire-checked against the daemon. The
- * old version of this function only stripped "0x" from parentFormId without
- * renaming the keys, so the daemon rejected every call with
- *   invalid_request: Automation arg "file" is required
- * (meaning `parent.file`, not top-level `file`). The wrapper was therefore
- * fully broken — fast-fail consent gate worked but no call ever reached
- * the daemon successfully. Caught during Phase C step 2 verification.
- *
- * This helper also strips the "0x" prefix from formId in the same pass.
+ * Normalize the parent spec for daemon forwarding: strip "0x" prefix from
+ * `formId` so the daemon sees plain hex. The schema and daemon already agree
+ * on `{ file, formId, subGroup?, coords? }`; no key renaming needed.
  */
-function mapParentSpecForDaemon(args: Record<string, unknown>): Record<string, unknown> {
+function normalizeParentSpec(args: Record<string, unknown>): Record<string, unknown> {
   const parent = args.parent;
   if (!parent || typeof parent !== "object") return args;
   const p = parent as Record<string, unknown>;
-  const daemonParent: Record<string, unknown> = {};
-  if (typeof p.parentFile === "string") daemonParent.file = p.parentFile;
-  if (typeof p.parentFormId === "string") {
-    const f = p.parentFormId;
-    daemonParent.formId = f.startsWith("0x") || f.startsWith("0X") ? f.slice(2) : f;
-  }
-  if (typeof p.subGroup === "string") daemonParent.subGroup = p.subGroup;
-  if (Array.isArray(p.coords)) daemonParent.coords = p.coords;
-  return { ...args, parent: daemonParent };
+  if (typeof p.formId !== "string") return args;
+  const f = p.formId;
+  if (!(f.startsWith("0x") || f.startsWith("0X"))) return args;
+  return { ...args, parent: { ...p, formId: f.slice(2) } };
 }
 
 export interface CreateChildRecordOptions {
@@ -160,7 +152,7 @@ export function makeCreateChildRecordHandler(opts: CreateChildRecordOptions) {
       return r.refusal;
     }
 
-    const daemonArgs = mapParentSpecForDaemon(args);
+    const daemonArgs = normalizeParentSpec(args);
     const native = await opts.adapter.call({ command: "records.create", args: daemonArgs });
     if (!native.ok) {
       const env = refuse({
