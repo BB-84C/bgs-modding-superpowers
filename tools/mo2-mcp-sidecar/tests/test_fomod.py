@@ -193,3 +193,367 @@ def test_register_now_wires_both_methods():
     fomod.register()
     assert "fomod.parse_choices" in _METHODS
     assert "fomod.resolve_files" in _METHODS
+
+
+# --- Lane V3 FOMOD-EXT: mo2_state-aware dependency evaluation ---
+
+# A FOMOD whose Option type is dynamic (Required if CBBE.esp is Active, otherwise NotUsable).
+# This pattern is extremely common in real Bethesda mod FOMODs that gate variants on
+# what the user already has installed.
+_DYNAMIC_TYPE_FOMOD = """<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+  <moduleName>CBBEPatch</moduleName>
+  <installSteps order="Explicit">
+    <installStep name="Main">
+      <optionalFileGroups order="Explicit">
+        <group name="BodyPatch" type="SelectAny">
+          <plugins order="Explicit">
+            <plugin name="CBBE Compatibility Patch">
+              <description>Requires CBBE.esp</description>
+              <files>
+                <file source="cbbe_patch.esp" destination="cbbe_patch.esp"/>
+              </files>
+              <typeDescriptor>
+                <dependencyType>
+                  <defaultType name="NotUsable"/>
+                  <patterns>
+                    <pattern>
+                      <dependencies operator="And">
+                        <fileDependency file="CBBE.esp" state="Active"/>
+                      </dependencies>
+                      <type name="Recommended"/>
+                    </pattern>
+                  </patterns>
+                </dependencyType>
+              </typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>
+"""
+
+
+def _write_dynamic_type_fomod(tmp_path: Path) -> Path:
+    fomod_dir = tmp_path / "DynamicMod" / "fomod"
+    fomod_dir.mkdir(parents=True)
+    (fomod_dir / "ModuleConfig.xml").write_text(_DYNAMIC_TYPE_FOMOD, encoding="utf-8")
+    (fomod_dir / "info.xml").write_text(
+        '<?xml version="1.0"?><fomod><Name>CBBEPatch</Name></fomod>', encoding="utf-8")
+    archive_root = fomod_dir.parent
+    (archive_root / "cbbe_patch.esp").write_text("patch")
+    return archive_root
+
+
+def test_parse_choices_evaluates_file_dependencies_met(tmp_path):
+    """When CBBE.esp is in enabled_plugins, the dynamic option becomes Recommended (met)."""
+    archive_root = _write_dynamic_type_fomod(tmp_path)
+
+    result = fomod.fomod_parse_choices({
+        "archive_path": str(archive_root),
+        "mo2_state": {
+            "enabled_plugins": ["CBBE.esp"],
+            "provided_files": [],
+            "game_version": None,
+        },
+    })
+
+    page = result["pages"][0]
+    option = page["groups"][0]["options"][0]
+    assert option["type"] == "Recommended"
+    assert option["dependencies_status"] == {"met": True, "missing": []}
+
+
+def test_parse_choices_evaluates_file_dependencies_unmet(tmp_path):
+    """When CBBE.esp is NOT in enabled_plugins, the dynamic option resolves to NotUsable."""
+    archive_root = _write_dynamic_type_fomod(tmp_path)
+
+    result = fomod.fomod_parse_choices({
+        "archive_path": str(archive_root),
+        "mo2_state": {
+            "enabled_plugins": [],  # CBBE not installed
+            "provided_files": [],
+            "game_version": None,
+        },
+    })
+
+    page = result["pages"][0]
+    option = page["groups"][0]["options"][0]
+    assert option["type"] == "NotUsable"
+    status = option["dependencies_status"]
+    assert status["met"] is False
+    assert any("CBBE.esp" in m for m in status["missing"])
+    assert any("Active" in m for m in status["missing"])
+
+
+def test_parse_choices_no_state_omits_dependency_fields(tmp_path):
+    """Backward compat: omitting mo2_state means no dependencies_status fields on
+    options or pages and no module_dependencies_status. conditional_pages_note
+    is always present.
+    """
+    archive_root = _write_dynamic_type_fomod(tmp_path)
+
+    result = fomod.fomod_parse_choices({"archive_path": str(archive_root)})
+
+    assert "module_dependencies_status" not in result
+    assert "conditional_pages_note" in result  # always present
+    assert result["conditional_pages_note"] is not None  # dynamic type detected
+    page = result["pages"][0]
+    assert "dependencies_status" not in page
+    option = page["groups"][0]["options"][0]
+    assert "dependencies_status" not in option
+
+
+# --- Module-level <moduleDependencies> ---
+
+_MODULE_DEP_FOMOD = """<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+  <moduleName>NeedsFarHarbor</moduleName>
+  <moduleDependencies operator="And">
+    <fileDependency file="DLCCoast.esm" state="Active"/>
+  </moduleDependencies>
+  <installSteps order="Explicit">
+    <installStep name="OnlyStep">
+      <optionalFileGroups order="Explicit">
+        <group name="OnlyGroup" type="SelectAny">
+          <plugins order="Explicit">
+            <plugin name="OnlyOption">
+              <description>desc</description>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>
+"""
+
+
+def _write_module_dep_fomod(tmp_path: Path) -> Path:
+    fomod_dir = tmp_path / "FarHarborMod" / "fomod"
+    fomod_dir.mkdir(parents=True)
+    (fomod_dir / "ModuleConfig.xml").write_text(_MODULE_DEP_FOMOD, encoding="utf-8")
+    (fomod_dir / "info.xml").write_text(
+        '<?xml version="1.0"?><fomod><Name>FH</Name></fomod>', encoding="utf-8")
+    return fomod_dir.parent
+
+
+def test_parse_choices_module_dependencies_met(tmp_path):
+    archive_root = _write_module_dep_fomod(tmp_path)
+    result = fomod.fomod_parse_choices({
+        "archive_path": str(archive_root),
+        "mo2_state": {"enabled_plugins": ["DLCCoast.esm"], "provided_files": [], "game_version": None},
+    })
+    assert result["module_dependencies_status"] == {"met": True, "missing": []}
+
+
+def test_parse_choices_module_dependencies_unmet(tmp_path):
+    archive_root = _write_module_dep_fomod(tmp_path)
+    result = fomod.fomod_parse_choices({
+        "archive_path": str(archive_root),
+        "mo2_state": {"enabled_plugins": [], "provided_files": [], "game_version": None},
+    })
+    status = result["module_dependencies_status"]
+    assert status["met"] is False
+    assert any("DLCCoast.esm" in m for m in status["missing"])
+
+
+# --- <gameDependency> version check ---
+
+_GAME_VERSION_FOMOD = """<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+  <moduleName>NeedsNextGen</moduleName>
+  <moduleDependencies operator="And">
+    <gameDependency version="1.10.980"/>
+  </moduleDependencies>
+  <installSteps order="Explicit">
+    <installStep name="X">
+      <optionalFileGroups order="Explicit">
+        <group name="G" type="SelectAny">
+          <plugins order="Explicit">
+            <plugin name="P"><description>d</description>
+              <typeDescriptor><type name="Optional"/></typeDescriptor></plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>
+"""
+
+
+def _write_game_version_fomod(tmp_path: Path) -> Path:
+    fomod_dir = tmp_path / "NextGenMod" / "fomod"
+    fomod_dir.mkdir(parents=True)
+    (fomod_dir / "ModuleConfig.xml").write_text(_GAME_VERSION_FOMOD, encoding="utf-8")
+    (fomod_dir / "info.xml").write_text(
+        '<?xml version="1.0"?><fomod><Name>NG</Name></fomod>', encoding="utf-8")
+    return fomod_dir.parent
+
+
+def test_parse_choices_game_version_met(tmp_path):
+    archive_root = _write_game_version_fomod(tmp_path)
+    result = fomod.fomod_parse_choices({
+        "archive_path": str(archive_root),
+        "mo2_state": {"enabled_plugins": [], "provided_files": [], "game_version": "1.10.980.0"},
+    })
+    assert result["module_dependencies_status"]["met"] is True
+
+
+def test_parse_choices_game_version_unmet(tmp_path):
+    archive_root = _write_game_version_fomod(tmp_path)
+    result = fomod.fomod_parse_choices({
+        "archive_path": str(archive_root),
+        "mo2_state": {"enabled_plugins": [], "provided_files": [], "game_version": "1.10.163.0"},
+    })
+    status = result["module_dependencies_status"]
+    assert status["met"] is False
+    assert any("1.10.980" in m for m in status["missing"])
+
+
+# --- Conditional pages flag ---
+
+_CONDITIONAL_PAGE_FOMOD = """<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+  <moduleName>BranchingMod</moduleName>
+  <installSteps order="Explicit">
+    <installStep name="AlwaysShown">
+      <optionalFileGroups order="Explicit">
+        <group name="g1" type="SelectAny">
+          <plugins order="Explicit">
+            <plugin name="A"><description>d</description>
+              <typeDescriptor><type name="Optional"/></typeDescriptor></plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+    <installStep name="OnlyIfFlagSet">
+      <visible operator="And">
+        <flagDependency flag="usedAdvanced" value="true"/>
+      </visible>
+      <optionalFileGroups order="Explicit">
+        <group name="g2" type="SelectAny">
+          <plugins order="Explicit">
+            <plugin name="B"><description>d</description>
+              <typeDescriptor><type name="Optional"/></typeDescriptor></plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>
+"""
+
+
+def _write_conditional_page_fomod(tmp_path: Path) -> Path:
+    fomod_dir = tmp_path / "BranchingMod" / "fomod"
+    fomod_dir.mkdir(parents=True)
+    (fomod_dir / "ModuleConfig.xml").write_text(_CONDITIONAL_PAGE_FOMOD, encoding="utf-8")
+    (fomod_dir / "info.xml").write_text(
+        '<?xml version="1.0"?><fomod><Name>B</Name></fomod>', encoding="utf-8")
+    return fomod_dir.parent
+
+
+def test_parse_choices_conditional_pages_note_flag(tmp_path):
+    """A FOMOD with conditional <visible> pages sets conditional_pages_note even
+    without mo2_state. The static tree still includes the hidden page (defensive
+    listing) but the note tells the agent the wizard may skip it.
+    """
+    archive_root = _write_conditional_page_fomod(tmp_path)
+    result = fomod.fomod_parse_choices({"archive_path": str(archive_root)})
+    assert result["conditional_pages_note"] is not None
+    # Both pages present in static tree (no wizard flow applied yet)
+    assert len(result["pages"]) == 2
+    assert {p["name"] for p in result["pages"]} == {"AlwaysShown", "OnlyIfFlagSet"}
+
+
+def test_parse_choices_no_conditional_flow_note_none(tmp_path):
+    """Existing minimal FOMOD has no conditional flow -> conditional_pages_note is None."""
+    archive_root = _write_fomod(tmp_path)  # the minimal FOMOD from earlier tests
+    result = fomod.fomod_parse_choices({"archive_path": str(archive_root)})
+    assert result["conditional_pages_note"] is None
+
+
+def test_parse_choices_conditional_page_dependencies_status_unmet(tmp_path):
+    """With mo2_state, the conditional page reports met=False because the flag was never set."""
+    archive_root = _write_conditional_page_fomod(tmp_path)
+    result = fomod.fomod_parse_choices({
+        "archive_path": str(archive_root),
+        "mo2_state": {"enabled_plugins": [], "provided_files": [], "game_version": None},
+    })
+    pages_by_name = {p["name"]: p for p in result["pages"]}
+    assert pages_by_name["AlwaysShown"]["dependencies_status"] == {"met": True, "missing": []}
+    conditional_status = pages_by_name["OnlyIfFlagSet"]["dependencies_status"]
+    assert conditional_status["met"] is False
+    assert any("usedAdvanced" in m for m in conditional_status["missing"])
+
+
+# --- resolve_files dependency enforcement ---
+
+def test_resolve_files_module_dep_unmet_raises_invalid_choices(tmp_path):
+    """When <moduleDependencies> isn't satisfied, pyfomod's Installer constructor
+    raises FailedCondition and we surface it as invalid_choices.
+    """
+    archive_root = _write_module_dep_fomod(tmp_path)
+    with pytest.raises(RuntimeError, match="invalid_choices"):
+        fomod.fomod_resolve_files({
+            "archive_path": str(archive_root),
+            "choices": [
+                {"page_name": "OnlyStep",
+                 "selected_options": [{"group_name": "OnlyGroup", "option_name": "OnlyOption"}]}
+            ],
+            "mo2_state": {"enabled_plugins": [], "provided_files": [], "game_version": None},
+        })
+
+
+def test_resolve_files_module_dep_met_proceeds(tmp_path):
+    """With DLCCoast.esm enabled, resolve_files completes normally."""
+    archive_root = _write_module_dep_fomod(tmp_path)
+    # No files declared on the option, so we expect file_count=0 but no error.
+    result = fomod.fomod_resolve_files({
+        "archive_path": str(archive_root),
+        "choices": [
+            {"page_name": "OnlyStep",
+             "selected_options": [{"group_name": "OnlyGroup", "option_name": "OnlyOption"}]}
+        ],
+        "mo2_state": {"enabled_plugins": ["DLCCoast.esm"], "provided_files": [], "game_version": None},
+    })
+    assert result["file_count"] == 0
+
+
+def test_resolve_files_without_state_skips_dependency_check(tmp_path):
+    """Backward compat: omitting mo2_state means pyfomod has no file_type
+    callback and silently skips file dependency checks (mirrors pyfomod's docs).
+    The install proceeds even when the module dependency would have failed.
+    """
+    archive_root = _write_module_dep_fomod(tmp_path)
+    # No mo2_state -> no game_version, no file_type cb -> pyfomod skips file dep check
+    result = fomod.fomod_resolve_files({
+        "archive_path": str(archive_root),
+        "choices": [
+            {"page_name": "OnlyStep",
+             "selected_options": [{"group_name": "OnlyGroup", "option_name": "OnlyOption"}]}
+        ],
+    })
+    assert result["file_count"] == 0
+
+
+# --- Case-insensitive plugin matching (NTFS / Bethesda convention) ---
+
+def test_parse_choices_plugin_match_is_case_insensitive(tmp_path):
+    """plugins.txt may write 'cbbe.esp' but the FOMOD declares 'CBBE.esp'."""
+    archive_root = _write_dynamic_type_fomod(tmp_path)
+    result = fomod.fomod_parse_choices({
+        "archive_path": str(archive_root),
+        "mo2_state": {"enabled_plugins": ["cbbe.esp"], "provided_files": [], "game_version": None},
+    })
+    option = result["pages"][0]["groups"][0]["options"][0]
+    assert option["type"] == "Recommended"
+    assert option["dependencies_status"]["met"] is True

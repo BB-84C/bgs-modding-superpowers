@@ -1,7 +1,22 @@
 """FOMOD parsing JSON-RPC methods (pyfomod wrapper).
 
 Task 27 adds fomod.parse_choices (return full step/group/option tree).
-Task 28 will add fomod.resolve_files (consume choices -> file mapping).
+Task 28 adds fomod.resolve_files (consume choices -> file mapping).
+
+Lane V3 FOMOD-EXT (2026-06-17): adds optional `mo2_state` parameter to both
+methods. When supplied, `parse_choices` surfaces `dependencies_status` on each
+page / option (and `module_dependencies_status` at top level) reporting whether
+the FOMOD's `<moduleDependencies>` / `<visible>` / `<dependencyType>` clauses
+hold against current MO2 state — so agents can see at PLAN TIME which options
+will be blocked before they pick choices. `resolve_files` propagates state into
+pyfomod's Installer constructor so `game_version` and `file_type` checks fire
+naturally during the wizard walk.
+
+A `conditional_pages_note` flag is always returned (independent of mo2_state)
+flagging static-tree-vs-actual-wizard-flow divergence: when the FOMOD has any
+conditional pages, conditional file patterns, or dynamic option types, the
+static page dump may include pages the wizard will hide. See
+`fomod_deps.detect_conditional_flow` for the exact heuristic.
 """
 from __future__ import annotations
 
@@ -15,6 +30,24 @@ try:
     _PYFOMOD_AVAILABLE = True
 except ImportError:
     _PYFOMOD_AVAILABLE = False
+
+from .fomod_deps import (
+    collect_dynamic_option_clauses,
+    detect_conditional_flow,
+    evaluate_conditions,
+    make_file_type_callback,
+    normalize_mo2_state,
+)
+
+
+_CONDITIONAL_PAGES_NOTE = (
+    "This FOMOD declares conditional pages, conditional file installs, or "
+    "dynamic option types. The static page tree returned here may include "
+    "pages the wizard would hide given the current MO2 state. To choose "
+    "defensively, supply choices for every page; the wizard will skip those "
+    "whose <visible> conditions don't hold. A future enhancement (v1.4+) may "
+    "expose a wizard-step API."
+)
 
 
 def _option_type_name(opt: Any) -> str:
@@ -35,27 +68,86 @@ def _group_type_name(group: Any) -> str:
     return getattr(t, "value", str(t))
 
 
+def _option_payload(opt: Any, mo2_state: dict[str, Any] | None) -> dict[str, Any]:
+    """Build the per-option dict. Adds dependencies_status when mo2_state given."""
+    image = getattr(opt, "image", None)
+    payload = {
+        "name": getattr(opt, "name", ""),
+        "description": getattr(opt, "description", "") or "",
+        "image": str(image) if image else None,
+        "type": _option_type_name(opt),
+    }
+    if mo2_state is None:
+        return payload
+
+    # Dynamic option type (Type) — resolve against mo2_state to compute the
+    # effective type and dependency status.
+    from pyfomod import Type
+    if isinstance(getattr(opt, "type", None), Type):
+        met, missing, resolved_type = collect_dynamic_option_clauses(opt, mo2_state)
+        payload["type"] = resolved_type
+        payload["dependencies_status"] = {"met": met, "missing": missing}
+    else:
+        payload["dependencies_status"] = {"met": True, "missing": []}
+    return payload
+
+
+def _page_payload(page: Any, mo2_state: dict[str, Any] | None) -> dict[str, Any]:
+    groups = []
+    for group in page:
+        options = [_option_payload(opt, mo2_state) for opt in group]
+        groups.append({
+            "name": getattr(group, "name", ""),
+            "type": _group_type_name(group),
+            "options": options,
+        })
+    payload: dict[str, Any] = {"name": getattr(page, "name", ""), "groups": groups}
+    if mo2_state is not None:
+        page_conditions = getattr(page, "conditions", None)
+        met, missing = evaluate_conditions(page_conditions, mo2_state)
+        payload["dependencies_status"] = {"met": met, "missing": missing}
+    return payload
+
+
 def fomod_parse_choices(params: dict) -> dict:
     """Parse a FOMOD installer's info.xml + ModuleConfig.xml; return the step/group/option tree.
 
     Args:
         params["archive_path"]: path to extracted FOMOD root (must contain fomod/ subdirectory).
+        params["mo2_state"]: (Lane V3, optional) dict with shape
+            {
+              "enabled_plugins": [str],   # plugin filenames present + enabled
+              "game_version": str | None, # LooseVersion-comparable string
+              "provided_files": [str],    # any provided file paths (for non-plugin <fileDependency>)
+            }
+            When supplied, the response gains `dependencies_status` per page/option
+            and `module_dependencies_status` at top level reflecting whether each
+            FOMOD `<dependencies>` clause holds against current MO2 state.
 
     Returns:
         {
           "fomod_name": str,
           "fomod_version": str | None,
+          "conditional_pages_note": str | None,
+          "module_dependencies_status": {met, missing} | None,
           "pages": [
             {
               "name": str,
+              "dependencies_status": {met, missing} | None,
               "groups": [
                 {"name": str, "type": str, "options": [
-                  {"name": str, "description": str, "image": str | None, "type": str}
+                  {"name": str, "description": str, "image": str | None, "type": str,
+                   "dependencies_status": {met, missing} | None}
                 ]}
               ]
             }
           ]
         }
+
+    Backward compat: when `mo2_state` is omitted, per-page / per-option
+    `dependencies_status` and top-level `module_dependencies_status` are all
+    omitted (not present in the dict). `conditional_pages_note` is always
+    returned (None if no conditional flow detected, string otherwise).
 
     Raises:
         RuntimeError("pyfomod_not_available") if pyfomod cannot be imported.
@@ -91,32 +183,28 @@ def fomod_parse_choices(params: dict) -> dict:
         if scratch_dir is not None:
             shutil.rmtree(scratch_dir, ignore_errors=True)
 
-    pages = []
-    for page in getattr(root, "pages", []) or []:
-        groups = []
-        for group in page:
-            options = []
-            for opt in group:
-                image = getattr(opt, "image", None)
-                options.append({
-                    "name": getattr(opt, "name", ""),
-                    "description": getattr(opt, "description", "") or "",
-                    "image": str(image) if image else None,
-                    "type": _option_type_name(opt),
-                })
-            groups.append({
-                "name": getattr(group, "name", ""),
-                "type": _group_type_name(group),
-                "options": options,
-            })
-        pages.append({"name": getattr(page, "name", ""), "groups": groups})
+    raw_mo2_state = params.get("mo2_state")
+    mo2_state = normalize_mo2_state(raw_mo2_state) if raw_mo2_state is not None else None
+
+    pages = [_page_payload(page, mo2_state) for page in (getattr(root, "pages", []) or [])]
+
+    has_conditional_flow = detect_conditional_flow(root)
+    note = _CONDITIONAL_PAGES_NOTE if has_conditional_flow else None
 
     version = getattr(root, "version", None)
-    return {
+    result: dict[str, Any] = {
         "fomod_name": getattr(root, "name", "") or "",
         "fomod_version": str(version) if version else None,
+        "conditional_pages_note": note,
         "pages": pages,
     }
+
+    if mo2_state is not None:
+        module_conditions = getattr(root, "conditions", None)
+        met, missing = evaluate_conditions(module_conditions, mo2_state)
+        result["module_dependencies_status"] = {"met": met, "missing": missing}
+
+    return result
 
 
 def fomod_resolve_files(params: dict) -> dict:
@@ -128,6 +216,13 @@ def fomod_resolve_files(params: dict) -> dict:
     Args:
         params["archive_path"]: path to extracted FOMOD root
         params["choices"]: list of {page_name, selected_options: [{group_name, option_name}]}
+        params["mo2_state"]: (Lane V3, optional) dict — see fomod_parse_choices.
+            When supplied, `game_version` is forwarded to Installer for
+            <gameDependency> checks, and a file_type callback derived from
+            enabled_plugins+provided_files is forwarded for <fileDependency>
+            checks. pyfomod's Installer will raise FailedCondition (surfaced as
+            invalid_choices: ...) if the user picks an option whose conditions
+            don't hold OR if the FOMOD's <moduleDependencies> don't hold.
 
     Returns:
         {
@@ -154,6 +249,9 @@ def fomod_resolve_files(params: dict) -> dict:
     except Exception as exc:
         raise RuntimeError(f"not_a_fomod: {exc}")
 
+    raw_mo2_state = params.get("mo2_state")
+    mo2_state = normalize_mo2_state(raw_mo2_state) if raw_mo2_state is not None else None
+
     # Build lookup: page_name -> group_name -> set of selected option names
     by_page: dict[str, dict[str, set[str]]] = {}
     for ch in choices:
@@ -168,7 +266,23 @@ def fomod_resolve_files(params: dict) -> dict:
             opt_name = sel.get("option_name", "")
             groups.setdefault(group_name, set()).add(opt_name)
 
-    installer = pyfomod.Installer(root, path=str(archive_path))
+    installer_kwargs: dict[str, Any] = {"path": str(archive_path)}
+    if mo2_state is not None:
+        if mo2_state["game_version"] is not None:
+            installer_kwargs["game_version"] = mo2_state["game_version"]
+        file_type_cb = make_file_type_callback(mo2_state)
+        if file_type_cb is not None:
+            installer_kwargs["file_type"] = file_type_cb
+
+    try:
+        installer = pyfomod.Installer(root, **installer_kwargs)
+    except Exception as exc:
+        # Installer constructor calls _test_conditions(root.conditions) and
+        # raises FailedCondition if module-level dependencies aren't met. We
+        # surface that as invalid_choices since it's the same agent-facing
+        # failure shape (the install can't proceed).
+        raise RuntimeError(f"invalid_choices: module dependencies unmet: {exc}")
+
     try:
         page = installer.next()  # start at page 0
         while page is not None:
