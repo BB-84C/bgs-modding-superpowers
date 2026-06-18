@@ -32,6 +32,7 @@ import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
 import { detectFomod, hasFomodChoices } from "../fomod-helpers.js";
 import { FomodChoicesRequiredError, type FomodTreeShape } from "../fomod-required-error.js";
+import { gatherMo2FomodState } from "../mo2-state-for-fomod.js";
 
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + archive_path +
 // mod_name + plan_id + lease_token all gain .min(1). Empty strings in any of
@@ -95,7 +96,16 @@ const handler: PlanApplyHandler = {
     }
 
     // Detect FOMOD via shared helper (delegates to sidecar.fomod.parse_choices).
-    const { isFomod, tree: fomodTree } = await detectFomod(bound.sidecar, archivePath);
+    // Lane V3 FOMOD-EXT: gather MO2 state so the sidecar can evaluate
+    // <moduleDependencies>, <visible>, and <dependencyType> against the real
+    // load order; the fomod_tree surfaced in fomod_choices_required will carry
+    // dependencies_status fields agents can introspect before picking choices.
+    const mo2State = await gatherMo2FomodState(ctx, profile);
+    const { isFomod, tree: fomodTree } = await detectFomod(
+      bound.sidecar,
+      archivePath,
+      mo2State as unknown as Record<string, unknown>,
+    );
 
     if (isFomod && !hasFomodChoices(args)) {
       throw new FomodChoicesRequiredError({
@@ -132,10 +142,15 @@ const handler: PlanApplyHandler = {
     // 1. Stage content into stagingDir.
     const useFomodChoices = hasFomodChoices(args);
     if (useFomodChoices) {
+      // Lane V3: forward MO2 state so pyfomod's Installer enforces
+      // <gameDependency> / <fileDependency> checks during the wizard walk.
+      // A picked option whose preconditions don't hold raises invalid_choices.
+      const mo2State = await gatherMo2FomodState(ctx, profile);
       await bound.sidecar.call("install.stage_fomod", {
         archive_path: archivePath,
         choices: args.fomod_choices,
         staging_dir: stagingDir,
+        mo2_state: mo2State,
       });
     } else {
       await bound.sidecar.call("archive.extract_all", {

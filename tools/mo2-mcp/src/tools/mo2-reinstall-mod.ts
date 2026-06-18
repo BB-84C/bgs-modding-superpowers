@@ -53,6 +53,7 @@ import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
 import { detectFomod, hasFomodChoices } from "../fomod-helpers.js";
 import { FomodChoicesRequiredError, type FomodTreeShape } from "../fomod-required-error.js";
+import { gatherMo2FomodState } from "../mo2-state-for-fomod.js";
 
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + mod name + plan_id
 // + lease_token all gain .min(1) so empty strings fail Zod safeParse instead
@@ -185,7 +186,17 @@ const handler: PlanApplyHandler = {
     const bound = requireBoundContext(ctx);
     let isFomod = false;
     if (bound.sidecar) {
-      const detection = await detectFomod(bound.sidecar, archivePath);
+      // Lane V3 FOMOD-EXT: gather MO2 state so the surfaced fomod_tree carries
+      // per-page / per-option dependencies_status. Reinstall always uses the
+      // first allowed profile (the live broker's active profile); we don't
+      // accept an explicit profile arg here, so fall back to allowedProfiles[0].
+      const profile = bound.config.allowedProfiles[0] ?? "Default";
+      const mo2State = await gatherMo2FomodState(ctx, profile);
+      const detection = await detectFomod(
+        bound.sidecar,
+        archivePath,
+        mo2State as unknown as Record<string, unknown>,
+      );
       isFomod = detection.isFomod;
       if (isFomod && !hasFomodChoices(args)) {
         throw new FomodChoicesRequiredError({
@@ -230,10 +241,15 @@ const handler: PlanApplyHandler = {
       }
       const stagingDir = path.join(bound.config.mo2Root, ".mo2-mcp", "staging", randomUUID());
       try {
+        // Lane V3 FOMOD-EXT: forward MO2 state so the wizard enforces
+        // dependencies during the apply.
+        const profile = bound.config.allowedProfiles[0] ?? "Default";
+        const mo2State = await gatherMo2FomodState(ctx, profile);
         await bound.sidecar.call("install.stage_fomod", {
           archive_path: archivePath,
           choices: plan.args.fomod_choices,
           staging_dir: stagingDir,
+          mo2_state: mo2State,
         });
         await _replaceModContent(modPath, stagingDir, path.basename(archivePath));
       } finally {
