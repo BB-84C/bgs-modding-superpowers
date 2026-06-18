@@ -217,14 +217,32 @@ export function normalizeMcpInputSchema(schema) {
     if (!hasUnion && schema.type === "object") {
         return schema;
     }
-    // Collect branches across whichever union keyword(s) appear.
-    const branches = [];
+    // Collect branches across whichever union keyword(s) appear at top level.
+    const topBranches = [];
     for (const kw of unionKeywords) {
         const v = schema[kw];
         if (Array.isArray(v))
-            branches.push(...v);
+            topBranches.push(...v);
     }
+    // BUG-27 fix: recursively flatten nested unions before discriminant
+    // extraction and property merge. Zod
+    //   z.union([z.discriminatedUnion("action", [v1, v2, v3]), applyShape])
+    // serializes via zodToJsonSchema to a top-level
+    //   { anyOf: [ { oneOf: [v1, v2, v3] }, applyShape ] }
+    // The inner {oneOf:[...]} envelope has no .properties of its own, so the
+    // pre-BUG-27 merge loop only saw applyShape's fields and the LLM never
+    // got visibility into v1/v2/v3's action / entry / title / updates. By
+    // recursively flattening to [v1, v2, v3, applyShape], every concrete
+    // branch reaches the discriminant + merge passes. This is empirically
+    // hit by gpt-5.x family on B.5.1 (mo2_configure_executable plan call).
+    const branches = _flattenUnionBranches(topBranches);
     // Discriminant hoist (preserves BUG-13 Lane A semantics for OpenAI).
+    // Also handles partial discriminants — properties that carry a const /
+    // single-value enum in SOME but not all branches (e.g. `action` is a
+    // literal in the three plan variants but absent from the apply variant).
+    // Those are hoisted with a unioned enum but NOT added to top-level
+    // `required`, so OpenAI's strict tool-schema validator no longer locks
+    // such properties to whichever branch happened to merge first.
     const { properties: discriminantProps, required: discriminantRequired } = extractDiscriminants(branches);
     // Merge all non-discriminant branch properties so LLMs see every field.
     const mergedProperties = { ...discriminantProps };
@@ -260,14 +278,24 @@ export function normalizeMcpInputSchema(schema) {
     return result;
 }
 /**
- * Scan union branches for discriminant properties — those that appear in
- * EVERY branch and carry either `const` or a single-value `enum`. Hoist
- * each such property into the parent `properties` map with a unioned enum
- * across branches. A discriminant is included in top-level `required` only
- * if every branch requires it; otherwise the hoisted property is advisory.
+ * Scan union branches for discriminant properties — those that carry either
+ * `const` or a single-value `enum` in ONE OR MORE branches. Hoist each such
+ * property into the parent `properties` map with a unioned `enum` across
+ * branches.
  *
- * Returns empty properties + required when no shared discriminant is found
- * (preserves the prior permissive wrap shape).
+ * Full discriminant (appears in EVERY branch): hoisted; added to top-level
+ * `required` iff every branch also requires it (BUG-13 Lane A semantics).
+ *
+ * Partial discriminant (appears in 2+ branches but not all, OR appears in
+ * only one branch): hoisted with the unioned enum but NEVER added to
+ * top-level `required`. Without this case, a property like `action` that is
+ * `const:'add'` in variant 1, `const:'edit'` in variant 2, `const:'remove'`
+ * in variant 3 but absent from the apply variant would fall through to the
+ * merge loop, get first-wins `{const:'add'}`, and lock OpenAI strict
+ * tool-schema validators to that single value (BUG-27 secondary symptom).
+ *
+ * Returns empty properties + required when no const / single-enum property
+ * is found in any branch.
  */
 function extractDiscriminants(branches) {
     if (!Array.isArray(branches) || branches.length === 0) {
@@ -275,6 +303,10 @@ function extractDiscriminants(branches) {
     }
     const perBranch = [];
     const requiredPerBranch = [];
+    // allPropNames is a Set so we union across branches but preserve the
+    // first-seen insertion order — matters for the `required` array's order
+    // (existing tests assert ['mode', 'action']).
+    const allPropNames = new Set();
     for (const branch of branches) {
         if (!branch || typeof branch !== "object") {
             return { properties: {}, required: [] };
@@ -302,34 +334,36 @@ function extractDiscriminants(branches) {
                 values,
                 type: typeof ps.type === "string" ? ps.type : undefined,
             });
+            allPropNames.add(propName);
         }
         perBranch.push(map);
         requiredPerBranch.push(new Set(req));
     }
-    // Find props that appear in EVERY branch as a discriminant candidate.
-    const firstBranch = perBranch[0];
-    const commonPropNames = [];
-    for (const propName of firstBranch.keys()) {
-        if (perBranch.every((b) => b.has(propName))) {
-            commonPropNames.push(propName);
-        }
-    }
-    if (commonPropNames.length === 0) {
+    if (allPropNames.size === 0) {
         return { properties: {}, required: [] };
     }
     const hoistedProperties = {};
     const hoistedRequired = [];
-    for (const propName of commonPropNames) {
+    for (const propName of allPropNames) {
         const allValues = [];
         const types = new Set();
-        for (const b of perBranch) {
-            const cand = b.get(propName);
+        let inEveryBranch = true;
+        let requiredInEvery = true;
+        for (let i = 0; i < branches.length; i++) {
+            const cand = perBranch[i].get(propName);
+            if (cand === undefined) {
+                inEveryBranch = false;
+                requiredInEvery = false;
+                continue;
+            }
             for (const v of cand.values) {
                 if (!allValues.includes(v))
                     allValues.push(v);
             }
             if (cand.type !== undefined)
                 types.add(cand.type);
+            if (!requiredPerBranch[i].has(propName))
+                requiredInEvery = false;
         }
         const hoistedProp = {};
         if (types.size === 1) {
@@ -337,9 +371,57 @@ function extractDiscriminants(branches) {
         }
         hoistedProp.enum = allValues;
         hoistedProperties[propName] = hoistedProp;
-        if (requiredPerBranch.every((r) => r.has(propName))) {
+        if (inEveryBranch && requiredInEvery) {
             hoistedRequired.push(propName);
         }
     }
     return { properties: hoistedProperties, required: hoistedRequired };
+}
+/**
+ * Recursively flatten union branches. If a branch is itself a JSON Schema
+ * union envelope ({anyOf:[...]} / {oneOf:[...]} / {allOf:[...]}), expand
+ * its children into the flat branch list. Used by normalizeMcpInputSchema
+ * to handle Zod shapes like
+ *   z.union([z.discriminatedUnion(...), applyShape])
+ * which serialize to nested {anyOf:[{oneOf:[v1,v2,v3]}, applyShape]} via
+ * zodToJsonSchema.
+ *
+ * Recursion is depth-first. The first union keyword found on a branch wins
+ * (the loop breaks); JSON Schema is not supposed to mix anyOf/oneOf/allOf
+ * on the same node, but if it does we only expand one of them.
+ *
+ * Edge cases:
+ *  - Non-object branches (rare; defensive): preserved as-is.
+ *  - Empty `oneOf: []` / `anyOf: []`: contributes nothing to the flat list.
+ *  - Branch with BOTH a union keyword AND its own .properties (exotic;
+ *    not produced by current Zod-derived shapes in this repo): the union
+ *    is expanded and the parent's own properties are dropped. This matches
+ *    the BUG-27 fix prompt's policy and is locked in by a regression test
+ *    so a future change has to decide deliberately.
+ *  - Self-referencing $ref schemas: not followed; we only inspect direct
+ *    `anyOf`/`oneOf`/`allOf` arrays on the branch object.
+ */
+function _flattenUnionBranches(branches) {
+    const flat = [];
+    for (const branch of branches) {
+        if (!branch || typeof branch !== "object") {
+            flat.push(branch);
+            continue;
+        }
+        const b = branch;
+        let nested;
+        for (const kw of ["anyOf", "oneOf", "allOf"]) {
+            if (Array.isArray(b[kw])) {
+                nested = b[kw];
+                break;
+            }
+        }
+        if (nested !== undefined) {
+            flat.push(..._flattenUnionBranches(nested));
+        }
+        else {
+            flat.push(branch);
+        }
+    }
+    return flat;
 }

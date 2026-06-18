@@ -39,8 +39,18 @@ export interface FomodDetection {
  * `not_a_fomod` / missing `info.xml`. Re-throws any other error (corrupt
  * archive, sidecar disconnect, pyfomod unavailable, etc.) so callers can
  * surface real failures.
+ *
+ * Lane V3 FOMOD-EXT (2026-06-17): `mo2State` is an optional object forwarded
+ * to the sidecar so pyfomod can evaluate `<moduleDependencies>`,
+ * `<visible>` page conditions, and `<dependencyType>` option conditions
+ * against current MO2 state. When supplied, the returned `tree` carries
+ * `module_dependencies_status`, per-page `dependencies_status`, and per-option
+ * `dependencies_status` fields (see FomodTreeShape). The mo2State shape is
+ * deliberately structural (Record<string, unknown>) so this helper stays
+ * coupled only to the sidecar JSON contract — see mo2-state-for-fomod.ts for
+ * the gatherer that produces the real shape.
  */
-export declare function detectFomod(sidecar: SidecarLike, archivePath: string): Promise<FomodDetection>;
+export declare function detectFomod(sidecar: SidecarLike, archivePath: string, mo2State?: Record<string, unknown> | null): Promise<FomodDetection>;
 /**
  * Returns true when the caller supplied a non-empty `fomod_choices` array.
  *

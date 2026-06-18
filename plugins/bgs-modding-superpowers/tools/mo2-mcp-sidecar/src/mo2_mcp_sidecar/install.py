@@ -179,6 +179,9 @@ def install_stage_fomod(params: dict[str, Any]) -> dict[str, Any]:
             with a fomod/ subdir, OR a .zip/.7z/.rar that contains one)
         params["choices"]: list of {page_name, selected_options: [{group_name, option_name}]}
         params["staging_dir"]: absolute path to destination - created if missing
+        params["mo2_state"]: (Lane V3, optional) forwarded to fomod_resolve_files
+            so pyfomod's Installer evaluates <gameDependency> / <fileDependency>
+            checks against current MO2 state during the wizard walk.
 
     Returns:
         {
@@ -204,6 +207,7 @@ def install_stage_fomod(params: dict[str, Any]) -> dict[str, Any]:
     archive_path = Path(params["archive_path"])
     choices = params.get("choices", [])
     staging_dir = Path(params["staging_dir"])
+    mo2_state = params.get("mo2_state")
 
     if not archive_path.exists():
         raise FileNotFoundError(f"archive not found: {archive_path}")
@@ -227,11 +231,17 @@ def install_stage_fomod(params: dict[str, Any]) -> dict[str, Any]:
         fomod_root = scratch_dir
 
     try:
-        # Step 2: resolve files via pyfomod (reuses existing fomod.fomod_resolve_files)
-        resolved = fomod_resolve_files({
+        # Step 2: resolve files via pyfomod (reuses existing fomod.fomod_resolve_files).
+        # mo2_state is forwarded so pyfomod's Installer can enforce
+        # <gameDependency> / <fileDependency> checks during the wizard walk
+        # (FOMOD-EXT V3 phase 1).
+        resolve_params: dict[str, Any] = {
             "archive_path": str(fomod_root),
             "choices": choices,
-        })
+        }
+        if mo2_state is not None:
+            resolve_params["mo2_state"] = mo2_state
+        resolved = fomod_resolve_files(resolve_params)
         files = resolved.get("files", [])
 
         # Step 3: copy each source -> staging_dir/destination
