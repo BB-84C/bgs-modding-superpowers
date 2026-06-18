@@ -45,5 +45,6 @@ pub enum Command {
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         strings: bool,
     },
+    #[command(alias = "caps")]
     Capabilities,
 }

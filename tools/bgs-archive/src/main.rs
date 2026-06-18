@@ -40,7 +40,7 @@ fn main() -> Result<()> {
             strings,
             cli.json,
         )?,
-        Command::Capabilities => println!("capabilities not yet implemented (task A3)"),
+        Command::Capabilities => bgs_archive::cmd_caps::run(cli.json)?,
     }
 
     Ok(())

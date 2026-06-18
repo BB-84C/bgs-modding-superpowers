@@ -1,7 +1,6 @@
-#![allow(dead_code)]
-
 pub mod archive;
 pub mod cli;
+pub mod cmd_caps;
 pub mod cmd_extract;
 pub mod cmd_info;
 pub mod cmd_list;
