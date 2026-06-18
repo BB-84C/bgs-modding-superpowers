@@ -29,6 +29,8 @@
  * regression guard. Do not re-add `[kw]: branches` at the top level.
  */
 import { describe, it, expect } from "vitest";
+import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import { normalizeMcpInputSchema } from "../src/index.js";
 
 describe("normalizeMcpInputSchema", () => {
@@ -249,5 +251,231 @@ describe("normalizeMcpInputSchema", () => {
     expect(out.required).toEqual(["mode", "action"]);
     // Anthropic guard.
     expect((out as any).anyOf).toBeUndefined();
+  });
+
+  // ---------- BUG-27 — recursive nested union flatten ----------
+  //
+  // The fix surfaces nested anyOf/oneOf/allOf branches into the same flat
+  // list before discriminant extraction and property merge. Without it,
+  // Zod's z.union([z.discriminatedUnion(...), applyShape]) produces a
+  // top-level {anyOf:[{oneOf:[v1,v2,v3]}, applyShape]} whose inner
+  // {oneOf:[...]} envelope has no .properties → the merge loop only saw
+  // applyShape's fields and the inner variants were invisible to the LLM.
+
+  it("BUG-27: flattens nested anyOf inside an anyOf branch (envelope branch has no own properties)", () => {
+    const input = {
+      anyOf: [
+        {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                mode: { const: "plan" },
+                action: { const: "add" },
+                entry: { type: "object" },
+              },
+              required: ["mode", "action", "entry"],
+            },
+            {
+              type: "object",
+              properties: {
+                mode: { const: "plan" },
+                action: { const: "edit" },
+                title: { type: "string" },
+              },
+              required: ["mode", "action", "title"],
+            },
+          ],
+        },
+        {
+          type: "object",
+          properties: {
+            mode: { const: "apply" },
+            plan_id: { type: "string" },
+          },
+          required: ["mode", "plan_id"],
+        },
+      ],
+    };
+    const out = normalizeMcpInputSchema(input);
+    expect(out.type).toBe("object");
+    const props = out.properties as Record<string, unknown>;
+    // mode present in EVERY flattened branch with a literal value → full discriminant, required
+    expect(props.mode).toEqual({ enum: ["plan", "apply"] });
+    // action present in 2 of 3 flattened branches with const literals → partial discriminant, unioned, NOT required
+    expect(props.action).toEqual({ enum: ["add", "edit"] });
+    // Non-discriminant per-branch fields visible at top level
+    expect(props.entry).toEqual({ type: "object" });
+    expect(props.title).toEqual({ type: "string" });
+    expect(props.plan_id).toEqual({ type: "string" });
+    expect(out.required).toEqual(["mode"]);
+    // Anthropic guard
+    expect((out as any).anyOf).toBeUndefined();
+    expect((out as any).oneOf).toBeUndefined();
+    expect((out as any).allOf).toBeUndefined();
+  });
+
+  it("BUG-27: flattens nested oneOf inside an anyOf branch (mixed union keywords)", () => {
+    const input = {
+      anyOf: [
+        {
+          oneOf: [
+            {
+              type: "object",
+              properties: {
+                mode: { const: "plan" },
+                action: { const: "add" },
+              },
+              required: ["mode", "action"],
+            },
+            {
+              type: "object",
+              properties: {
+                mode: { const: "plan" },
+                action: { const: "remove" },
+              },
+              required: ["mode", "action"],
+            },
+          ],
+        },
+        {
+          type: "object",
+          properties: {
+            mode: { const: "apply" },
+            plan_id: { type: "string" },
+          },
+          required: ["mode", "plan_id"],
+        },
+      ],
+    };
+    const out = normalizeMcpInputSchema(input);
+    const props = out.properties as Record<string, unknown>;
+    expect(props.mode).toEqual({ enum: ["plan", "apply"] });
+    // action in 2 of 3 flattened branches as const → partial hoist, unioned
+    expect(props.action).toEqual({ enum: ["add", "remove"] });
+    expect(props.plan_id).toEqual({ type: "string" });
+    expect(out.required).toEqual(["mode"]);
+    // Anthropic guard
+    expect((out as any).anyOf).toBeUndefined();
+    expect((out as any).oneOf).toBeUndefined();
+    expect((out as any).allOf).toBeUndefined();
+  });
+
+  it("BUG-27: when a branch has BOTH its own properties AND a nested union, the union is expanded and the parent's own properties are dropped (rare; locked-in policy)", () => {
+    // This case is not produced by current Zod-derived shapes in this repo.
+    // It is locked in here so a future refactor has to deliberately decide
+    // whether to change policy. Today: flatten the union; drop the parent.
+    const input = {
+      anyOf: [
+        {
+          type: "object",
+          properties: { dropped: { type: "string" } },
+          anyOf: [
+            {
+              type: "object",
+              properties: { mode: { const: "plan" }, name: { type: "string" } },
+              required: ["mode", "name"],
+            },
+            {
+              type: "object",
+              properties: { mode: { const: "apply" }, plan_id: { type: "string" } },
+              required: ["mode", "plan_id"],
+            },
+          ],
+        },
+        {
+          type: "object",
+          properties: { sibling: { type: "string" } },
+          required: ["sibling"],
+        },
+      ],
+    };
+    const out = normalizeMcpInputSchema(input);
+    const props = out.properties as Record<string, unknown>;
+    // Parent envelope's `dropped` is NOT visible (policy choice)
+    expect(props.dropped).toBeUndefined();
+    // Flattened inner branches' fields ARE visible
+    expect(props.mode).toBeDefined();
+    expect(props.name).toEqual({ type: "string" });
+    expect(props.plan_id).toEqual({ type: "string" });
+    // Sibling outer branch's field is also visible
+    expect(props.sibling).toEqual({ type: "string" });
+    // mode only in 2 of 3 flattened branches (sibling branch has no mode) → partial hoist, NOT required
+    expect((props.mode as Record<string, unknown>).enum).toEqual(["plan", "apply"]);
+    expect(out.required).toBeUndefined();
+    // Anthropic guard
+    expect((out as any).anyOf).toBeUndefined();
+    expect((out as any).oneOf).toBeUndefined();
+    expect((out as any).allOf).toBeUndefined();
+  });
+
+  it("BUG-27: mo2_configure_executable Zod-derived shape produces complete top-level properties", () => {
+    // This is the real bug shape: z.union([z.discriminatedUnion(...), applyShape]).
+    // zodToJsonSchema with target:'openApi3' (the same target index.ts uses)
+    // emits {anyOf:[{oneOf:[v1,v2,v3]}, applyShape]} (or similar nested form).
+    // After our fix, every per-branch field surfaces at top level so the
+    // LLM can construct any of the four legal call shapes through the
+    // OpenCode tool-calling wire schema.
+    const entrySchema = z.object({
+      title: z.string().min(1),
+      binary: z.string().min(1),
+    });
+    const updatesSchema = z.object({
+      title: z.string().min(1).optional(),
+    });
+    const planSchema = z.discriminatedUnion("action", [
+      z.object({
+        mode: z.literal("plan"),
+        action: z.literal("add"),
+        entry: entrySchema,
+      }),
+      z.object({
+        mode: z.literal("plan"),
+        action: z.literal("edit"),
+        title: z.string().min(1),
+        updates: updatesSchema,
+      }),
+      z.object({
+        mode: z.literal("plan"),
+        action: z.literal("remove"),
+        title: z.string().min(1),
+      }),
+    ]);
+    const inputSchema = z.union([
+      planSchema,
+      z.object({
+        mode: z.literal("apply"),
+        plan_id: z.string().min(1),
+        lease_token: z.string().min(1),
+      }),
+    ]);
+    const raw = zodToJsonSchema(inputSchema, { target: "openApi3" }) as Record<string, unknown>;
+    const out = normalizeMcpInputSchema(raw);
+    expect(out.type).toBe("object");
+    const props = out.properties as Record<string, unknown>;
+    // mode appears in EVERY flattened branch (3 plan variants + 1 apply) → full discriminant
+    const mode = props.mode as Record<string, unknown>;
+    expect(mode).toBeDefined();
+    expect(mode.enum).toEqual(expect.arrayContaining(["plan", "apply"]));
+    // action appears in 3 of 4 flattened branches → partial discriminant, NOT required
+    const action = props.action as Record<string, unknown>;
+    expect(action).toBeDefined();
+    expect((action.enum as unknown[]).slice().sort()).toEqual(["add", "edit", "remove"]);
+    // Non-discriminant fields visible at top level
+    expect(props.entry).toBeDefined();
+    expect(props.title).toBeDefined();
+    expect(props.updates).toBeDefined();
+    expect(props.plan_id).toBeDefined();
+    expect(props.lease_token).toBeDefined();
+    // mode required (in every branch's required); action NOT required (absent from apply branch)
+    const required = out.required as string[];
+    expect(required).toContain("mode");
+    expect(required).not.toContain("action");
+    // additionalProperties true so branch-specific fields not yet enumerated remain accepted
+    expect(out.additionalProperties).toBe(true);
+    // Anthropic regression guard
+    expect((out as any).anyOf).toBeUndefined();
+    expect((out as any).oneOf).toBeUndefined();
+    expect((out as any).allOf).toBeUndefined();
   });
 });
