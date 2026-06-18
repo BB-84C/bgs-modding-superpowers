@@ -2,6 +2,7 @@
 
 mod cli;
 mod error;
+mod game;
 mod model;
 
 use anyhow::Result;

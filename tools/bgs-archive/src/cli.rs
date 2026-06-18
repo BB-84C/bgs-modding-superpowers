@@ -36,12 +36,12 @@ pub enum Command {
     Pack {
         input_dir: PathBuf,
         out_archive: PathBuf,
-        #[arg(long)]
-        game: String,
-        #[arg(long)]
-        format: Option<String>,
-        #[arg(long)]
-        compress: Option<String>,
+        #[arg(long, value_enum)]
+        game: crate::game::Game,
+        #[arg(long, value_enum, default_value_t = crate::game::PackFormat::Gnrl)]
+        format: crate::game::PackFormat,
+        #[arg(long, value_enum)]
+        compress: Option<crate::game::Compress>,
         #[arg(long)]
         strings: bool,
     },
