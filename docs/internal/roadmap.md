@@ -1411,3 +1411,99 @@ BUG-11 Layer B forward-slash conversion (\_serializeValue\ PATH_KEYS handling, L
 - **0 open bugs on main**
 
 main HEAD at \53ecd08\; 39 commits since main@\ 63c437\ Batch-1 baseline.
+
+## 2026-06-17 ## B.3.4 + B.5.2 EMPIRICALLY VALIDATED — 66/70 (94.3%) achieved
+
+After OpenCode restart (v1.3 dist live), orchestrator executed both remaining high-priority test-design cases per BATCH7-B52-B34-TEST-DESIGN.md. Both PASS via real OpenCode→MCP wire.
+
+### B.3.4 — \mo2_install\ with valid FOMOD choices (BUG-26 fix end-to-end validated)
+
+Procedure (12 steps, 5 phase). Sequence:
+
+**Phase 1 probe**: \Mo2Mo2Install_tool\ plan with \omod_choices:[]\ on \	est-fomod.7z\ fixture → response envelope contained the full \omod_tree\ structure as designed:
+
+\\\json
+{
+  "code": "fomod_choices_required",
+  "details": {
+    "fomod_tree": {
+      "fomod_name": "E2EFomod",
+      "fomod_version": "1.0",
+      "conditional_pages_note": null,
+      "pages": [{
+        "name": "Install",
+        "groups": [{
+          "name": "Main",
+          "type": "SelectExactlyOne",
+          "options": [{"name": "Default", "type": "Recommended", "dependencies_status": {"met": true, "missing": []}}]
+        }],
+        "dependencies_status": {"met": true, "missing": []}
+      }],
+      "module_dependencies_status": {"met": true, "missing": []}
+    }
+  }
+}
+\\\
+
+**BUG-26 fix (typed FomodChoicesRequiredError) + FOMOD-EXT dependency_status fields validated live**.
+
+**Phase 2 construct**: parse tree → 1 page, 1 SelectExactlyOne group "Main", 1 option "Default". Choice: \[{"page_name":"Install","selected_options":[{"group_name":"Main","option_name":"Default"}]}]\.
+
+**Phase 3 plan+apply**: plan succeeded with valid choices → apply via sidecar Pattern A → \{ok:true, mod_name:"E2E-B34-Fomod", fomod_used:true, dest_path:".../mods/E2E-B34-Fomod"}\.
+
+**Phase 4 readback**: mod dir created with 2 files (\meta.ini\ + \	extures/e2e/fomod-default.txt\ — the "Default" option's payload). \Mo2Mo2ModInfo_tool\ returned correct metadata.
+
+**Phase 5 cleanup**: \Mo2Mo2RemoveMod_tool\ with \ackup_first:false\ cleanly removed mod dir + modlist rows. \profiles_updated:["Default"]\. plugins.txt + ModOrganizer.ini SHA byte-clean. modlist SHA temporarily differed from baseline post-cleanup (BUG-28 below) but **self-normalized on next MO2 launch**.
+
+#### BUG-28 (NEW, discovered during B.3.4) — \mo2_install\ creates dual modlist rows
+
+\mo2_install\ with \	arget_priority:"bottom"\ writes the mod entry to modlist.txt **twice**: once at line 2 (top, disabled \-E2E-B34-Fomod\) AND at the last line (bottom, enabled \+E2E-B34-Fomod\). Only the bottom row reflects the requested target_priority; the top row appears to be a placeholder from \createMod\ → \send_mod_to\ sequence where the initial position isn't cleaned up. \Mo2Mo2RemoveMod_tool\ correctly removes BOTH rows (so no orphan after cleanup) and modlist.txt byte-invariant self-heals on next MO2 launch. **Severity: low** — functional install works, cleanup works, only cosmetic during the mod's lifetime. Investigate \	ools/mo2-mcp/src/tools/mo2-install.ts\ applyMutation for redundant write. Tracked as housekeeping debt for v1.4.
+
+### B.5.2 — \mo2_run_tool\ after \configure_executable\ add (lifecycle juggle, run_tool dispatch validated)
+
+Procedure (14 steps, 3 phase). Sequence:
+
+**Phase 1 offline configure add**: MO2 stopped → \configure_executable\ plan+apply (\ction:add, entry:{title:"E2E-B52-Notepad", binary:"C:\\Windows\\System32\\notepad.exe", ...}\) → \xecutables_count: 8 → 9\. ModOrganizer.ini readback: \9\binary=C:/Windows/System32/notepad.exe\ + \9\workingDirectory=C:/Windows/System32\ (forward-slash per BUG-11 Layer B).
+
+**Phase 2 online run_tool**: MO2 restart (boots with new INI entry) → mo2-mcp rebind (broker reconnected, \pipeConnected:true\) → \Mo2Mo2ListExecutables_tool\ confirmed E2E-B52-Notepad registered → pre-launch notepad count: 0 → \Mo2Mo2RunTool_tool\ plan+apply with title="E2E-B52-Notepad" → \{ok:true, result:{handle:6088, waiting:false}}\ → **notepad.exe PID 60292 spawned** (StartTime 21:17:50, Path \C:\\Windows\\System32\\notepad.exe\). Killed cleanly via Stop-Process.
+
+**Phase 3 offline configure remove**: MO2 stopped → \configure_executable\ remove plan+apply → \xecutables_count: 9 → 8\. 0 E2E-B52 occurrences in INI.
+
+**Final invariant**: modlist + plugins SHA byte-match baseline (\CA4CD4F4...\ + \E6CC4983...\). ModOrganizer.ini differs from pre-test (Qt renumbering, semantically clean: 0 E2E entries, executables_count restored).
+
+End-to-end pipeline validated: configure_executable → MO2 boot → mo2_run_tool → broker organizer.start_application → real process spawn → cleanup.
+
+### Side observation — stale BUG-11 era entry
+
+\Mo2Mo2ListExecutables_tool\ returned a stale entry from Batch 1 era (pre-BUG-11 fix): \E2E-Test-Exe-1781663606679\ with corrupted \inary:"C:indowsystem32/notepad.exe"\ + \workingDirectory:"C:indowsystem32"\. The entry has been sitting in ModOrganizer.ini since the first BUG-11 reproduction (timestamp suggests early June 2026 = 1781663606679 ms epoch). Harmless (would fail to launch with FILE_NOT_FOUND but wouldn't BUG-16 hang because no agent ever tried to run it). Housekeeping debt — could be removed via \Mo2Mo2ConfigureExecutable_tool\ remove. Not done this session to keep state changes minimal.
+
+### Final 70-case e2e tally
+
+| Status | Count |
+|---|---|
+| ✅ **Verified PASS via MCP wire** | **66/70 (94.3%)** |
+| ❌ Unreachable through OpenCode wire by design | 2 (C.5.2, C.5.3) |
+| ⏸ Test-design / sequencing — 2 marginal cases | 2 (Bx.x — non-load-bearing variants) |
+
+**66/68 reachable cases = 97.1%**. Remaining 2 marginal are non-load-bearing test variants, not gaps in mo2-mcp coverage.
+
+### Test suite final state
+
+| Surface | Pass | Skipped |
+|---|---|---|
+| \	ools/mo2-mcp\ (vitest) | 488 | 19 |
+| \	ools/mo2-mcp-sidecar\ (pytest) | 107 | 0 |
+| **Total** | **595** | 19 |
+
+### Bug roster final v1.3
+
+- 24 bugs fixed and shipped on main (BUG-1, 2, 3, 6, 7, 9, 10, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25a, 25b, 26, 27 + Anthropic regression hotfix)
+- 1 NEW BUG-28 discovered + documented (mo2_install dual modlist row) — low severity, self-healing on MO2 launch, deferred to v1.4
+- 2 falsified by revisit (BUG-4, BUG-5)
+- 1 env-resolved (BUG-LAST)
+- 1 deferred process-class (BUG-17)
+- Empirical milestones validated: BUG-13, BUG-14, BUG-16+L2, BUG-22+23 (Pattern A FOMOD on 6.7 GB real), BUG-26 (fomod_tree surfacing), BUG-11 Layer B, BUG-27 (gpt-5.x multi-field), BUG-25a/b
+
+### v1.2 → v1.3 arc summary
+
+Started Batch 1 at main@\ 63c437\ with 395 tests. Ended at main@\<this commit>\ with 595 tests (+200). Closeout: **24 bugs fixed shipped on main, 0 critical open, 1 low-severity housekeeping-debt (BUG-28) deferred**. 66/70 e2e cases verified PASS via real OpenCode→MCP wire. mo2-mcp v1.3 is the stable mainline for downstream BGS modding workflows.
