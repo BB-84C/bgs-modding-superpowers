@@ -64,7 +64,12 @@ bgs-papyrus capabilities
 |---|---|---|---|
 | skyrimle / skyrimse | `TESV_Papyrus_Flags.flg` | `<root>/Papyrus Compiler/PapyrusCompiler.exe` | none |
 | fallout4 | `Institute_Papyrus_Flags.flg` | `<root>/Papyrus Compiler/PapyrusCompiler.exe` | none |
-| starfield | `Starfield_Papyrus_Flags.flg` | `<root>/Papyrus Compiler/PapyrusCompiler.exe` | `--sf-syntax-fix` ON |
+| starfield | `Starfield_Papyrus_Flags.flg` | **`<root>/Tools/Papyrus Compiler/PapyrusCompiler.exe`** | `--sf-syntax-fix` ON |
+
+> **CONFIRMED real paths (2026-06-18 recon on this machine):**
+> - Starfield compiler: `D:\SteamLibrary\steamapps\common\Starfield\Tools\Papyrus Compiler\PapyrusCompiler.exe` — note the `Tools\` segment; Starfield CK does NOT use the bare `<root>\Papyrus Compiler\` layout that Skyrim/FO4 use. `detect.py` MUST probe both `<root>/Papyrus Compiler/` AND `<root>/Tools/Papyrus Compiler/`.
+> - Starfield flags file: `D:\SteamLibrary\steamapps\common\Starfield\Data\Scripts\Source\Starfield_Papyrus_Flags.flg` (also mirrored at `Tools\ContentResources\Scripts\Source\`).
+> - Starfield round-trip oracle fixtures (CK-generated psc+pex pairs): `.opencode/artifacts/archive-papyrus-tools/fixtures/starfield-chronomark/` (copied from `D:\Starfield MO2\mods\Useful Chronomark Watch\Scripts`). `UCW_MainQuestScript` + `UCW_PlayerAliasScript`, each `.psc` (Source/) + `.pex`.
 
 Default import dirs per game (from `blu3mania/npp-papyrus` + pyro):
 - SSE: `Data/Scripts/Source`, `Data/Source/Scripts`

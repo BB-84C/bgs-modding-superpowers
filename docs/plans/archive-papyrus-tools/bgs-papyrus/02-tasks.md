@@ -88,7 +88,7 @@ def test_sse_flags_file():
     assert flags_file(Game.SKYRIMSE) == "TESV_Papyrus_Flags.flg"
 ```
 - [ ] **Step 2: FAIL.**
-- [ ] **Step 3: Implement `games.py`** — `Game` enum (`SKYRIMLE, SKYRIMSE, FALLOUT4, STARFIELD`), `flags_file()` (matrix from `01-architecture.md`), `default_imports()`, `ck_compiler_subpath()` = `"Papyrus Compiler/PapyrusCompiler.exe"`, `steam_dir_name()` (`"Skyrim Special Edition"`, `"Fallout 4"`, `"Starfield"`). Finalize `model.py` Envelope.
+- [ ] **Step 3: Implement `games.py`** — `Game` enum (`SKYRIMLE, SKYRIMSE, FALLOUT4, STARFIELD`), `flags_file()` (matrix from `01-architecture.md`), `default_imports()`, `ck_compiler_subpaths()` returning a LIST per game: `["Papyrus Compiler/PapyrusCompiler.exe"]` for Skyrim/FO4; `["Tools/Papyrus Compiler/PapyrusCompiler.exe", "Papyrus Compiler/PapyrusCompiler.exe"]` for Starfield (CONFIRMED: real Starfield path has the `Tools/` segment), `steam_dir_name()` (`"Skyrim Special Edition"`, `"Fallout 4"`, `"Starfield"`). Finalize `model.py` Envelope.
 - [ ] **Step 4: PASS.**  **Step 5: Commit.**
 
 ---
