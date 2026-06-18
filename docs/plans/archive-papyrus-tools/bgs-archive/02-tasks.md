@@ -246,7 +246,7 @@ assert!(matches!(a, bgs_archive::archive::AnyArchive::Fo4(..)));
 - [ ] **Step 1: Failing test**: create a temp input dir with `sub/a.txt` + `b.bin`; `pack --game fallout4`; reopen result; assert both entries present with correct payloads.
 - [ ] **Step 2: FAIL.**
 - [ ] **Step 3: Implement** — `walkdir` the input dir; compute archive-internal key from relative path (forward slashes; Starfield requires `/`). Branch by `game.family()`:
-  - fo4: build `ba2::fo4::File` from `Chunk::from_decompressed(bytes)`, insert under `ArchiveKey::from(rel_bytes)`, build `ArchiveOptions::builder().format(..).version(game.fo4_version()).compression_format(..).build()`, `archive.write(&mut out, &opts)` (cheat-sheet §3).
+  - fo4: build `ba2::fo4::File` from `Chunk::from_decompressed(bytes)`, insert under `ArchiveKey::from(rel_bytes)`, build `ArchiveOptions::builder().format(..).version(game.fo4_version()).compression_format(..).strings(true).build()`, `archive.write(&mut out, &opts)` (cheat-sheet §3). **`.strings(true)` is MANDATORY** — verified in A4: FO4 only writes the file-name string table when `strings()` is true; without it `extract`/`list` cannot recover entry paths (they fall back to `<hash:...>`). The `--strings`/`strings: bool` CLI flag should DEFAULT to true for fo4 packing; only set false for size-optimized hash-only archives where the caller knows names aren't needed.
   - tes4: build `Directory`/`File::from_decompressed`, group by top-level dir into `ArchiveKey`, `ArchiveOptions::builder().types(..).version(game.tes4_version()).build()` (cheat-sheet §4).
   - tes3: `File` from bytes, `archive.write(&mut out)` no options (cheat-sheet §5).
   - `--format dx10` -> return `AppError::Unsupported("dx10_pack")` for now (Task A-DX10).
