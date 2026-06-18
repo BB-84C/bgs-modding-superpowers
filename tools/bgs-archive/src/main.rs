@@ -1,4 +1,8 @@
+#![allow(dead_code)]
+
 mod cli;
+mod error;
+mod model;
 
 use anyhow::Result;
 use clap::Parser;
