@@ -3,10 +3,11 @@ from __future__ import annotations
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from bgs_papyrus.games import Game, ck_compiler_subpaths, flags_file, steam_dir_name
+from bgs_papyrus.model import Envelope
 
 
 @dataclass
@@ -19,6 +20,21 @@ class ToolchainInfo:
     russo: str | None = None
     champollion: str | None = None
     source: str | None = None
+
+
+def run(game_filter: Game | None = None) -> Envelope:
+    games = [game_filter] if game_filter else [
+        Game.SKYRIMLE,
+        Game.SKYRIMSE,
+        Game.FALLOUT4,
+        Game.STARFIELD,
+    ]
+    per_game = {game.name.lower(): asdict(detect_game(game)) for game in games}
+    return Envelope(
+        ok=True,
+        command="detect-toolchain",
+        data={"per_game": per_game},
+    )
 
 
 def detect_game(game: Game) -> ToolchainInfo:
