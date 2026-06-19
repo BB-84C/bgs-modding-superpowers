@@ -28,6 +28,7 @@
     tools/xedit-hook-bridge/dist/   (xEditHookBridge.dll only)
     tools/mo2-vfs-launcher/         (PowerShell launcher surface)
     tools/mo2-control-plane/        (broker + live-bridge Python plugin)
+    tools/bgs-archive/              (Rust BA2/BSA CLI source + docs)
     package.json, README.md, LICENSE, RELEASE-NOTES.md
 
   .mcp.json strategies (-McpPathStrategy):
@@ -330,7 +331,33 @@ if ($LASTEXITCODE -gt 7) {
 # Reset $LASTEXITCODE so downstream cmdlets see a clean state.
 $global:LASTEXITCODE = 0
 
-# ---- 6c. tools/mo2-assets-engine (offline archive/loose-file engine) --------
+# ---- 6c. tools/bgs-archive (Rust BA2/BSA CLI reference tree) ----------------
+# bgs-archive is distributed as a GitHub Release binary; the plugin tree bundles
+# source, tests, scripts, Cargo.lock, and README so agent-facing references and
+# fallback source builds work from a fresh vendor clone. Exclude only Rust build
+# output; target/ can be large and is fully reproducible.
+$bgsArchiveSrc = Join-Path $RepoRoot "tools/bgs-archive"
+$bgsArchiveDst = Join-Path $PluginRoot "tools/bgs-archive"
+if (-not (Test-Path -LiteralPath $bgsArchiveSrc)) {
+  throw "Source not found: tools/bgs-archive"
+}
+New-Item -ItemType Directory -Path $bgsArchiveDst -Force | Out-Null
+$robocopyArgs = @(
+  $bgsArchiveSrc,
+  $bgsArchiveDst,
+  "/E",
+  "/XD", "target",
+  "/NFL", "/NDL", "/NJH", "/NJS", "/NP"
+)
+& robocopy @robocopyArgs | Out-Null
+# robocopy exit codes 0-7 are success variants; 8+ are real errors.
+if ($LASTEXITCODE -gt 7) {
+  throw "robocopy failed copying tools/bgs-archive (exit $LASTEXITCODE)"
+}
+# Reset $LASTEXITCODE so downstream cmdlets see a clean state.
+$global:LASTEXITCODE = 0
+
+# ---- 6d. tools/mo2-assets-engine (offline archive/loose-file engine) --------
 # Bundled so Plan A's Python engine + `mo2-assets` CLI are available from the
 # materialized plugin tree. Use robocopy with /XD for the same reason as
 # bgs-translator: Python dev caches can appear at any depth after local test
@@ -358,7 +385,7 @@ if ($LASTEXITCODE -gt 7) {
 # Reset $LASTEXITCODE so downstream cmdlets see a clean state.
 $global:LASTEXITCODE = 0
 
-# ---- 6d. tools/mo2-mcp-sidecar (Python JSON-RPC sidecar) -------------------
+# ---- 6e. tools/mo2-mcp-sidecar (Python JSON-RPC sidecar) -------------------
 # Bundled so the mo2-mcp TypeScript server can launch the sidecar from the
 # materialized plugin tree. Use robocopy with /XD for Python dev caches.
 $mo2SidecarSrc = Join-Path $RepoRoot "tools/mo2-mcp-sidecar"
