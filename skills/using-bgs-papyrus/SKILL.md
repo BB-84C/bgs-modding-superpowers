@@ -27,13 +27,19 @@ bgs-papyrus detect-toolchain --json --game starfield
 
 The official Creation Kit must be installed by the user from Steam. Bethesda's `PapyrusCompiler.exe` is not bundled with this plugin and must not be copied into the repo or plugin tree. `bgs-papyrus` detects and drives the installed compiler.
 
-Champollion is used for decompile. If needed, the tool downloads Champollion v1.3.2 to:
+Champollion is used for decompile. `bgs-papyrus` detects Champollion; it does not download it automatically. Install `Champollion.exe` at:
 
 ```text
-~/.bgs-modding-superpowers/tools/champollion/
+~/.bgs-modding-superpowers/tools/champollion/Champollion.exe
 ```
 
 or the user can set `BGS_PAPYRUS_CHAMPOLLION` to an existing executable.
+
+One PowerShell install shape for Champollion v1.3.2 from `Orvid/Champollion` releases:
+
+```powershell
+$root = "$HOME\.bgs-modding-superpowers\tools\champollion"; New-Item -ItemType Directory -Force -Path $root | Out-Null; $zip = Join-Path $root "Champollion.v1.3.2.zip"; Invoke-WebRequest "https://github.com/Orvid/Champollion/releases/download/v1.3.2/Champollion.v1.3.2.zip" -OutFile $zip; Expand-Archive -Force $zip $root
+```
 
 Human manuals:
 

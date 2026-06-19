@@ -81,13 +81,19 @@ Decompile a directory tree:
 bgs-papyrus decompile "D:\mods\Example\Scripts" --json --game skyrimse --out "D:\work\decompiled" --recursive
 ```
 
-Decompile uses Champollion. If Champollion is not already configured, the tool downloads Champollion v1.3.2 to:
+Decompile uses Champollion. `bgs-papyrus` detects Champollion; it does not download it automatically. Install `Champollion.exe` here:
 
 ```text
-~\.bgs-modding-superpowers\tools\champollion\
+~\.bgs-modding-superpowers\tools\champollion\Champollion.exe
 ```
 
 You can also set `BGS_PAPYRUS_CHAMPOLLION` to an existing Champollion executable.
+
+One PowerShell install shape for Champollion v1.3.2 from `Orvid/Champollion` releases:
+
+```powershell
+$root = "$HOME\.bgs-modding-superpowers\tools\champollion"; New-Item -ItemType Directory -Force -Path $root | Out-Null; $zip = Join-Path $root "Champollion.v1.3.2.zip"; Invoke-WebRequest "https://github.com/Orvid/Champollion/releases/download/v1.3.2/Champollion.v1.3.2.zip" -OutFile $zip; Expand-Archive -Force $zip $root
+```
 
 ## 5. Starfield Guard syntax
 

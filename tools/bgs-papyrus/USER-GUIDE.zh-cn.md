@@ -81,13 +81,19 @@ bgs-papyrus decompile "D:\mods\Example\Scripts\MyQuestScript.pex" --json --game 
 bgs-papyrus decompile "D:\mods\Example\Scripts" --json --game skyrimse --out "D:\work\decompiled" --recursive
 ```
 
-反编译使用 Champollion。如果本机还没有配置 Champollion，本工具会把 Champollion v1.3.2 下载到：
+反编译使用 Champollion。`bgs-papyrus` 只检测 Champollion，不会自动下载。请把 `Champollion.exe` 放到：
 
 ```text
-~\.bgs-modding-superpowers\tools\champollion\
+~\.bgs-modding-superpowers\tools\champollion\Champollion.exe
 ```
 
 也可以通过 `BGS_PAPYRUS_CHAMPOLLION` 指向已有的 Champollion 可执行文件。
+
+从 `Orvid/Champollion` releases 安装 Champollion v1.3.2 的 PowerShell 一行命令示例：
+
+```powershell
+$root = "$HOME\.bgs-modding-superpowers\tools\champollion"; New-Item -ItemType Directory -Force -Path $root | Out-Null; $zip = Join-Path $root "Champollion.v1.3.2.zip"; Invoke-WebRequest "https://github.com/Orvid/Champollion/releases/download/v1.3.2/Champollion.v1.3.2.zip" -OutFile $zip; Expand-Archive -Force $zip $root
+```
 
 ## 5. Starfield Guard 语法
 
