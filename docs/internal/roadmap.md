@@ -1594,3 +1594,50 @@ Three test ESPs left in `.artifacts/mo2/overwrite/` as semantic-acceptance audit
 - `OpenCodeR6Final.esp` (526 B) — final wrapper-wire-test PASS, REFR 66000001 created via `xedit_create_child_record` intent tool with the realigned schema
 
 All three TES4 + signatures verified via raw byte readback. Bundled tree byte-sync to vendor confirmed at every push.
+
+---
+
+## 2026-06-19 ## Two agent-native CLI tools: bgs-archive (BA2/BSA) + bgs-papyrus (Papyrus compile/decompile)
+
+### What this round delivered
+
+Branch `feat/archive-papyrus-cli-tools` (35 commits): two standalone agent-native CLI tools — **CLI + skills, no MCP** — built subagent-driven with multi-commit/push, grounded in 3-lens web recon + exact upstream API extraction, with binding semantic E2E acceptance.
+
+- **bgs-archive** (`tools/bgs-archive/`, Rust on `ba2` v3.0.1 / 0BSD): unpack/pack BA2/BSA across Oblivion/FO3-NV/Skyrim LE-SE/AE/FO4(+NextGen v7/v8)/FO76/Starfield(v2/v3). Subcommands info/list/extract/pack/capabilities, JSON envelopes. Auto-detect via `ba2::guess_format`. Source in-tree; binary intended for GitHub Release (not committed).
+- **bgs-papyrus** (`tools/bgs-papyrus/`, Python): detect + drive the user-installed official CK `PapyrusCompiler.exe` (compile) + Champollion + CK-grounded Starfield Guard post-processor (decompile), for Skyrim/FO4/Starfield. Subcommands detect-toolchain/compile/decompile/capabilities.
+- Both materialized into `plugins/bgs-modding-superpowers/tools/` + `using-bgs-archive` / `using-bgs-papyrus` skills + bootstrap-table rows. README + (papyrus) bilingual USER-GUIDE.
+
+### Binding semantic acceptance (real, not green-test theatre)
+
+- **bgs-archive**: real FO4 BA2 (`ccbgsfo4008-pipgrn`, auto-detect fo4 v1 GNRL Zip, 30 entries) + real Skyrim BSA (auto-detect tes4 v105 lz4) — structural-validity (format magic + size) + self-consistency SHA256 round-trip PASS. Tool-free (no external oracle: BSArchPro is GUI-only and hangs bash; no CLI archive oracle exists on this machine).
+- **bgs-papyrus COMPILE**: real Starfield CK 4.7.0.5 compiled the Chronomark scripts via our wrapper — both `.pex` produced byte-identical-SIZE to the original CK output (3624/886).
+- **bgs-papyrus DECOMPILE + Guard**: Chronomark decompile round-trip (symbol-match, our recompiled pex decompiles to same normalized source as original). Starfield Guard syntax **empirically observed** from real CK-authored vanilla scripts and recompile-validated: Champollion `Guard…EndGuard` → official `LockGuard…EndLockGuard`; `TryGuard…EndGuard` → `TryLockGuard…EndTryLockGuard`.
+
+### What is now known
+
+- BA2/BSA version matrix (BSA v103/104/105; BA2 v1/v2/v3/v7/v8; FO4 NG bump is structurally-inert version-only; Starfield v3 uses LZ4 *block* not SSE's frame).
+- Starfield CK compiler lives at `<root>\Tools\Papyrus Compiler\PapyrusCompiler.exe` (the `Tools\` segment differs from Skyrim/FO4's bare `Papyrus Compiler\`). Flags: `Starfield_Papyrus_Flags.flg`.
+- The official CK PapyrusCompiler runs headless via subprocess (no GUI) and supports batch (`-all`) — pyro-proven; our wrapper drives it cleanly.
+- Caprica/Champollion ARE stale (2023-24) and Champollion's Starfield Guard syntax is GUESSED/wrong; the real official syntax was recovered empirically from CK-authored vanilla sources.
+- KNOWN LIMITATION: Champollion v1.3.2 has an *unrelated* decompile bug (remote-event casts) that can prevent some complex vanilla scripts from recompiling — documented honestly; our Guard post-processor is validated, this is upstream Champollion.
+- `ba2` Rust crate is the only library with write + full Starfield/FO4-NG coverage + permissive (0BSD) license.
+
+### What later phases should do differently / open items
+
+- **bgs-archive binary needs a GitHub Release publish** (`bgs-archive-vX.Y.Z`, per-platform) so end-users get a binary without a Rust toolchain; currently source-in-tree + `cargo build`.
+- DX10/GNMF pack deferred (Task A-DX10) — gated on resolving `fo4::DX10Header` field layout.
+- Large-compressed-entry decompression validated only via upstream `ba2`; the tiny real fixtures are uncompressed — a bigger compressed BA2 fixture would strengthen this.
+- Champollion remote-event-cast decompile limitation is a candidate for a future post-processor rule or an upstream Champollion fork.
+- Oracle review (2 rounds) caught + drove fixes: JSON error envelopes, archive path-traversal sanitization, in-tool game-Data write guard (`--allow-game-data`), tes4 nested-path split, compile/decompile fresh-output checks, starfield_syntax unmodeled-construct honesty, and acceptance-doc honesty. All 7 resolved.
+- Branch pending merge decision; not yet merged to main / vendor-refreshed.
+
+### Test state
+- bgs-archive: cargo test green (incl path-traversal, game-data-refusal, tes4-nested round-trip, real-archive `#[ignore]` acceptance).
+- bgs-papyrus: 36 non-e2e pytest green + 3 e2e (real CK compile/decompile) passing with evidence under `.opencode/artifacts/archive-papyrus-tools/acceptance/`.
+
+### 2026-06-19 addendum — coverage gaps Q1/Q2 closed (pre-merge)
+
+- **Q2 real Starfield BA2**: v2 GNRL (`Constellation - Localization.ba2`, 27 entries) + v3 DX10/LZ4 (`Starfield - LODTextures02.ba2`, 658 entries). FOUND + FIXED a real bug — v3 LZ4-block texture extraction failed with `DecompressionFailed`; added an LZ4 decompression path before FO4/DX10 file write (commit `ba0c68d`, `lzzzz` direct dep). 658/658 `.dds` extract with valid `DDS ` magic. The prior "compressed-entry decompression unproven" open item is now CLOSED. (Note: `SFBGS006 - Textures.ba2` turned out to be v2/Zip; the real v3/LZ4 fixture is `Starfield - LODTextures02.ba2`.)
+- **Q1 FO4 compile**: FO4 CK `PapyrusCompiler 2.8.0.4` (at `B:\SteamLibrary\steamapps\common\Fallout 4\Papyrus Compiler\`, found via `libraryfolders.vdf` scan — a second Steam library on B:) compiled `BoSResQuestScript.psc` → valid FO4 `.pex` (magic `0xFA57C0DE`, ver 3.9, gameId 2) via our wrapper (commit `bf7bd85`).
+- **Q1 FO4/Skyrim decompile**: Champollion via our tool → `WeaponLLInject` (FO4) + `MMX452_Sofia_MarkerOnOff` (Skyrim) valid `.psc` with ScriptName.
+- **Remaining honest gap**: Skyrim COMPILE not E2E-verified (Skyrim CK not installed on this machine). Identical wrapper/code path proven on Starfield + FO4; blocked only by the missing CK, not a tool defect.
