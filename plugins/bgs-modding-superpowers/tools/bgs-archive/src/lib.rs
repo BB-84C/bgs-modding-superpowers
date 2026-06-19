@@ -8,3 +8,4 @@ pub mod cmd_pack;
 pub mod error;
 pub mod game;
 pub mod model;
+pub mod safety;

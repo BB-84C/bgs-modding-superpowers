@@ -14,6 +14,8 @@ pub enum AppError {
     Unsupported(String),
     #[error("not found: {0}")]
     NotFound(String),
+    #[error("{0}")]
+    RefusedGameDataWrite(String),
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
 }
@@ -25,6 +27,7 @@ impl AppError {
             AppError::Tes3(_) | AppError::Tes4(_) | AppError::Fo4(_) => "archive_error",
             AppError::Unsupported(_) => "unsupported",
             AppError::NotFound(_) => "not_found",
+            AppError::RefusedGameDataWrite(_) => "refused_game_data_write",
             AppError::Json(_) => "json_error",
         }
     }

@@ -41,7 +41,7 @@ target\release\bgs-archive.exe capabilities --json
 
 ## Commands
 
-Run `bgs-archive --help` or any subcommand's `--help` for the live option surface. Add `--json` to any command for an agent-readable envelope.
+Run `bgs-archive --help` or any subcommand's `--help` for the live option surface. Add `--json` to any command for an agent-readable envelope. Writes into detected game `Data` directories are refused by default; use an MO2 mod overlay, or pass the global `--allow-game-data` override deliberately.
 
 ### `info`
 
@@ -73,7 +73,7 @@ Example JSON shape:
 
 ### `extract`
 
-Extract all entries or a filtered subset. Use `--flatten` only for deliberate flat-output workflows.
+Extract all entries or a filtered subset. Use `--flatten` only for deliberate flat-output workflows. `--out` is guarded against direct writes into game `Data` directories unless `--allow-game-data` is passed.
 
 ```powershell
 bgs-archive --json extract "D:\mods\Example - Main.ba2" --out "D:\work\extract" --filter "meshes/**/*.nif"
@@ -87,7 +87,7 @@ Example JSON shape:
 
 ### `pack`
 
-Pack a directory into a supported BSA/BA2 output. Pack outputs should go into an MO2 mod overlay, not into a game `Data` folder.
+Pack a directory into a supported BSA/BA2 output. Pack outputs should go into an MO2 mod overlay, not into a game `Data` folder; protected game `Data` outputs are refused unless `--allow-game-data` is passed.
 
 ```powershell
 $overlay = "D:\ModOrganizer\mods\My Packed Assets"
@@ -162,7 +162,7 @@ DX10/GNMF packing is intentionally unsupported in this version and returns an `u
 
 ## Testing status
 
-Real-archive read, format detection, JSON command smoke tests, and self-consistency pack/list/extract round-trips are verified in the acceptance evidence. Large-compressed-entry decompression relies on the upstream `ba2` crate.
+Real-archive read, format detection, JSON command smoke tests, and self-consistency pack/list/extract round-trips are verified in the acceptance evidence. The real-archive gate is structural validity (magic bytes, size, metadata, entry list) plus self-consistency extraction/repack/re-extraction on staged archives; there is no external byte-compare oracle in this environment because BSArchPro/BSAArchivePro is GUI-only here. Large-compressed-entry decompression relies on the upstream `ba2` crate.
 
 ## License
 

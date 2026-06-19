@@ -16,11 +16,13 @@ pub fn run(
     out: Option<&Path>,
     filter: Option<&str>,
     flatten: bool,
+    allow_game_data: bool,
     json: bool,
 ) -> Result<(), AppError> {
     let output_dir = out
         .map(Path::to_path_buf)
         .unwrap_or_else(|| default_out_dir(archive));
+    crate::safety::ensure_writable_target(&output_dir, allow_game_data)?;
     let opened = open_any(archive)?;
     let paths = opened.extract(&output_dir, filter, flatten)?;
     let result = ExtractResult {

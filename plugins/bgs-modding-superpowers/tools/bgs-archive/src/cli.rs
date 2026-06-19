@@ -8,6 +8,9 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    #[arg(long, global = true)]
+    pub allow_game_data: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }

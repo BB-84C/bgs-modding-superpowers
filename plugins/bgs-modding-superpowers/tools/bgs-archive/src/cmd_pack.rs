@@ -23,36 +23,48 @@ struct PackEntry {
     bytes: Vec<u8>,
 }
 
-pub fn run(
-    input_dir: &Path,
-    out_archive: &Path,
-    game: Game,
-    format: PackFormat,
-    compress: Option<Compress>,
-    strings: bool,
-    json: bool,
-) -> Result<(), AppError> {
-    if format == PackFormat::Dx10 {
+pub struct PackRequest<'a> {
+    pub input_dir: &'a Path,
+    pub out_archive: &'a Path,
+    pub game: Game,
+    pub format: PackFormat,
+    pub compress: Option<Compress>,
+    pub strings: bool,
+    pub allow_game_data: bool,
+    pub json: bool,
+}
+
+pub fn run(request: PackRequest<'_>) -> Result<(), AppError> {
+    crate::safety::ensure_writable_target(request.out_archive, request.allow_game_data)?;
+
+    if request.format == PackFormat::Dx10 {
         return Err(AppError::Unsupported(
             "dx10_pack not yet supported (Task A-DX10)".into(),
         ));
     }
 
-    let entries = collect_entries(input_dir)?;
-    match game.family() {
-        Family::Tes3 => write_tes3(&entries, out_archive)?,
-        Family::Tes4 => write_tes4(&entries, out_archive, game)?,
-        Family::Fo4 => write_fo4(&entries, out_archive, game, format, compress, strings)?,
+    let entries = collect_entries(request.input_dir)?;
+    match request.game.family() {
+        Family::Tes3 => write_tes3(&entries, request.out_archive)?,
+        Family::Tes4 => write_tes4(&entries, request.out_archive, request.game)?,
+        Family::Fo4 => write_fo4(
+            &entries,
+            request.out_archive,
+            request.game,
+            request.format,
+            request.compress,
+            request.strings,
+        )?,
     }
 
     let result = PackResult {
-        out_archive: out_archive.display().to_string(),
-        family: family_name(game.family()),
-        version: version(game),
+        out_archive: request.out_archive.display().to_string(),
+        family: family_name(request.game.family()),
+        version: version(request.game),
         entry_count: entries.len(),
     };
 
-    if json {
+    if request.json {
         println!("{}", serde_json::to_string(&Envelope::ok("pack", result))?);
     } else {
         print_human(&result);
@@ -179,7 +191,7 @@ fn write_tes3(entries: &[PackEntry], out_archive: &Path) -> Result<(), AppError>
 }
 
 fn split_tes4_path(path: &str) -> (String, &str) {
-    path.split_once('/').map_or_else(
+    path.rsplit_once('/').map_or_else(
         || (String::new(), path),
         |(dir, file)| (dir.to_string(), file),
     )

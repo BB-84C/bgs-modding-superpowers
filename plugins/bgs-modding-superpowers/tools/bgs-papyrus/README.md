@@ -109,7 +109,13 @@ Useful options:
 - `--threaded`: ask Champollion to use threaded decompile where supported.
 - `--sf-syntax-fix` / `--no-sf-syntax-fix`: enable or disable Starfield syntax post-processing.
 
-Champollion is downloaded to `~/.bgs-modding-superpowers/tools/champollion/` when needed, or you can set `BGS_PAPYRUS_CHAMPOLLION` to an existing executable.
+Champollion is detected, not auto-downloaded. Install `Champollion.exe` at `~/.bgs-modding-superpowers/tools/champollion/Champollion.exe`, or set `BGS_PAPYRUS_CHAMPOLLION` to an existing executable.
+
+One PowerShell install shape for Champollion v1.3.2 from `Orvid/Champollion` releases:
+
+```powershell
+$root = "$HOME\.bgs-modding-superpowers\tools\champollion"; New-Item -ItemType Directory -Force -Path $root | Out-Null; $zip = Join-Path $root "Champollion.v1.3.2.zip"; Invoke-WebRequest "https://github.com/Orvid/Champollion/releases/download/v1.3.2/Champollion.v1.3.2.zip" -OutFile $zip; Expand-Archive -Force $zip $root
+```
 
 ## Starfield Guard syntax
 

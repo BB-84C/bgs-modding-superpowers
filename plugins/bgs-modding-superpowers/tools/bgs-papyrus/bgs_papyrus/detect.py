@@ -6,6 +6,7 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from bgs_papyrus import process
 from bgs_papyrus.games import Game, ck_compiler_subpaths, flags_file, steam_dir_name
 from bgs_papyrus.model import Envelope
 
@@ -22,14 +23,14 @@ class ToolchainInfo:
     source: str | None = None
 
 
-def run(game_filter: Game | None = None) -> Envelope:
+def run(game_filter: Game | None = None, *, probe_version: bool = True) -> Envelope:
     games = [game_filter] if game_filter else [
         Game.SKYRIMLE,
         Game.SKYRIMSE,
         Game.FALLOUT4,
         Game.STARFIELD,
     ]
-    per_game = {game.name.lower(): asdict(detect_game(game)) for game in games}
+    per_game = {game.name.lower(): asdict(detect_game(game, probe_version=probe_version)) for game in games}
     return Envelope(
         ok=True,
         command="detect-toolchain",
@@ -37,14 +38,14 @@ def run(game_filter: Game | None = None) -> Envelope:
     )
 
 
-def detect_game(game: Game) -> ToolchainInfo:
+def detect_game(game: Game, probe_version: bool = False) -> ToolchainInfo:
     ck_compiler, source = _detect_ck_compiler(game)
     game_root = _game_root_from_compiler(game, ck_compiler) if ck_compiler else None
     community = _detect_community_backends()
     return ToolchainInfo(
         game=game.value,
         ck_compiler=str(ck_compiler) if ck_compiler else None,
-        ck_version=None,
+        ck_version=_probe_ck_version(ck_compiler) if probe_version and ck_compiler else None,
         flags_file=_detect_flags_file(game, game_root),
         caprica=community["caprica"],
         russo=community["russo"],
@@ -73,6 +74,16 @@ def _detect_ck_compiler(game: Game) -> tuple[Path | None, str | None]:
             return found, "steam"
 
     return None, None
+
+
+def _probe_ck_version(compiler: Path) -> str | None:
+    try:
+        result = process.run_tool([str(compiler)], timeout=15)
+    except Exception:
+        return None
+    text = f"{result.stdout}\n{result.stderr}"
+    match = re.search(r"Papyrus\s+Compiler\s+Version\s+([0-9]+(?:\.[0-9A-Za-z_-]+)+)", text, re.IGNORECASE)
+    return match.group(1) if match else None
 
 
 def _find_compiler_under_root(game: Game, root: Path) -> Path | None:
