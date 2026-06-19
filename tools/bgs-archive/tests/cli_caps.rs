@@ -16,6 +16,9 @@ fn caps_json_reports_archive_capabilities() {
     let data = &envelope["data"];
 
     assert_eq!(data["ba2_version"], "3.0.1");
-    assert!(data["games"].as_array().unwrap().contains(&Value::from("starfield")));
+    assert!(data["games"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::from("starfield")));
     assert_eq!(data["write_support"]["dx10"], false);
 }

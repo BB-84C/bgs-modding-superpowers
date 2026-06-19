@@ -53,18 +53,72 @@ fn round_trip(game: &str, extension: &str) {
         .iter()
         .map(|entry| entry["path"].as_str().unwrap())
         .collect();
-    assert!(paths.contains(&"meshes/test.nif"), "{game} paths: {paths:?}");
+    assert!(
+        paths.contains(&"meshes/test.nif"),
+        "{game} paths: {paths:?}"
+    );
     assert!(paths.contains(&"readme.txt"), "{game} paths: {paths:?}");
 
     let extract_dir = temp.path().join("extract");
     Command::cargo_bin("bgs-archive")
         .unwrap()
-        .args(["extract", path_str(&archive), "--out", path_str(&extract_dir)])
+        .args([
+            "extract",
+            path_str(&archive),
+            "--out",
+            path_str(&extract_dir),
+        ])
         .assert()
         .success();
 
-    assert_eq!(fs::read(extract_dir.join("meshes/test.nif")).unwrap(), NIF_BYTES);
-    assert_eq!(fs::read(extract_dir.join("readme.txt")).unwrap(), README_BYTES);
+    assert_eq!(
+        fs::read(extract_dir.join("meshes/test.nif")).unwrap(),
+        NIF_BYTES
+    );
+    assert_eq!(
+        fs::read(extract_dir.join("readme.txt")).unwrap(),
+        README_BYTES
+    );
+}
+
+#[test]
+fn pack_tes4_preserves_nested_directory_paths() {
+    let temp = tempfile::tempdir().unwrap();
+    let input_dir = temp.path().join("input");
+    let nested = input_dir.join("meshes").join("actors");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("foo.nif"), NIF_BYTES).unwrap();
+
+    let archive = temp.path().join("nested.bsa");
+    Command::cargo_bin("bgs-archive")
+        .unwrap()
+        .args([
+            "pack",
+            path_str(&input_dir),
+            path_str(&archive),
+            "--game",
+            "skyrimse",
+        ])
+        .assert()
+        .success();
+
+    let list_output = Command::cargo_bin("bgs-archive")
+        .unwrap()
+        .args(["list", path_str(&archive), "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let envelope: Value = serde_json::from_slice(&list_output).unwrap();
+    let paths: Vec<&str> = envelope["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["path"].as_str().unwrap())
+        .collect();
+
+    assert!(paths.contains(&"meshes/actors/foo.nif"), "paths: {paths:?}");
 }
 
 fn path_str(path: &Path) -> &str {

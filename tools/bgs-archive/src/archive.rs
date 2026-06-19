@@ -1,4 +1,9 @@
-use std::{fs, fs::File, io::BufReader, path::Path};
+use std::{
+    fs,
+    fs::File,
+    io::BufReader,
+    path::{Component, Path, PathBuf},
+};
 
 use ba2::prelude::*;
 use globset::Glob;
@@ -94,9 +99,10 @@ impl AnyArchive {
                         continue;
                     }
 
-                    let mut dst = create_output(out_dir, &virtual_path, flatten)?;
-                    file.write(&mut dst)?;
-                    extracted.push(virtual_path);
+                    if let Some(mut dst) = create_output(out_dir, &virtual_path, flatten)? {
+                        file.write(&mut dst)?;
+                        extracted.push(virtual_path);
+                    }
                 }
             }
             AnyArchive::Tes4(archive, meta) => {
@@ -108,9 +114,10 @@ impl AnyArchive {
                             continue;
                         }
 
-                        let mut dst = create_output(out_dir, &virtual_path, flatten)?;
-                        file.write(&mut dst, &opts)?;
-                        extracted.push(virtual_path);
+                        if let Some(mut dst) = create_output(out_dir, &virtual_path, flatten)? {
+                            file.write(&mut dst, &opts)?;
+                            extracted.push(virtual_path);
+                        }
                     }
                 }
             }
@@ -122,9 +129,10 @@ impl AnyArchive {
                         continue;
                     }
 
-                    let mut dst = create_output(out_dir, &virtual_path, flatten)?;
-                    file.write(&mut dst, &opts)?;
-                    extracted.push(virtual_path);
+                    if let Some(mut dst) = create_output(out_dir, &virtual_path, flatten)? {
+                        file.write(&mut dst, &opts)?;
+                        extracted.push(virtual_path);
+                    }
                 }
             }
         }
@@ -137,20 +145,64 @@ fn matches_filter(path: &str, matcher: Option<&globset::GlobMatcher>) -> bool {
     matcher.is_none_or(|matcher| matcher.is_match(path))
 }
 
-fn create_output(out_dir: &Path, virtual_path: &str, flatten: bool) -> Result<File, AppError> {
-    let relative_path = if flatten {
-        virtual_path
+fn create_output(
+    out_dir: &Path,
+    virtual_path: &str,
+    flatten: bool,
+) -> Result<Option<File>, AppError> {
+    if sanitize_entry_path(out_dir, virtual_path).is_none() {
+        eprintln!("warning: skipped unsafe archive entry path: {virtual_path}");
+        return Ok(None);
+    }
+
+    let output_path = if flatten {
+        let file_name = virtual_path
+            .replace('\\', "/")
             .rsplit('/')
             .find(|part| !part.is_empty())
-            .unwrap_or(virtual_path)
+            .map(str::to_string)
+            .unwrap_or_else(|| virtual_path.to_string());
+        sanitize_entry_path(out_dir, &file_name)
     } else {
-        virtual_path
+        sanitize_entry_path(out_dir, virtual_path)
     };
-    let dest = out_dir.join(relative_path);
+
+    let Some(dest) = output_path else {
+        eprintln!("warning: skipped unsafe archive entry path: {virtual_path}");
+        return Ok(None);
+    };
+
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
-    Ok(File::create(dest)?)
+    Ok(Some(File::create(dest)?))
+}
+
+fn sanitize_entry_path(out_dir: &Path, raw: &str) -> Option<PathBuf> {
+    let normalized = raw.replace('\\', "/");
+    let raw_path = Path::new(&normalized);
+    let mut relative = PathBuf::new();
+
+    for component in raw_path.components() {
+        match component {
+            Component::Normal(part) => relative.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+
+    if relative.as_os_str().is_empty() {
+        return None;
+    }
+
+    let dest = out_dir.join(&relative);
+    path_stays_under(out_dir, &dest).then_some(dest)
+}
+
+fn path_stays_under(base: &Path, candidate: &Path) -> bool {
+    let base_components: Vec<_> = base.components().collect();
+    let candidate_components: Vec<_> = candidate.components().collect();
+    candidate_components.starts_with(&base_components)
 }
 
 fn bstr_path(bytes: &[u8]) -> String {

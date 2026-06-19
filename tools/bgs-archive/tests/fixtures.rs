@@ -143,6 +143,28 @@ fn extract_writes_fo4_entry_bytes_to_output_directory() {
 }
 
 #[test]
+fn extract_skips_entries_that_would_traverse_outside_output_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let archive_path = root.path().join("malicious.ba2");
+    let chunk = Chunk::from_decompressed(b"owned\n");
+    let file: File = [chunk].into_iter().collect();
+    let key: ArchiveKey = b"../../evil.txt".as_slice().into();
+    let archive: Archive = [(key, file)].into_iter().collect();
+    let options = ArchiveOptions::builder().strings(true).build();
+    let mut archive_file = std::fs::File::create(&archive_path).unwrap();
+    archive.write(&mut archive_file, &options).unwrap();
+
+    let out_dir = root.path().join("safe").join("extract");
+    let archive = bgs_archive::archive::open_any(&archive_path).unwrap();
+    let extracted = archive.extract(&out_dir, None, false).unwrap();
+
+    assert!(extracted.is_empty());
+    assert!(!root.path().join("evil.txt").exists());
+    assert!(!root.path().join("safe").join("evil.txt").exists());
+    assert!(!out_dir.join("evil.txt").exists());
+}
+
+#[test]
 fn pack_fo4_round_trips_file_bytes_with_paths() {
     let input_dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(input_dir.path().join("sub")).unwrap();
