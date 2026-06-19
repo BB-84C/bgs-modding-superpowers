@@ -1641,3 +1641,8 @@ Branch `feat/archive-papyrus-cli-tools` (35 commits): two standalone agent-nativ
 - **Q1 FO4 compile**: FO4 CK `PapyrusCompiler 2.8.0.4` (at `B:\SteamLibrary\steamapps\common\Fallout 4\Papyrus Compiler\`, found via `libraryfolders.vdf` scan — a second Steam library on B:) compiled `BoSResQuestScript.psc` → valid FO4 `.pex` (magic `0xFA57C0DE`, ver 3.9, gameId 2) via our wrapper (commit `bf7bd85`).
 - **Q1 FO4/Skyrim decompile**: Champollion via our tool → `WeaponLLInject` (FO4) + `MMX452_Sofia_MarkerOnOff` (Skyrim) valid `.psc` with ScriptName.
 - **Remaining honest gap**: Skyrim COMPILE not E2E-verified (Skyrim CK not installed on this machine). Identical wrapper/code path proven on Starfield + FO4; blocked only by the missing CK, not a tool defect.
+
+### 2026-06-19 — landed: merged to main + bgs-archive released
+- Feature branch `feat/archive-papyrus-cli-tools` merged to `main` (`9cafedd`, --no-ff) and deleted; vendor clone refreshed to `9cafedd`.
+- `bgs-archive v0.1.0` published: https://github.com/BB-84C/bgs-modding-superpowers/releases/tag/bgs-archive-v0.1.0 (asset `bgs-archive-windows-x64.exe`, sha256 `73C985D000D1E3...`). Closes the "binary needs a Release" open item. Other platforms build from source.
+- Coverage final: archive read all families + real Starfield v2/v3 (LZ4 bug fixed); Papyrus compile Starfield+FO4 via real CK, decompile Starfield/FO4/Skyrim. Only Skyrim *compile* unverified (no Skyrim CK on machine).
