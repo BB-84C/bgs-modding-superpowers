@@ -122,7 +122,6 @@ impl AnyArchive {
                 }
             }
             AnyArchive::Fo4(archive, meta) => {
-                let opts: ba2::fo4::FileWriteOptions = meta.into();
                 for (key, file) in archive.iter() {
                     let virtual_path = name_or_fo4_hash(key);
                     if !matches_filter(&virtual_path, matcher.as_ref()) {
@@ -130,7 +129,7 @@ impl AnyArchive {
                     }
 
                     if let Some(mut dst) = create_output(out_dir, &virtual_path, flatten)? {
-                        file.write(&mut dst, &opts)?;
+                        write_fo4_file(&mut dst, file, meta)?;
                         extracted.push(virtual_path);
                     }
                 }
@@ -176,6 +175,50 @@ fn create_output(
         fs::create_dir_all(parent)?;
     }
     Ok(Some(File::create(dest)?))
+}
+
+fn write_fo4_file(
+    dst: &mut File,
+    file: &ba2::fo4::File<'_>,
+    meta: &ba2::fo4::ArchiveOptions,
+) -> Result<(), AppError> {
+    let opts: ba2::fo4::FileWriteOptions = meta.into();
+    if meta.compression_format() != ba2::fo4::CompressionFormat::LZ4 {
+        file.write(dst, &opts)?;
+        return Ok(());
+    }
+
+    let chunks = file
+        .iter()
+        .map(decompress_lz4_chunk_for_write)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut decompressed_file: ba2::fo4::File = chunks.into_iter().collect();
+    decompressed_file.header = file.header.clone();
+    decompressed_file.write(dst, &opts)?;
+    Ok(())
+}
+
+fn decompress_lz4_chunk_for_write(
+    chunk: &ba2::fo4::Chunk<'_>,
+) -> Result<ba2::fo4::Chunk<'static>, AppError> {
+    let Some(decompressed_len) = chunk.decompressed_len() else {
+        return Ok(ba2::fo4::Chunk::from_decompressed(
+            chunk.as_bytes().to_vec().into_boxed_slice(),
+        ));
+    };
+
+    let mut bytes = vec![0; decompressed_len];
+    let actual =
+        lzzzz::lz4::decompress(chunk.as_bytes(), &mut bytes).map_err(ba2::fo4::Error::from)?;
+    if actual != decompressed_len {
+        return Err(ba2::fo4::Error::DecompressionSizeMismatch {
+            expected: decompressed_len,
+            actual,
+        }
+        .into());
+    }
+
+    Ok(ba2::fo4::Chunk::from_decompressed(bytes.into_boxed_slice()))
 }
 
 fn sanitize_entry_path(out_dir: &Path, raw: &str) -> Option<PathBuf> {
