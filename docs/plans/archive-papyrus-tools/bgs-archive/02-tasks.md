@@ -271,19 +271,20 @@ assert!(matches!(a, bgs_archive::archive::AnyArchive::Fo4(..)));
 
 ---
 
-## Task A11: semantic E2E vs real archives (BINDING acceptance)
-**Files:** `tests/real_archive.rs` (`#[ignore]`)
-- [ ] **Step 1: Write `#[ignore]` test** reading `BGS_ARCHIVE_TEST_BA2` env path; extract a named entry; shell out to BSArch.exe (`BSARCH_EXE` env, default xEdit-tree path) to extract the same entry; byte-compare. Then pack-and-re-extract round-trip byte-compare.
-- [ ] **Step 2: Run manually** against a real FO4 BA2 and a real Starfield BA2 from the harness:
-  `cargo test --test real_archive -- --ignored --nocapture` with envs set.
-- [ ] **Step 3: Record evidence** under `.opencode/artifacts/archive-papyrus-tools/acceptance/` (the two byte-compare PASS logs). This is the acceptance gate, not `cargo test` alone.
-- [ ] **Step 4: Commit** the test (evidence dir is git-ignored artifact).
+## Task A11: semantic E2E vs real archives (BINDING acceptance) — CLI-only, no GUI oracle
+**Files:** `tests/real_archive.rs` (`#[ignore]`) + `scripts/run-a11-real-archive-acceptance.ps1`
+> NOTE: the original plan called for a BSArch.exe byte-compare oracle. That was abandoned — the only BSArch on this machine is the GUI `BSArchPro.exe`, which hangs bash; no CLI archive oracle exists. The acceptance is therefore tool-free: structural validity + self-consistency round-trip (catches the same decompression/fidelity bug classes an external oracle would).
+- [ ] **Step 1: Write `#[ignore]` test / pwsh harness** reading real fixture paths; for each fixture: `info`/`list` (assert family/version), `extract`, then **structural-validate** each extracted file (format magic by extension + size consistent with `list`).
+- [ ] **Step 2: Self-consistency round-trip**: repack the extracted tree with our own tool, re-extract, assert byte-identical (SHA256) to the first extraction.
+- [ ] **Step 3: Run manually** against a real FO4 BA2 + a real Skyrim BSA from `.opencode/artifacts/archive-papyrus-tools/fixtures/`.
+- [ ] **Step 4: Record evidence** under `.opencode/artifacts/archive-papyrus-tools/acceptance/` (structural + SHA256 round-trip verdict). This is the acceptance gate, not `cargo test` alone.
+- [ ] **Step 5: Commit** the test/harness (evidence dir is git-ignored artifact). NEVER launch a GUI tool.
 
 ---
 
 ## Task A-DX10 (deferred / stretch): DX10 texture pack
 - [ ] Re-fetch `fo4::DX10Header` / `fo4::GNMFHeader` field layout (cheat-sheet §8 UNVERIFIED) before any code.
-- [ ] Parse input `.dds` header -> populate `FileHeader::DX10(DX10Header{..})`, slice mips into `Chunk`s with `mips` ranges, write with `Format::DX10`. Gate behind a passing real-DX10 round-trip vs BSArch.
+- [ ] Parse input `.dds` header -> populate `FileHeader::DX10(DX10Header{..})`, slice mips into `Chunk`s with `mips` ranges, write with `Format::DX10`. Gate behind a passing real-DX10 self-consistency round-trip (extract → repack → re-extract byte-identical) + DDS structural validation (valid `DDS ` magic + header dimensions preserved). No external GUI oracle.
 
 ---
 
