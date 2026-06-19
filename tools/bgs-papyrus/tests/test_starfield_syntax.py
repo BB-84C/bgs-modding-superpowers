@@ -119,3 +119,24 @@ def test_guard_declaration_keeps_plain_guard_when_members_require_it():
 
     assert "Guard CoraGuardCount\n" in out
     assert "Guard CoraGuardCount ProtectsFunctionLogic" not in out
+
+
+def test_unmodeled_guard_related_construct_gets_general_unverified_marker():
+    src = "ScriptName Example\nFunction F() RequiresGuard(Foo)\nEndFunction\n"
+
+    out = fix(src)
+
+    assert "UNVERIFIED sf-syntax: unmodeled guard-related construct(s) present" in out
+
+
+def test_fully_modeled_guard_rewrite_does_not_get_general_unverified_marker():
+    src = (
+        "Guard myGuard ;*** WARNING: Experimental syntax, may be incorrect: Guard\n"
+        "  Foo()\n"
+        "EndGuard ;*** WARNING: Experimental syntax, may be incorrect: EndGuard\n"
+    )
+
+    out = fix(src)
+
+    assert "LockGuard" in out and "EndLockGuard" in out
+    assert "unmodeled guard-related construct(s) present" not in out

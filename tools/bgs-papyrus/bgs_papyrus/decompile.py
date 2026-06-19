@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from . import detect, process
+from . import detect, process, safety
 from .games import Game
 from .model import Envelope
 
@@ -43,7 +43,18 @@ def decompile_run(
     recursive=False,
     threaded=False,
     timeout=300,
+    allow_game_data=False,
 ) -> Envelope:
+    if safety.is_protected_game_path(out) and not allow_game_data:
+        return Envelope(
+            ok=False,
+            command="decompile",
+            error={
+                "code": "refused_game_data_write",
+                "message": "Refusing to write into a game Data directory; output to an MO2 mod overlay (<MO2_Root>/mods/<mod>/Scripts/) instead, or pass --allow-game-data.",
+            },
+        )
+
     game = Game(game)
     backend = backend.lower()
     if backend != "champollion":
@@ -70,8 +81,9 @@ def decompile_run(
         recursive=recursive,
         threaded=threaded,
     )
+    before = _snapshot_outputs(out, "*.psc")
     result = process.run_tool(argv, timeout=timeout)
-    produced = _produced_psc(out)
+    produced = _fresh_outputs(out, "*.psc", before)
     fixed: list[str] = []
     should_fix_starfield = (game == Game.STARFIELD) if sf_syntax_fix is None else bool(sf_syntax_fix)
     if should_fix_starfield:
@@ -85,7 +97,7 @@ def decompile_run(
                 path.write_text(updated, encoding="utf-8")
                 fixed.append(path_text)
 
-    success = result.returncode == 0
+    success = result.returncode == 0 and bool(produced)
     data = {
         "backend": "champollion",
         "source": str(source),
@@ -96,11 +108,17 @@ def decompile_run(
         "stdout": result.stdout,
         "stderr": result.stderr,
     }
+    if success:
+        error = None
+    elif result.returncode == 0:
+        error = {"code": "decompile_produced_no_psc", "message": "Champollion returned success but produced no fresh .psc output."}
+    else:
+        error = {"code": "decompile_failed", "message": "Champollion decompile failed."}
     return Envelope(
         ok=success,
         command="decompile",
         data=data,
-        error=None if success else {"code": "decompile_failed", "message": "Champollion decompile failed."},
+        error=error,
     )
 
 
@@ -109,3 +127,32 @@ def _produced_psc(out) -> list[str]:
     if not out_path.exists():
         return []
     return sorted(str(path) for path in out_path.rglob("*.psc"))
+
+
+def _snapshot_outputs(out, pattern: str) -> dict[str, int]:
+    out_path = Path(out)
+    if not out_path.exists():
+        return {}
+    snapshot: dict[str, int] = {}
+    for path in out_path.rglob(pattern):
+        try:
+            snapshot[str(path)] = path.stat().st_mtime_ns
+        except OSError:
+            continue
+    return snapshot
+
+
+def _fresh_outputs(out, pattern: str, before: dict[str, int]) -> list[str]:
+    out_path = Path(out)
+    if not out_path.exists():
+        return []
+    fresh: list[str] = []
+    for path in out_path.rglob(pattern):
+        key = str(path)
+        try:
+            mtime = path.stat().st_mtime_ns
+        except OSError:
+            continue
+        if key not in before or mtime > before[key]:
+            fresh.append(str(path))
+    return sorted(fresh)

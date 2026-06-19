@@ -21,6 +21,7 @@ def _default_out(source: str) -> str:
 def main(argv=None):
     p = argparse.ArgumentParser(prog="bgs-papyrus")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--allow-game-data", action="store_true", help="Allow output into a protected game Data directory.")
     sub = p.add_subparsers(dest="command", required=True)
 
     capabilities = sub.add_parser("capabilities")
@@ -72,6 +73,7 @@ def main(argv=None):
                 release=args.release,
                 final=args.final,
                 timeout=300,
+                allow_game_data=args.allow_game_data,
             )
         elif args.command == "decompile":
             env = decompile_mod.decompile_run(
@@ -83,6 +85,7 @@ def main(argv=None):
                 recursive=args.recursive,
                 threaded=args.threaded,
                 timeout=300,
+                allow_game_data=args.allow_game_data,
             )
         else:
             env = model.Envelope(ok=True, command=args.command, data={})

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from . import detect, process
+from . import detect, process, safety
 from .games import Game, default_imports
 from .model import Envelope
 
@@ -71,7 +71,14 @@ def compile_run(
     release=False,
     final=False,
     timeout=300,
+    allow_game_data=False,
 ) -> Envelope:
+    if safety.is_protected_game_path(out) and not allow_game_data:
+        return _error(
+            "refused_game_data_write",
+            "Refusing to write into a game Data directory; output to an MO2 mod overlay (<MO2_Root>/mods/<mod>/Scripts/) instead, or pass --allow-game-data.",
+        )
+
     game = Game(game)
     backend = backend.lower()
     toolchain = detect.detect_game(game)
@@ -114,10 +121,13 @@ def compile_run(
     else:
         argv = build_russo_argv(compiler, source, imports, out, optimize=optimize)
 
+    before = _snapshot_outputs(out, "*.pex")
     result = process.run_tool(argv, timeout=timeout)
-    produced = _produced_pex(out)
+    produced = _fresh_outputs(out, "*.pex", before)
     errors = _parse_errors(result.stdout, result.stderr)
-    success = result.returncode == 0 and bool(produced)
+    expected = _expected_pex_names(source, all_=all_)
+    produced_expected = produced if expected is None else [path for path in produced if Path(path).name.lower() in expected]
+    success = result.returncode == 0 and bool(produced_expected)
     data = {
         "backend": resolved,
         "compiler": compiler,
@@ -129,11 +139,17 @@ def compile_run(
         "stdout": result.stdout,
         "stderr": result.stderr,
     }
+    if success:
+        error = None
+    elif result.returncode == 0:
+        error = {"code": "compile_produced_no_pex", "message": "Papyrus compiler returned success but produced no fresh expected .pex output."}
+    else:
+        error = {"code": "compile_failed", "message": "Papyrus compile failed or produced no .pex output."}
     return Envelope(
         ok=success,
         command="compile",
         data=data,
-        error=None if success else {"code": "compile_failed", "message": "Papyrus compile failed or produced no .pex output."},
+        error=error,
     )
 
 
@@ -179,6 +195,42 @@ def _produced_pex(out) -> list[str]:
     if not out_path.exists():
         return []
     return sorted(str(path) for path in out_path.rglob("*.pex"))
+
+
+def _snapshot_outputs(out, pattern: str) -> dict[str, int]:
+    out_path = Path(out)
+    if not out_path.exists():
+        return {}
+    snapshot: dict[str, int] = {}
+    for path in out_path.rglob(pattern):
+        try:
+            snapshot[str(path)] = path.stat().st_mtime_ns
+        except OSError:
+            continue
+    return snapshot
+
+
+def _fresh_outputs(out, pattern: str, before: dict[str, int]) -> list[str]:
+    out_path = Path(out)
+    if not out_path.exists():
+        return []
+    fresh: list[str] = []
+    for path in out_path.rglob(pattern):
+        key = str(path)
+        try:
+            mtime = path.stat().st_mtime_ns
+        except OSError:
+            continue
+        if key not in before or mtime > before[key]:
+            fresh.append(str(path))
+    return sorted(fresh)
+
+
+def _expected_pex_names(source, *, all_: bool) -> set[str] | None:
+    source_path = Path(source)
+    if not all_ and source_path.suffix.lower() == ".psc":
+        return {f"{source_path.stem}.pex".lower()}
+    return None
 
 
 def _parse_errors(stdout: str, stderr: str) -> list[dict]:

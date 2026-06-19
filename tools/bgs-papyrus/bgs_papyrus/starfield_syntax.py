@@ -33,6 +33,7 @@ def fix(psc_text: str, *, validated: dict | None = None) -> str:
             text = _mark_unverified_rule(text, rule)
     if active.get("guard_declaration_protects_function_logic", False):
         text = _fix_guard_declarations(text)
+    text = _mark_unmodeled_guard_constructs(psc_text, text, active)
     return text
 
 
@@ -112,6 +113,37 @@ def _locked_guard_names(text: str) -> set[str]:
             if name:
                 names.add(name.lower())
     return names
+
+
+UNMODELED_GUARD_MARKER = "; UNVERIFIED sf-syntax: unmodeled guard-related construct(s) present; verify against the official CK before trusting"
+
+
+def _mark_unmodeled_guard_constructs(original: str, text: str, active: dict) -> str:
+    if UNMODELED_GUARD_MARKER in text:
+        return text
+
+    residual = original
+    for rule in RULES:
+        residual = rule.detect_regex.sub("", residual)
+    residual = re.sub(r"(?im)^.*Experimental syntax, may be incorrect: (?:Try)?(?:End)?Guard.*(?:\n|$)", "", residual)
+
+    token_pattern = re.compile(
+        r"\b(?:TryLockGuard|LockGuard|TryGuard|EndGuard|RequiresGuard|ProtectsFunctionLogic|SelfOnly|Guard)\b",
+        re.IGNORECASE,
+    )
+    for match in token_pattern.finditer(residual):
+        if _has_nearby_marker(residual, match.start(), "UNVERIFIED sf-syntax"):
+            continue
+        return _insert_general_unverified_marker(text)
+    return text
+
+
+def _insert_general_unverified_marker(text: str) -> str:
+    if text.startswith("ScriptName "):
+        newline = text.find("\n")
+        if newline != -1:
+            return text[: newline + 1] + UNMODELED_GUARD_MARKER + "\n" + text[newline + 1 :]
+    return UNMODELED_GUARD_MARKER + "\n" + text
 
 
 RULES = (
