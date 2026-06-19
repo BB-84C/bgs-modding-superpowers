@@ -1,0 +1,16 @@
+[project]
+name = "bgs-papyrus"
+version = "0.1.0"
+description = "Agent-native Papyrus compile/decompile CLI for Skyrim, Fallout 4, Starfield"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+bgs-papyrus = "bgs_papyrus.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+markers = ["e2e: requires a real Creation Kit / Champollion install"]
