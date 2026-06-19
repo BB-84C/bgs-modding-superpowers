@@ -28,6 +28,7 @@ for dev-log and release-changelog maintenance.
 | `writing-bgs-load-order` | Reading/editing/generating `plugins.txt` or `loadorder.txt`; enabling/disabling/reordering/adding/removing plugins; launching xEdit with a custom plugins file; "load order", "enable this plugin", "disable that plugin", "what does the asterisk mean" |
 | `using-bgs-translator` | Translate a Bethesda plugin's text to another language; "translate this mod", "汉化这个 mod", "localize mod to chinese", "build SST for", "use my LLM to translate plugins" |
 | `using-bgs-archive` | unpack/pack BA2/BSA archives; inspect archive format/contents; extract assets |
+| `using-bgs-papyrus` | compile/decompile Papyrus PSC<->PEX for Skyrim/FO4/Starfield |
 | `writing-modpack-devlog` | "Log this", "record what I did", "note this change", "add to dev-log", "track this decision" |
 | `writing-modpack-changelog` | "Cut a release", "release notes", "what changed since v1.2", "prepare release for Nexus" |
 
@@ -156,6 +157,9 @@ actual plugin, load-order, and record readback.
 - When the user wants to inspect, unpack, extract, or pack BA2/BSA archives,
   route to `using-bgs-archive`; archive packing must write to MO2 overlays, not
   game `Data` or Stock-Game trees.
+- When the user wants to compile or decompile Papyrus scripts (`.psc` / `.pex`),
+  route to `using-bgs-papyrus`; compiled `.pex` output must go to MO2 overlays,
+  not game `Data` or Stock-Game trees.
 - When the user asks to "log", "record", "track", or "note" modpack work,
   route to `writing-modpack-devlog`. When the user asks to "cut a release" or
   prepare release notes, route to `writing-modpack-changelog`.
@@ -174,6 +178,8 @@ actual plugin, load-order, and record readback.
   translation and SST dictionary export.
 - `using-bgs-archive` — BA2/BSA archive inspection, extraction, and safe
   overlay-only packing.
+- `using-bgs-papyrus` — Papyrus PSC/PEX compile/decompile workflows for Skyrim,
+  Fallout 4, and Starfield.
 - `writing-modpack-devlog`, `writing-modpack-changelog` — runtime asset
   skills for project documentation.
 

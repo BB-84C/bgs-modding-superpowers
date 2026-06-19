@@ -29,6 +29,7 @@
     tools/mo2-vfs-launcher/         (PowerShell launcher surface)
     tools/mo2-control-plane/        (broker + live-bridge Python plugin)
     tools/bgs-archive/              (Rust BA2/BSA CLI source + docs)
+    tools/bgs-papyrus/              (Python Papyrus CLI source + docs)
     package.json, README.md, LICENSE, RELEASE-NOTES.md
 
   .mcp.json strategies (-McpPathStrategy):
@@ -357,7 +358,35 @@ if ($LASTEXITCODE -gt 7) {
 # Reset $LASTEXITCODE so downstream cmdlets see a clean state.
 $global:LASTEXITCODE = 0
 
-# ---- 6d. tools/mo2-assets-engine (offline archive/loose-file engine) --------
+# ---- 6d. tools/bgs-papyrus (Papyrus compile/decompile CLI reference tree) ----
+# bgs-papyrus is distributed as a Python CLI. The plugin tree bundles source,
+# tests, README, bilingual user guides, and changelog so agent-facing references
+# and fallback source installs work from a fresh vendor clone. Use robocopy with
+# /XD because Python dev caches can appear at any depth after local test runs.
+$bgsPapyrusSrc = Join-Path $RepoRoot "tools/bgs-papyrus"
+$bgsPapyrusDst = Join-Path $PluginRoot "tools/bgs-papyrus"
+if (-not (Test-Path -LiteralPath $bgsPapyrusSrc)) {
+  throw "Source not found: tools/bgs-papyrus"
+}
+New-Item -ItemType Directory -Path $bgsPapyrusDst -Force | Out-Null
+$robocopyArgs = @(
+  $bgsPapyrusSrc,
+  $bgsPapyrusDst,
+  "/E",
+  "/XD", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+  "/XD", "*.egg-info", "build", "dist",
+  "/XD", ".venv", "venv", "env",
+  "/NFL", "/NDL", "/NJH", "/NJS", "/NP"
+)
+& robocopy @robocopyArgs | Out-Null
+# robocopy exit codes 0-7 are success variants; 8+ are real errors.
+if ($LASTEXITCODE -gt 7) {
+  throw "robocopy failed copying tools/bgs-papyrus (exit $LASTEXITCODE)"
+}
+# Reset $LASTEXITCODE so downstream cmdlets see a clean state.
+$global:LASTEXITCODE = 0
+
+# ---- 6e. tools/mo2-assets-engine (offline archive/loose-file engine) --------
 # Bundled so Plan A's Python engine + `mo2-assets` CLI are available from the
 # materialized plugin tree. Use robocopy with /XD for the same reason as
 # bgs-translator: Python dev caches can appear at any depth after local test
@@ -385,7 +414,7 @@ if ($LASTEXITCODE -gt 7) {
 # Reset $LASTEXITCODE so downstream cmdlets see a clean state.
 $global:LASTEXITCODE = 0
 
-# ---- 6e. tools/mo2-mcp-sidecar (Python JSON-RPC sidecar) -------------------
+# ---- 6f. tools/mo2-mcp-sidecar (Python JSON-RPC sidecar) --------------------
 # Bundled so the mo2-mcp TypeScript server can launch the sidecar from the
 # materialized plugin tree. Use robocopy with /XD for Python dev caches.
 $mo2SidecarSrc = Join-Path $RepoRoot "tools/mo2-mcp-sidecar"
