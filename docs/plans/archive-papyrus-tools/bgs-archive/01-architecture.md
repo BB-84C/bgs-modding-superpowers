@@ -120,15 +120,16 @@ Extraction reuses the preserved `ArchiveOptions` via `meta.into()` to build per-
 
 ## Acceptance (semantic E2E — binding)
 
-Unit (`cargo test`): in-memory round-trip per family (build archive via ba2 -> write to temp -> read back -> assert payload bytes equal). Proves wiring, NOT real-format fidelity.
+Unit (`cargo test`): in-memory round-trip per family (build archive via ba2 -> write to temp -> read back -> assert payload bytes equal). Proves command wiring and regression behavior.
 
-Semantic E2E (`tests/real_archive.rs`, `#[ignore]`, run explicitly): against real game archives.
-1. Locate a real archive (env `BGS_ARCHIVE_TEST_BA2` / a known harness path).
-2. `bgs-archive extract` a known entry; byte-compare against the same entry extracted by **BSArch.exe** (reference oracle from the xEdit tree) — proves our reader matches the canonical tool.
-3. `bgs-archive pack` the extracted tree back into a new archive, re-extract, byte-compare payloads — proves write fidelity.
-4. For Starfield: repeat with a real Starfield `.ba2` (v2 GNRL) to prove v2 coverage.
+Semantic E2E (`tests/real_archive.rs`, `#[ignore]`, run explicitly): against staged real game archives.
+1. Locate real archive fixtures from the acceptance artifact area.
+2. Validate structural readability by opening the archive, checking the expected magic bytes, size, family/version metadata, and entry list.
+3. Run `bgs-archive extract` for representative real entries and inspect the extracted bytes/files.
+4. Run `bgs-archive pack` on the extracted tree, reopen/list the repacked archive, re-extract it, and compare the payloads against the pre-pack extraction.
+5. Repeat the structural + self-consistency path for the covered real FO4/Skyrim/Starfield fixtures.
 
-`ok:true` is never sufficient; the byte-compare is the acceptance signal.
+No external byte-compare oracle is available on this machine: BSArchPro/BSAArchivePro is GUI-only here and is not CLI-safe. Acceptance is therefore structural validity (magic bytes + size + metadata) plus self-consistency pack/extract round-trip on real archives, not a BSArch byte-compare. `ok:true` is never sufficient; the inspected structural/readback artifacts are the acceptance signal.
 
 ## Distribution
 
