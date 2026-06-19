@@ -8,7 +8,7 @@ class Envelope:
     tool: str = "bgs-papyrus"
     command: str = ""
     data: dict | None = None
-    error: dict | None = None
+    error: dict | None = None  # {"code": str, "message": str}
 
     def to_json(self) -> str:
         return _json.dumps(
