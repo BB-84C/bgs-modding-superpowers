@@ -1634,3 +1634,10 @@ Branch `feat/archive-papyrus-cli-tools` (35 commits): two standalone agent-nativ
 ### Test state
 - bgs-archive: cargo test green (incl path-traversal, game-data-refusal, tes4-nested round-trip, real-archive `#[ignore]` acceptance).
 - bgs-papyrus: 36 non-e2e pytest green + 3 e2e (real CK compile/decompile) passing with evidence under `.opencode/artifacts/archive-papyrus-tools/acceptance/`.
+
+### 2026-06-19 addendum — coverage gaps Q1/Q2 closed (pre-merge)
+
+- **Q2 real Starfield BA2**: v2 GNRL (`Constellation - Localization.ba2`, 27 entries) + v3 DX10/LZ4 (`Starfield - LODTextures02.ba2`, 658 entries). FOUND + FIXED a real bug — v3 LZ4-block texture extraction failed with `DecompressionFailed`; added an LZ4 decompression path before FO4/DX10 file write (commit `ba0c68d`, `lzzzz` direct dep). 658/658 `.dds` extract with valid `DDS ` magic. The prior "compressed-entry decompression unproven" open item is now CLOSED. (Note: `SFBGS006 - Textures.ba2` turned out to be v2/Zip; the real v3/LZ4 fixture is `Starfield - LODTextures02.ba2`.)
+- **Q1 FO4 compile**: FO4 CK `PapyrusCompiler 2.8.0.4` (at `B:\SteamLibrary\steamapps\common\Fallout 4\Papyrus Compiler\`, found via `libraryfolders.vdf` scan — a second Steam library on B:) compiled `BoSResQuestScript.psc` → valid FO4 `.pex` (magic `0xFA57C0DE`, ver 3.9, gameId 2) via our wrapper (commit `bf7bd85`).
+- **Q1 FO4/Skyrim decompile**: Champollion via our tool → `WeaponLLInject` (FO4) + `MMX452_Sofia_MarkerOnOff` (Skyrim) valid `.psc` with ScriptName.
+- **Remaining honest gap**: Skyrim COMPILE not E2E-verified (Skyrim CK not installed on this machine). Identical wrapper/code path proven on Starfield + FO4; blocked only by the missing CK, not a tool defect.

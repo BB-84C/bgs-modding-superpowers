@@ -118,6 +118,7 @@ dependencies = [
  "ba2",
  "clap",
  "globset",
+ "lzzzz",
  "predicates",
  "serde",
  "serde_json",

@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 
 const FO4_BA2: &str = r"D:\awesome-bgs-mod-master\.opencode\artifacts\archive-papyrus-tools\fixtures\fo4-ba2\ccbgsfo4008-pipgrn - main.ba2";
 const SKYRIM_BSA: &str = r"D:\awesome-bgs-mod-master\.opencode\artifacts\archive-papyrus-tools\fixtures\skyrim-bsa\SofiaHideTrackingMarker.bsa";
+const STARFIELD_V3_DX10_BA2: &str = r"D:\awesome-bgs-mod-master\.opencode\artifacts\archive-papyrus-tools\fixtures\starfield-ba2\Starfield - LODTextures02.ba2";
 
 #[test]
 #[ignore = "Task A11 uses staged real archives; run explicitly on machines with fixtures"]
@@ -57,6 +58,44 @@ fn real_archive_structural_and_self_consistency_acceptance_cli_only() {
         "A11 real archive acceptance failed; see {}",
         evidence_path.display()
     );
+}
+
+#[test]
+#[ignore = "Task Q2 uses a staged real Starfield v3 DX10/LZ4 archive; run explicitly on machines with fixture"]
+fn real_starfield_v3_dx10_lz4_extracts_dds_magic() {
+    let archive = PathBuf::from(STARFIELD_V3_DX10_BA2);
+    assert!(archive.exists(), "fixture missing: {}", archive.display());
+
+    let repo_root = repo_root();
+    let work_dir = repo_root
+        .join(".opencode/artifacts/archive-papyrus-tools/acceptance")
+        .join("Q2-starfield-v3-rust-work");
+    reset_dir(&work_dir);
+
+    let info_json = run_cli(["info", path_str(&archive), "--json"]);
+    let info: Value = serde_json::from_str(&info_json).unwrap();
+    assert_eq!(info["data"]["family"].as_str(), Some("fo4"));
+    assert_eq!(info["data"]["version"].as_u64(), Some(3));
+    assert_eq!(info["data"]["format"].as_str(), Some("DX10"));
+    assert_eq!(info["data"]["compression"].as_str(), Some("LZ4"));
+
+    let list_json = run_cli(["list", path_str(&archive), "--json"]);
+    let entries = parse_list(&list_json);
+    assert!(!entries.is_empty(), "v3 DX10 fixture had no entries");
+
+    run_cli(["extract", path_str(&archive), "--out", path_str(&work_dir)]);
+
+    for entry in entries {
+        let file_path = work_dir.join(entry.path.replace('/', "\\"));
+        let bytes =
+            fs::read(&file_path).unwrap_or_else(|error| panic!("{}: {error}", file_path.display()));
+        assert!(
+            bytes.starts_with(b"DDS "),
+            "{} did not start with DDS magic; first bytes: {}",
+            entry.path,
+            magic_summary(&bytes)
+        );
+    }
 }
 
 struct Fixture {

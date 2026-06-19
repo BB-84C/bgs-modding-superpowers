@@ -1,5 +1,6 @@
 import os
 import re
+import zipfile
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -10,6 +11,9 @@ from bgs_papyrus.games import Game
 
 
 STARFIELD_ROOT = Path(r"D:\SteamLibrary\steamapps\common\Starfield")
+FALLOUT4_ROOT = Path(r"B:\SteamLibrary\steamapps\common\Fallout 4")
+FALLOUT4_BASE_ZIP = FALLOUT4_ROOT / "Data" / "Scripts" / "Source" / "Base" / "Base.zip"
+FALLOUT4_COMPILE_SOURCE = "BoSResQuestScript.psc"
 CHRONOMARK_FIXTURE = (
     Path(__file__).resolve().parents[3]
     / ".opencode"
@@ -40,6 +44,10 @@ def _starfield_compiler() -> Path:
     )
 
 
+def _fallout4_toolchain() -> detect.ToolchainInfo:
+    return detect.detect_game(Game.FALLOUT4)
+
+
 def _pex_header(path: Path) -> dict[str, object]:
     header = path.read_bytes()[:8]
     return {
@@ -47,6 +55,12 @@ def _pex_header(path: Path) -> dict[str, object]:
         "version": tuple(header[4:6]),
         "game_id": int.from_bytes(header[6:8], "little"),
     }
+
+
+def _extract_fo4_base_source(out: Path) -> Path:
+    with zipfile.ZipFile(FALLOUT4_BASE_ZIP) as archive:
+        archive.extractall(out)
+    return out
 
 
 def _champollion() -> Path:
@@ -89,6 +103,42 @@ def _symbols(text: str) -> dict[str, set[str]]:
             match.lower() for match in re.findall(r"(?im)^\s*\w+\s+property\s+(\w+)\b", text)
         },
     }
+
+
+@pytest.mark.e2e
+def test_compile_real_fallout4_base_source_with_official_ck(tmp_path):
+    toolchain = _fallout4_toolchain()
+    compiler = Path(toolchain.ck_compiler) if toolchain.ck_compiler else Path("__missing_fallout4_compiler__")
+    if not compiler.exists():
+        pytest.skip(f"Fallout 4 Creation Kit Papyrus compiler not found: {compiler}")
+    if not FALLOUT4_BASE_ZIP.exists():
+        pytest.skip(f"Fallout 4 Base.zip source archive not found: {FALLOUT4_BASE_ZIP}")
+
+    source_dir = _extract_fo4_base_source(tmp_path / "fo4-base-source")
+    source = source_dir / FALLOUT4_COMPILE_SOURCE
+    flags = source_dir / "Institute_Papyrus_Flags.flg"
+    if not source.exists():
+        pytest.skip(f"Fallout 4 compile fixture source not found in Base.zip: {FALLOUT4_COMPILE_SOURCE}")
+    if not flags.exists():
+        pytest.skip(f"Fallout 4 Papyrus flags not found in Base.zip: {flags}")
+
+    env = compile_mod.compile_run(
+        Game.FALLOUT4,
+        source=str(source),
+        out=str(tmp_path / "compiled"),
+        backend="ck",
+        imports=[str(source_dir)],
+        flags=str(flags),
+        timeout=300,
+    )
+
+    produced = tmp_path / "compiled" / "BoSResQuestScript.pex"
+    assert env.ok is True, env.to_json()
+    assert produced.exists(), env.to_json()
+    header = _pex_header(produced)
+    assert header["magic"] == PEX_MAGIC
+    assert header["version"] == (3, 9)
+    assert header["game_id"] == 2
 
 
 @pytest.mark.e2e
