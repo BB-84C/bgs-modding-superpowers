@@ -454,6 +454,23 @@ if (Test-Path -LiteralPath (Join-Path $RepoRoot "knowledge/bgs-kb/packs/core/kb.
 
 # ---- 8. Top-level public surface -------------------------------------------
 Copy-FileOnly -From "package.json"      -To "package.json"
+
+# The repo-root package.json `main` points INTO plugins/bgs-modding-superpowers/
+# so that an OpenCode `git+https` install of the repo root (which exposes the repo
+# root as the package, but ships the bundled node_modules only inside the
+# materialized subtree) resolves PLUGIN_ROOT onto the self-contained subtree.
+# Inside the materialized subtree itself, that nesting does NOT exist — the subtree
+# IS the plugin root — so the copied package.json's `main` must be rewritten back to
+# the subtree-local entry. Without this, Codex/portable installs that treat the
+# subtree as the package root would resolve a non-existent
+# plugins/bgs-modding-superpowers/plugins/... path.
+$matzPkgPath = Join-Path $PluginRoot "package.json"
+$matzPkgRaw = Get-Content -LiteralPath $matzPkgPath -Raw -Encoding UTF8
+$matzPkgRaw = $matzPkgRaw.Replace(
+  '"plugins/bgs-modding-superpowers/.opencode/plugins/bgs-modding-superpowers.js"',
+  '".opencode/plugins/bgs-modding-superpowers.js"')
+[IO.File]::WriteAllText($matzPkgPath, $matzPkgRaw, [Text.UTF8Encoding]::new($false))
+
 Copy-FileOnly -From "README.md"         -To "README.md"
 Copy-FileOnly -From "LICENSE"           -To "LICENSE"
 if (Test-Path -LiteralPath (Join-Path $RepoRoot "RELEASE-NOTES.md")) {
