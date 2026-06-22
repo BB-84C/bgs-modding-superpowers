@@ -8,14 +8,29 @@ Add the plugin to the `plugin` array in your `opencode.json` (global or project-
 }
 ```
 
-Restart OpenCode. The plugin installs through OpenCode's plugin manager and registers:
+Restart OpenCode. OpenCode reads the package's `main` entry
+(`plugins/bgs-modding-superpowers/.opencode/plugins/bgs-modding-superpowers.js`),
+which loads the self-contained materialized plugin tree under
+`plugins/bgs-modding-superpowers/` and registers:
 
 - All skills under `skills/` (including the per-session bootstrap and first-run setup skills)
-- Two MCP servers wired by the root-level `.mcp.json`:
-  - `xedit` (`plugins/bgs-modding-superpowers/tools/xedit-mcp/dist/index.js`)
+- Three MCP servers wired by the plugin's `config.mcp` hook, each resolved relative
+  to the materialized tree (so the bundled `node_modules/` next to each `dist/` is used):
+  - `xedit`  (`plugins/bgs-modding-superpowers/tools/xedit-mcp/dist/index.js`)
   - `bgs_kb` (`plugins/bgs-modding-superpowers/tools/bgs-kb-mcp/dist/index.js`)
+  - `mo2`    (`plugins/bgs-modding-superpowers/tools/mo2-mcp/dist/index.js`)
 
-The materialized plugin tree under `plugins/bgs-modding-superpowers/` ships with both MCP packages' `node_modules/` and the bundled `bgs-kb-core` SQLite database already populated, so `node <entry>.js` works on a fresh clone with no `npm install` step.
+The materialized plugin tree under `plugins/bgs-modding-superpowers/` ships with
+each MCP package's `node_modules/` and the bundled `bgs-kb-core` SQLite database
+already populated, so the MCP stdio servers start on a fresh clone with no
+`npm install` step.
+
+> Why `main` points into `plugins/bgs-modding-superpowers/`: a `git+https` install
+> exposes the **repo root** as the package, but only the materialized subtree carries
+> the bundled `node_modules/`. Pointing `main` at the subtree's entry makes OpenCode
+> resolve `PLUGIN_ROOT` onto the self-contained tree. The root-level `.mcp.json`
+> performs the equivalent wiring for Claude Code / Codex via `${CLAUDE_PLUGIN_ROOT}`;
+> OpenCode does not read `.mcp.json`.
 
 ## Verify
 

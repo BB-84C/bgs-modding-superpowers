@@ -2,7 +2,7 @@
   "name": "bgs-modding-superpowers",
   "version": "0.2.0",
   "type": "module",
-  "main": ".opencode/plugins/bgs-modding-superpowers.js",
+  "main": "plugins/bgs-modding-superpowers/.opencode/plugins/bgs-modding-superpowers.js",
   "description": "Agentic superpowers for Bethesda Game Studio modpack curation: MCP-driven xEdit conflict audit, MO2 control plane, and runtime install/dev-log skills.",
   "license": "MIT",
   "repository": "https://github.com/BB-84C/bgs-modding-superpowers",
