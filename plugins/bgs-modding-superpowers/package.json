@@ -7,5 +7,16 @@
   "license": "MIT",
   "repository": "https://github.com/BB-84C/bgs-modding-superpowers",
   "homepage": "https://github.com/BB-84C/bgs-modding-superpowers",
-  "keywords": ["bethesda", "modding", "mo2", "xedit", "modpack", "opencode-plugin", "claude-code-plugin", "codex-plugin", "skills", "mcp"]
+  "keywords": [
+    "bethesda",
+    "modding",
+    "mo2",
+    "xedit",
+    "modpack",
+    "opencode-plugin",
+    "claude-code-plugin",
+    "codex-plugin",
+    "skills",
+    "mcp"
+  ]
 }
