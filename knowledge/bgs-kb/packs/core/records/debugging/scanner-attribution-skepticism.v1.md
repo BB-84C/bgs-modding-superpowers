@@ -6,7 +6,7 @@ appliesTo:
   games: [SkyrimLE, SkyrimSE, SkyrimAE, SkyrimVR, Fallout4, Fallout4VR, Fallout3, FalloutNV, Starfield]
 canonical:
   answer: Auto crash-log scanners can mis-attribute a crash to an unrelated mod or file. Treat scanner output as a triage lead, then verify with the reproducible trigger, raw log context, recent-change window, and record/asset readback before removing or blaming a mod.
-  confidence: curator-corpus
+  confidence: high
 queryKeys: [crash scanner, crash log scanner, scanner attribution, auto scanner, misattribution, Buffout scanner, Trainwreck scanner]
 severity: high
 sources:

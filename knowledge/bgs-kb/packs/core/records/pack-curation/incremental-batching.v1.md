@@ -1,5 +1,5 @@
 ---
-id: install-planning.pack-curation.incremental-batching.v1
+id: pack-curation.incremental-batching.v1
 title: Build BGS modpacks in named, reversible batches after declaring 风格
 domains: [install-planning]
 appliesTo:

@@ -6,7 +6,7 @@ appliesTo:
   games: [SkyrimLE, SkyrimSE, SkyrimAE, SkyrimVR, Fallout4, Fallout4VR, Fallout3, FalloutNV, Starfield]
   engineFamilies: [gamebryo, creation-engine, creation-engine-2]
 canonical:
-  answer: Install interpretation starts from the author's own instructions: read requirements, variants, consequences, and file relationships before downloading or selecting installer options.
+  answer: "Install interpretation starts from the author's own instructions: read requirements, variants, consequences, and file relationships before downloading or selecting installer options."
   confidence: high
 queryKeys: [author instructions, author说明, install instructions, FOMOD choices, which file to download, variant selection, prerequisites, compatibility patches]
 severity: medium
