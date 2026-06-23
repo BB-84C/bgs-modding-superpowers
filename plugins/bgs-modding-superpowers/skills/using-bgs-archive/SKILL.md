@@ -51,6 +51,44 @@ target\release\bgs-archive.exe --json capabilities
 - DX10/GNMF pack is unsupported in this version. Extract works; packing returns `unsupported`.
 - Use `--json` for agent workflows and branch on the envelope, not human text.
 
+## 资产优先级判断 / Asset precedence judgment
+
+Asset precedence is the runtime question "which asset bytes does the game actually read for this virtual path?" It is related to load order, but it is not the same layer as plugin-record conflict resolution.
+
+Core rules:
+
+- Loose files win over archive contents at the same virtual path. If a loose `textures/...` or `meshes/...` file is active, it can mask every packed copy of that path.
+- Archive-to-archive order follows the plugin/load-order surface (`plugins.txt` / the game's active plugin order), not MO2 left-pane mod order. Moving a mod in the left pane may change loose-file winners, but it does not by itself prove a packed archive entry will win.
+- Before extracting, identify the layer: asset path conflict, archive count/format issue, or plugin record conflict. Do not solve the wrong problem with the wrong tool.
+- For Fallout 4-specific precombine/previs or BA2-ceiling diagnosis, query the KB instead of inlining rules here:
+
+```text
+bgs_kb_query({ query: "precombine previs archive precedence", games: ["Fallout4"], domains: ["engine", "archive-precedence"] })
+bgs_kb_query({ query: "BA2 file limit CTD archive", games: ["Fallout4"], domains: ["archive-precedence", "debugging"] })
+```
+
+Red flags:
+
+| Thought | Reality |
+|---|---|
+| "The wrong texture/model loaded, so I should reorder plugins first." | First inspect the final asset provider chain. Wrong bytes are usually an asset-precedence question before they are a record-order question. |
+| "MO2 left-pane priority controls packed assets too." | Left-pane priority controls loose-file winners. Packed archive winners are tied to the plugin/load-order surface. |
+| "I'll extract every archive loose so conflicts are obvious." | Bulk extraction creates duplicate active surfaces and can make the final tree harder to reason about. Extract only a bounded diagnostic set or a deliberate overlay. |
+| "A FO4 precombine/previs problem belongs in this archive skill." | That is game-specific engine knowledge. Query the Fallout 4 KB record and keep this skill game-agnostic. |
+| "The archive command succeeded, so the runtime winner changed." | Run `info`/`list` and inspect the MO2 final virtual path/provider chain before claiming the game will read the new asset. |
+
+Rationalizations:
+
+| Excuse | Reality |
+|---|---|
+| "Plugin order changed, so asset order must be fixed." | Only plugin-associated archives follow that surface; loose files can still override the packed winner. |
+| "It's just a texture, not a real conflict." | Asset conflicts are real runtime behavior. A single winning mesh, texture, interface file, or script can be the visible bug. |
+| "Unpacking is reversible, so I'll do it broadly." | Reversible clutter is still clutter. Keep extraction bounded and staged outside game `Data`. |
+| "The FO4 recipe is known, so paste it here." | Game facts belong in KB. The archive skill teaches the judgment frame and asks KB for game-specific facts. |
+| "If the file is in a BA2/BSA, MO2 mod priority is irrelevant." | It is different, not irrelevant: archives route through active plugins/load order. |
+
+After asset precedence is understood, route record-level conflicts to `xedit-conflict-audit`. Archives decide files; xEdit decides plugin records.
+
 ## JSON envelope contract
 
 Every `--json` command returns one stdout object:

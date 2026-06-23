@@ -31,6 +31,71 @@ Use these MCP intent tools (do not drop to `xedit_call` unless an intent tool do
 
 If the conflict is broad (many records across many plugins), do not loop through them one by one in the orchestrator — **delegate to a read-only investigator sub-agent** (see Hub skill, "Sub-agent delegation recipes").
 
+## 补丁 vs 改顺序决策 / Patch-vs-reorder decision
+
+This is the judgment gate after the tool surface tells you what wins. xEdit shows the override chain; it does not decide whether the right answer is accept, reorder, clean, remove, or patch. BB84's rule is situational thought over ritual: most overlap is normal, sorting is a single-choice lever, and exhaustive FormID stitching is not realistic at pack scale.
+
+Use this section only to choose the remedy. If the verdict becomes PATCH, stop here and hand off; this W2 skill audits conflicts and names intent, it does not author patch records.
+
+```dot
+digraph patch_vs_reorder {
+  rankdir=TB;
+  node [shape=box];
+
+  start [shape=doublecircle, label="Focused conflict readback\n(record fields + winning override)"];
+  behavior [shape=diamond, label="Does this conflict explain\nreal broken/missing behavior?"];
+  normal [shape=doublecircle, label="ACCEPT\nnormal overlap / chosen winner"];
+  itm [shape=diamond, label="Is the losing/winning edit\njust copied vanilla?"];
+  clean [shape=doublecircle, label="CLEAN\nITM candidate; do not invent meaning"];
+  systemic [shape=diamond, label="Is one side a systemic rule\nand the other incidental author tweak?"];
+  reorder [shape=doublecircle, label="REORDER\nlet the systemic rule win"];
+  needed [shape=diamond, label="Are needed fields split\nacross multiple plugins?"];
+  patch [shape=doublecircle, label="PATCH\nselectively forward needed fields"];
+  remove [shape=doublecircle, label="REMOVE / REJECT\nmod role or data not worth repair debt"];
+
+  start -> behavior;
+  behavior -> normal [label="no"];
+  behavior -> itm [label="yes / suspicious"];
+  itm -> clean [label="yes"];
+  itm -> systemic [label="no"];
+  systemic -> reorder [label="yes"];
+  systemic -> needed [label="no"];
+  needed -> patch [label="yes"];
+  needed -> remove [label="no: data not needed / role fails"];
+}
+```
+
+| Decision | Use when | Do not use when |
+|---|---|---|
+| ACCEPT | The later winner is the intended rule, or the lost edit is not needed for this pack. | You have not read the actual fields; "no crash" is not proof. |
+| REORDER | One plugin expresses a broader systemic rule and the other edit is incidental. Let the rule win to reduce patch surface. | Needed fields are split across both sides; order can only choose one winner. |
+| PATCH | Multiple plugins carry needed data for the same FormID, and sorting would lose required behavior either way. | You only feel uncomfortable seeing red; most data overlap is normal. |
+| CLEAN | The record is an unchanged copy of vanilla / ITM candidate. | You are about to delete a value whose purpose you have not understood. |
+| REMOVE / REJECT | The conflict reveals the mod's relevant data is not needed, off-role, or not worth the repair debt. | The source is silent on a hard removal threshold; do not invent one. |
+
+### Red flags (STOP)
+
+| Thought | Reality |
+|---|---|
+| "Red means broken; fix every red cell." | Red means overlapping data. Most overlap is normal; chase behavior-breaking conflicts. |
+| "Just reorder until both changes work." | Reordering is a single-choice lever: A wins or B wins. It cannot merge values. |
+| "The rightmost value wins, so the rest is irrelevant." | Earlier columns are evidence of lost behavior; read them before deciding. |
+| "I'll drag the field directly into the winning mod." | That mutates the source mod and creates cleanup debt. Make a patch if both values are needed. |
+| "xEdit can patch everything, so order doesn't matter." | True in principle, impractical at real pack scale. Use order to reduce patch debt. |
+| "xEdit shows the conflict, so xEdit alone proves the cause." | Some problems are script-use or presentation mismatches; mark uncertainty instead of guessing. |
+
+### Rationalizations
+
+| Excuse | Reality |
+|---|---|
+| "Sorting is easier; I'll avoid patches." | Sorting chooses one side. If both sides contain needed fields, you are still dropping data. |
+| "I'll patch all conflicts now so future me is safe." | Exhaustive FormID stitching is repair debt. Patch only the conflicts tied to intended behavior. |
+| "The later mod is newer, so its override must be intended." | Later means winner, not correct. Compare the field's meaning against the pack's need. |
+| "The game boots, so the conflict is acceptable." | Lost fields can silently disable features. Booting is not semantic success. |
+| "The field label is obvious enough." | Some data names are abstract. If you do not know the purpose, investigate before forwarding. |
+
+When the verdict is PATCH, route to `xedit-automation` (see its `## 补丁创作判断` section, forthcoming in this batch).
+
 ## R6 broad-audit shortcuts (capability gated)
 
 Check `xedit_list_capabilities` and branch on `system.capabilities.supports.*`.

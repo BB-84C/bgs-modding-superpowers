@@ -59,6 +59,108 @@ These files ship inside the materialized plugin tree under
 `tools/bgs-translator/` alongside `scripts/restart-web-gui.ps1`; they are
 present in a fresh vendor-clone install.
 
+## 本地化判断 / Localization judgment
+
+Localization is not "send every string to a provider." It is the curator's job
+to decide which player-visible text should change, which technical spans must
+stay exact, and which terms must remain consistent across the whole pack. A
+translation tool can produce candidate text; it cannot decide the pack glossary,
+the winning string provider, or whether a string is actually safe to edit.
+
+The core mechanic is the runtime string chain: the player sees the value from
+the plugin/patch layer that wins at runtime. A base-game translation or an older
+mod translation can be overridden by a later mod, update patch, or compatibility
+patch. Do not treat missing Chinese as a mysterious tool failure. First identify
+the winning string provider, then localize that layer.
+
+Source basis: BB84's FO4 localization 疑难杂症 transcript (`[E8]` in
+`.opencode/artifacts/sixiang-build/injection-using-bgs-translator/framework-extraction.md`)
+explains the override chain, attribution workflow, patch-localization ordering,
+and non-translatable/signature caveats. That extraction also marks current
+`[GAP]` items; do not fill those gaps from guesswork.
+
+```dot
+digraph localization_judgment {
+  rankdir=TB;
+  node [shape=box];
+
+  start [shape=doublecircle, label="String candidate"];
+  visible [shape=diamond, label="Player-visible text?\n(dialogue, quest, item name, book, UI, MCM, loading screen)"];
+  protected [shape=diamond, label="Protected span or internal reference?\nplaceholder, EditorID, script key, FormID, path, token"];
+  kb [label="Query KB for this game's protected signatures/fields\nand localization gotchas"];
+  winning [label="Find the winning runtime provider\nbase mod? update patch? compatibility patch? loose text file?"];
+  glossary [shape=diamond, label="Term already locked by pack glossary?"];
+  translate [label="Translate/reuse comparison translation\nwhile preserving protected spans"];
+  normalize [label="Normalize to pack glossary\nor record a deliberate term change"];
+  review [label="Sample readback in context\nneeds_review is real work"];
+  lock [shape=doublecircle, label="LOCK / do not translate"];
+  skip [shape=doublecircle, label="SKIP / not a localization target"];
+  done [shape=doublecircle, label="ACCEPT localized string"];
+
+  start -> visible;
+  visible -> skip [label="no"];
+  visible -> protected [label="yes"];
+  protected -> lock [label="yes"];
+  protected -> kb [label="unclear / no"];
+  kb -> winning -> glossary;
+  glossary -> normalize [label="yes, differs"];
+  glossary -> translate [label="no / already matches"];
+  normalize -> review;
+  translate -> review;
+  review -> done [label="context and placeholders pass"];
+  review -> translate [label="mismatch"];
+}
+```
+
+### Protected-span discipline
+
+Never localize a span just because it appears in an extracted text table. The
+safe default is: player-facing prose can be translated; identifiers and engine
+references stay exact unless the per-game KB or the tool's schema proves they
+are display values.
+
+| Red flag | What to do instead |
+|---|---|
+| Placeholder, formatter token, alias marker, or bracket tag appears inside the text. | Preserve it byte-for-byte and translate only the surrounding prose. |
+| The value looks like an EditorID, script property, config key, JSON key, file path, plugin name, FormID, or hex ID. | Lock it unless KB/tool docs identify it as display text. |
+| A record/signature/field type is unfamiliar. | Query KB for the current game before translating; if KB is silent, mark `[GAP]` and review manually. |
+| Generated naming-rule or FormID-dependent text is selected for comparison/bulk translation. | Do not bulk-translate. Use manual semantic review or leave locked until KB confirms the safe handling. |
+| A translated plugin is being sorted after update/compatibility patches to "win" text. | Do not break the functional patch layer. Localize the patch that actually wins, then load that localized patch after the functional layer. |
+
+### Rationalizations
+
+| Excuse | Reality |
+|---|---|
+| "There must be a universal localization patch." | There is no final patch that covers every later mod-side string. Find the winning provider. |
+| "The base-game Chinese patch is installed, so English text means the translator failed." | A later mod or patch may be overriding the localized base string. Attribute first. |
+| "Just translate everything; the validator will catch problems." | Validators catch known placeholders, not every engine reference, naming-rule dependency, or glossary drift. |
+| "The old Chinese ESP worked before; put it at the end." | That can invalidate update/compatibility patches, and stale translations may miss new records. Regenerate against the current winning layer. |
+| "Different mods can translate the same term differently; players will understand." | A pack needs one glossary. A later competing term is a judgment call, not accidental drift. |
+
+### KB query discipline
+
+This section is game-agnostic. Do not fossilize FO4, Skyrim, or Starfield
+protected-string lists in this skill. Before a real batch, query KB for the
+current game and mod shape:
+
+```text
+bgs_kb_query({
+  query: "localization protected strings placeholders EditorID FormID generated names",
+  domains: ["install-planning", "plugin-format"],
+  games: ["<current game>"]
+})
+
+bgs_kb_query({
+  query: "translation glossary consistency string lookup override chain",
+  domains: ["install-planning", "load-order"],
+  games: ["<current game>"]
+})
+```
+
+If KB is silent for a protected-string category, write `[GAP]` in the plan and
+keep the string out of unattended AI translation. Per-game protected-string and
+FormID-dependency patterns belong in KB records, not in this skill body.
+
 ## What xtl Does Better
 
 Most translator tools focus on editing string tables. `xtl` builds a complete

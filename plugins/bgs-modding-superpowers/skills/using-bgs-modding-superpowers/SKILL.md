@@ -24,6 +24,10 @@ for dev-log and release-changelog maintenance.
 | `setting-up-bgs-modding-environment` | First conversation in a project; MO2 or xEdit not yet detected; user says "set up", "install", "bootstrap", "configure" |
 | `maintaining-modding-environments` | After first-run: "ongoing", "maintain", "register custom pack", "prune cache", "update knowledge base", "modding environment health check" |
 | `evaluating-bgs-mods` | Deciding whether a mod belongs in the pack; "should I add this mod", "is this mod good", "评估这个mod", "这个mod值得装吗", "this mod looks too good to be true" |
+| `interpreting-mod-author-instructions` | After INCLUDE verdict, before download/install; "how do I install", "FOMOD choices", "which file to download", "author说明", "which variant", "按作者说明安装" |
+| `curating-bgs-modpack` | Whole-pack incremental build strategy; "plan the pack", "batch strategy", "rollback point", "naming convention", "declare 风格", "策展整合包", "整合包规划" |
+| `diagnosing-bgs-problems` | It broke — symptom-first triage; "CTD", "crash log", "FPS drop", "stuttering", "Buffout", "freeze", "won't start", "崩溃", "掉帧", "卡顿" |
+| `testing-bgs-modpack` | Proactive post-install verification of a batch; "test the pack", "verification", "post-install check", "is it stable", "what should I test", "测试整合包", "验证安装" |
 | `xedit-automation` | Any task involving `.esp/.esm/.esl` plugin files, FormIDs, masters, conflicts, ESL flagging, ITM/UDR cleaning, Pascal scripts |
 | `xedit-conflict-audit` | "Why is this override not winning?", "Which plugins overlap on this record?", "Is this load order safe?" |
 | `writing-bgs-load-order` | Reading/editing/generating `plugins.txt` or `loadorder.txt`; enabling/disabling/reordering/adding/removing plugins; launching xEdit with a custom plugins file; "load order", "enable this plugin", "disable that plugin", "what does the asterisk mean" |
@@ -155,6 +159,16 @@ actual plugin, load-order, and record readback.
 - When the user is deciding whether to add or keep a mod ("should I install X",
   "is this good", "评估"), route to `evaluating-bgs-mods` BEFORE any
   install/download action.
+- When an INCLUDE verdict is in and the user needs to read author instructions /
+  pick FOMOD options / choose a file or variant, route to
+  `interpreting-mod-author-instructions`.
+- When the user is planning the whole pack, sizing batches, deciding rollback
+  boundaries, or declaring 风格, route to `curating-bgs-modpack`.
+- When the user reports a crash, CTD, FPS drop, freeze, or stutter ("崩溃",
+  "掉帧", "卡顿"), route to `diagnosing-bgs-problems` for symptom-first triage
+  BEFORE any blame attribution.
+- When the user wants to verify a freshly installed batch ("test the pack",
+  "is it stable", "验证安装"), route to `testing-bgs-modpack`.
 - When the user wants to translate plugin text or emit SST dictionaries for a
   mod, route to `using-bgs-translator` instead of xEdit; translator reads plugin
   text and emits dictionaries, it does not modify plugin binaries.
@@ -176,6 +190,17 @@ actual plugin, load-order, and record readback.
 - `evaluating-bgs-mods` — judgment skill: should this mod go in the pack (BGS
   systemic-design fit, quality/risk/pack-value); hands off to
   `interpreting-mod-author-instructions` on INCLUDE.
+- `interpreting-mod-author-instructions` — judgment skill: how to correctly
+  download/install per author说明 (FOMOD reasoning, file/variant selection,
+  prerequisites). Downstream from `evaluating-bgs-mods` INCLUDE verdict.
+- `curating-bgs-modpack` — judgment skill: whole-pack incremental strategy
+  (batch sizing, rollback boundaries, attribution/naming, declaring 风格);
+  cross-stage skill that the per-mod skills feed.
+- `diagnosing-bgs-problems` — judgment skill: symptom-first triage for CTD /
+  FPS / freeze / stutter; escalates to `xedit-conflict-audit` or
+  `using-bgs-archive` once root-cause class is identified.
+- `testing-bgs-modpack` — judgment skill: proactive post-install verification
+  of an install batch; escalates to `diagnosing-bgs-problems` on failure.
 - `xedit-automation` — hub skill for all xEdit work; routing doctrine,
   anti-patterns, sub-agent recipes.
 - BGS KB records under `knowledge/bgs-kb/packs/core/records/` — deep reference
