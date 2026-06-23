@@ -48,7 +48,7 @@ export function makeGetTool(opts) {
                 summary: `Record ${id} was not found`,
                 code: KB_ERROR_CODES.RECORD_NOT_FOUND,
                 hint: find.hint ?? "Run bgs_kb_query first to verify the record id and pack id.",
-                detail: { id, ...(packId ? { packId } : {}) },
+                detail: { id, ...(packId ? { packId } : {}), ...(find.skippedPacks.length > 0 ? { skippedPacks: find.skippedPacks } : {}) },
                 severity: "MEDIUM",
             });
         }
@@ -58,6 +58,13 @@ export function makeGetTool(opts) {
                 code: "ambiguous_record_id",
                 severity: "MEDIUM",
                 message: `Record id ${id} exists in multiple packs (${find.ambiguousPackIds.join(", ")}); using ${find.found.session.pack.packId}. Specify packId for deterministic lookup.`,
+            });
+        }
+        if (find.skippedPacks.length > 0) {
+            warnings.push({
+                code: "skipped_non_record_packs",
+                severity: "MEDIUM",
+                message: `Skipped ${find.skippedPacks.length} loaded pack(s) without the standard records schema (e.g. glossary packs): ${find.skippedPacks.map((s) => s.packId).join(", ")}.`,
             });
         }
         const baseRecord = recordFromRow(find.found.row, find.found.session);
@@ -137,21 +144,60 @@ export function makeGetTool(opts) {
         }
     };
 }
+// Glossary-shape packs (e.g. `bgs-l10n-starfield-zhhans`) have a `records`
+// table for cross-pack compatibility but do NOT carry the standard records
+// columns such as `canonical_answer`. Iterating SELECTs across all loaded
+// packs blows up on the first such pack with "no such column: canonical_answer"
+// or "no such table: records(_fts)?". Treat those specific errors as a
+// structural "this pack isn't a records-shape pack" signal and skip it; do
+// not silently swallow other SQL errors. Matches the same pattern used in
+// query.ts when iterating sessions for cross-pack search.
+const RECORDS_SCHEMA_MISMATCH_RE = /no such (table:\s*records(_fts)?|column:\s*canonical_answer)/i;
 function findRecordById(registry, id, packId) {
+    const skippedPacks = [];
     if (packId) {
         const session = registry.byPackId(packId);
         if (!session)
-            return { found: null, ambiguousPackIds: [], hint: `Pack '${packId}' is not loaded` };
-        const row = getRecordRow(session, id);
-        return { found: row ? { session, row } : null, ambiguousPackIds: [] };
+            return { found: null, ambiguousPackIds: [], hint: `Pack '${packId}' is not loaded`, skippedPacks };
+        try {
+            const row = getRecordRow(session, id);
+            return { found: row ? { session, row } : null, ambiguousPackIds: [], skippedPacks };
+        }
+        catch (err) {
+            const message = err.message ?? String(err);
+            if (RECORDS_SCHEMA_MISMATCH_RE.test(message)) {
+                skippedPacks.push({ packId, reason: "no_records_schema" });
+                return {
+                    found: null,
+                    ambiguousPackIds: [],
+                    hint: `Pack '${packId}' does not use the standard records schema (likely a glossary-shape pack); bgs_kb_get cannot serve it.`,
+                    skippedPacks,
+                };
+            }
+            throw err;
+        }
     }
-    const matches = registry
-        .all()
-        .flatMap((session) => {
-        const row = getRecordRow(session, id);
-        return row ? [{ session, row }] : [];
-    });
-    return { found: matches[0] ?? null, ambiguousPackIds: matches.map((match) => match.session.pack.packId) };
+    const matches = [];
+    for (const session of registry.all()) {
+        try {
+            const row = getRecordRow(session, id);
+            if (row)
+                matches.push({ session, row });
+        }
+        catch (err) {
+            const message = err.message ?? String(err);
+            if (RECORDS_SCHEMA_MISMATCH_RE.test(message)) {
+                skippedPacks.push({ packId: session.pack.packId, reason: "no_records_schema" });
+                continue;
+            }
+            throw err;
+        }
+    }
+    return {
+        found: matches[0] ?? null,
+        ambiguousPackIds: matches.map((match) => match.session.pack.packId),
+        skippedPacks,
+    };
 }
 function getRecordRow(session, id) {
     return session.get(`SELECT id, pack_id, title, body_md, canonical_answer, applies_to_json, variants_json,

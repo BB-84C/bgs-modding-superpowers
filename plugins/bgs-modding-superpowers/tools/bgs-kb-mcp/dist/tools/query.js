@@ -96,7 +96,7 @@ export function makeQueryTool(opts) {
                 // search. Other SQL errors are NOT silently swallowed — only the
                 // missing-records-schema case is treated as a structural skip.
                 const message = err.message ?? String(err);
-                if (/no such table:\s*records(_fts)?/i.test(message)) {
+                if (/no such (table:\s*records(_fts)?|column:\s*canonical_answer)/i.test(message)) {
                     skippedPacks.push({ packId: session.pack.packId, reason: "no_records_schema" });
                     continue;
                 }
