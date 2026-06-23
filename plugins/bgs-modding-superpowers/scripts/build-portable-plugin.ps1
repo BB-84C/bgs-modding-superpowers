@@ -465,11 +465,18 @@ Copy-FileOnly -From "package.json"      -To "package.json"
 # subtree as the package root would resolve a non-existent
 # plugins/bgs-modding-superpowers/plugins/... path.
 $matzPkgPath = Join-Path $PluginRoot "package.json"
-$matzPkgRaw = Get-Content -LiteralPath $matzPkgPath -Raw -Encoding UTF8
-$matzPkgRaw = $matzPkgRaw.Replace(
-  '"plugins/bgs-modding-superpowers/.opencode/plugins/bgs-modding-superpowers.js"',
-  '".opencode/plugins/bgs-modding-superpowers.js"')
-[IO.File]::WriteAllText($matzPkgPath, $matzPkgRaw, [Text.UTF8Encoding]::new($false))
+$matzPkg = (Get-Content -LiteralPath $matzPkgPath -Raw -Encoding UTF8) | ConvertFrom-Json
+$matzPkg.main = ".opencode/plugins/bgs-modding-superpowers.js"
+# Drop the root-only `files` whitelist. At the repo root it scopes the OpenCode
+# `git+https` npm-pack to ship ONLY plugins/bgs-modding-superpowers/ (keeping the
+# dev tree out of end-user installs). But inside the materialized subtree that
+# path does not exist — the subtree IS the plugin root — so a copied `files`
+# field would make an npm-pack of the subtree near-empty. Remove it here.
+if ($matzPkg.PSObject.Properties.Name -contains 'files') {
+  $matzPkg.PSObject.Properties.Remove('files')
+}
+$matzPkgOut = ($matzPkg | ConvertTo-Json -Depth 10).Replace("`r`n", "`n")
+[IO.File]::WriteAllText($matzPkgPath, $matzPkgOut + "`n", [Text.UTF8Encoding]::new($false))
 
 Copy-FileOnly -From "README.md"         -To "README.md"
 Copy-FileOnly -From "LICENSE"           -To "LICENSE"
