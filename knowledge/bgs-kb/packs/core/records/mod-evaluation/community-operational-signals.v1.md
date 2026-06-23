@@ -31,6 +31,6 @@ Leveled-list and NPC-overhaul mods have broad conflict surfaces. They often need
 
 Script-heavy mods can bake state into saves. Decide on them before starting a playthrough when possible, and avoid casual mid-save removal unless the author provides a safe uninstall path. Removing a scripted mod from an active save can corrupt or destabilize the save even when the mod manager disables the files cleanly.
 
-Master ordering and ESL flags are operational hazards. Missing masters can cause a crash or failed load before the main menu. ESL flagging must respect FormID limits and compacting rules; careless ESL conversion or inconsistent master order can break references.
+Master ordering and ESL flags are operational hazards where applicable. Missing masters can cause a crash or failed load before the main menu on any game. ESL flagging applies only where the engine supports it (Skyrim SE/AE/VR, Fallout 4, Starfield — not Skyrim LE, Fallout 3, or New Vegas); where supported it must respect FormID limits and compacting rules, and careless ESL conversion or inconsistent master order can break references.
 
-Verify requirements and dependencies before installation. Confirm required frameworks such as SKSE, F4SE, or SFSE, required master plugins, library mods, and patch stacks are present at compatible versions before treating the mod as ready for evaluation.
+Verify requirements and dependencies before installation, where applicable. Confirm the game's script extender (SKSE for Skyrim, F4SE for Fallout 4, SFSE for Starfield, FOSE for Fallout 3, NVSE for New Vegas), required master plugins, library mods, and patch stacks are present at compatible versions before treating the mod as ready for evaluation.

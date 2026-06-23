@@ -8,7 +8,7 @@ appliesTo:
 canonical:
   answer: In Fallout 4, precombined geometry and previs visibility data must be treated together; mods that invalidate one side can produce FPS loss, flicker, pop-in, or missing geometry.
   confidence: medium
-queryKeys: [Fallout 4 precombines, previs, PRVS, PRECOMB, broken precombines, mod evaluation, precombine breaking, placed objects]
+queryKeys: [Fallout 4 precombines, previs, PRVS, PRECOMB, broken precombines, mod evaluation, precombine breaking, placed objects, object density, visibility culling]
 severity: critical
 sources:
   - kind: community-forum
@@ -25,4 +25,7 @@ The core pack already records that precombines and previs are coupled.
 For FO4 modlists, this becomes an install rule: cell-editing mods need to be checked for rebuilt data, not just sorted late.
 
 Treat broad world edits, settlement expansions, scrapping mods, and lighting overhauls as precombine/previs suspects.
+
+Precombine/previs recovery only restores the modified mods themselves. Any mod that places NEW objects in the worldspace bypasses visibility culling unconditionally — even after a precombine fix — so limit placed-object-density mods (decoration and settlement clutter) rather than assuming a recovery pass covers them.
+
 AFK UFO4P provides an active FO4 patching forum, but this record does not claim a specific fix list from the index alone.
