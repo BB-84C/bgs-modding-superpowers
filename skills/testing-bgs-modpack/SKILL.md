@@ -27,9 +27,9 @@ Do **not** use this skill as the primary skill for adjacent intents:
 
 | User intent | Primary skill |
 |---|---|
-| "It crashed", "FPS tanked", missing meshes, broken quests, bad logs, or any failure already observed | `diagnosing-bgs-problems` (forthcoming sibling) |
+| "It crashed", "FPS tanked", missing meshes, broken quests, bad logs, or any failure already observed | `diagnosing-bgs-problems` |
 | "Should this mod go in the pack?" before install | `evaluating-bgs-mods` |
-| Define pack style, batch size, rollback boundaries, naming/separator discipline | `curating-bgs-modpack` (forthcoming sibling) |
+| Define pack style, batch size, rollback boundaries, naming/separator discipline | `curating-bgs-modpack` |
 | Enable/disable/reorder plugins or edit `plugins.txt` | `writing-bgs-load-order` |
 | Inspect records, conflicts, or override winners | `xedit-conflict-audit` / `xedit-automation` |
 
@@ -49,7 +49,7 @@ Do not use when:
 
 - A crash/perf/quest/mesh/script failure already exists. Escalate to `diagnosing-bgs-problems`.
 - The question is whether to include the mod at all. Use `evaluating-bgs-mods`.
-- The batch boundary is unknown and the user wants to plan the pack architecture. Use `curating-bgs-modpack` once shipped; until then ask the curator for the current batch boundary.
+- The batch boundary is unknown and the user wants to plan the pack architecture. Use `curating-bgs-modpack`.
 - You are about to write game-specific console command catalogs into this file. Those belong in KB.
 - You are tempted to invent generic QA filler like "verify all systems work". Mark `[GAP — needs user input]` instead.
 
@@ -105,7 +105,7 @@ bgs_kb_query({
 
 [STOP] If KB is silent on a command or route, do not invent one from memory. Mark `[GAP — needs user input]` and ask for the user's preferred test cell / route / save boundary, or recommend the smallest non-saving visual/mechanic check that follows from the mod author's stated impact.
 
-[STOP] Console commands like `coc`, `tcl`, `tgm`, Skyrim equivalents, and Starfield equivalents are per-game facts. They belong in KB records, not in this game-agnostic skill body.
+[STOP] Per-game console commands and travel/debug shortcuts are KB facts. They belong in KB records, not in this game-agnostic skill body.
 
 ## Checklist
 
@@ -147,10 +147,10 @@ bgs_kb_query({
 
 ## See also
 
-- `diagnosing-bgs-problems` (forthcoming) — use after any crash, severe FPS drop, missing content, broken mechanic, log error, or failed verification signal.
-- `curating-bgs-modpack` (forthcoming) — owns batch boundaries, rollback rhythm, pack style, and naming/separator discipline.
+- `diagnosing-bgs-problems` — use after any crash, severe FPS drop, missing content, broken mechanic, log error, or failed verification signal.
+- `curating-bgs-modpack` — owns batch boundaries, rollback rhythm, pack style, and naming/separator discipline.
 - `evaluating-bgs-mods` — decides whether a mod should be included before install.
-- `interpreting-mod-author-instructions` (forthcoming) — reads author instructions and installer choices before the testable batch exists.
+- `interpreting-mod-author-instructions` — reads author instructions and installer choices before the testable batch exists.
 - `writing-bgs-load-order` — plugin enable/disable/order mechanics.
 - `xedit-conflict-audit` / `xedit-automation` — record-level readback when a failed verification points to override/conflict semantics.
 - `bgs_kb_query` — required source for per-game console commands, safe test cells/routes, save-hygiene specifics, and mod-category verification facts.

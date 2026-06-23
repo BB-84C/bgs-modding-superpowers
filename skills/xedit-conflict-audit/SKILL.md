@@ -73,6 +73,19 @@ digraph patch_vs_reorder {
 | CLEAN | The record is an unchanged copy of vanilla / ITM candidate. | You are about to delete a value whose purpose you have not understood. |
 | REMOVE / REJECT | The conflict reveals the mod's relevant data is not needed, off-role, or not worth the repair debt. | The source is silent on a hard removal threshold; do not invent one. |
 
+### KB query discipline
+
+This decision section is game-agnostic. Do not inline game-specific xEdit lore,
+record-class gotchas, or community patch-position folklore here.
+
+Use KB when the conflict family depends on current game or ecosystem facts:
+
+```text
+bgs_kb_query({ query: "xedit patch vs reorder conflict family", domains: ["xedit", "load-order"], games: ["<current game>"] })
+```
+
+If KB is silent, mark `[GAP]` instead of inventing a game-specific rule.
+
 ### Red flags (STOP)
 
 | Thought | Reality |
@@ -94,7 +107,7 @@ digraph patch_vs_reorder {
 | "The game boots, so the conflict is acceptable." | Lost fields can silently disable features. Booting is not semantic success. |
 | "The field label is obvious enough." | Some data names are abstract. If you do not know the purpose, investigate before forwarding. |
 
-When the verdict is PATCH, route to `xedit-automation` (see its `## 补丁创作判断` section, forthcoming in this batch).
+When the verdict is PATCH, route to `xedit-automation` (see its `## 补丁创作判断` section).
 
 ## R6 broad-audit shortcuts (capability gated)
 

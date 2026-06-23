@@ -60,11 +60,11 @@ Core rules:
 - Loose files win over archive contents at the same virtual path. If a loose `textures/...` or `meshes/...` file is active, it can mask every packed copy of that path.
 - Archive-to-archive order follows the plugin/load-order surface (`plugins.txt` / the game's active plugin order), not MO2 left-pane mod order. Moving a mod in the left pane may change loose-file winners, but it does not by itself prove a packed archive entry will win.
 - Before extracting, identify the layer: asset path conflict, archive count/format issue, or plugin record conflict. Do not solve the wrong problem with the wrong tool.
-- For Fallout 4-specific precombine/previs or BA2-ceiling diagnosis, query the KB instead of inlining rules here:
+- For current-game engine caveats or archive-count/packaging diagnostics, query the KB instead of inlining rules here:
 
 ```text
-bgs_kb_query({ query: "precombine previs archive precedence", games: ["Fallout4"], domains: ["engine", "archive-precedence"] })
-bgs_kb_query({ query: "BA2 file limit CTD archive", games: ["Fallout4"], domains: ["archive-precedence", "debugging"] })
+bgs_kb_query({ query: "asset precedence engine caveat", games: ["<current game>"], domains: ["engine", "archive-precedence"] })
+bgs_kb_query({ query: "archive count or packaging CTD", games: ["<current game>"], domains: ["archive-precedence", "debugging"] })
 ```
 
 Red flags:
@@ -74,7 +74,7 @@ Red flags:
 | "The wrong texture/model loaded, so I should reorder plugins first." | First inspect the final asset provider chain. Wrong bytes are usually an asset-precedence question before they are a record-order question. |
 | "MO2 left-pane priority controls packed assets too." | Left-pane priority controls loose-file winners. Packed archive winners are tied to the plugin/load-order surface. |
 | "I'll extract every archive loose so conflicts are obvious." | Bulk extraction creates duplicate active surfaces and can make the final tree harder to reason about. Extract only a bounded diagnostic set or a deliberate overlay. |
-| "A FO4 precombine/previs problem belongs in this archive skill." | That is game-specific engine knowledge. Query the Fallout 4 KB record and keep this skill game-agnostic. |
+| "A current game's engine-specific archive/precompute problem belongs in this archive skill." | That is game-specific engine knowledge. Query the relevant KB record and keep this skill game-agnostic. |
 | "The archive command succeeded, so the runtime winner changed." | Run `info`/`list` and inspect the MO2 final virtual path/provider chain before claiming the game will read the new asset. |
 
 Rationalizations:
