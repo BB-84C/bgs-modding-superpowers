@@ -130,7 +130,7 @@ Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01:
 
 ## 2026-06-23 — 思想论 judgment layer started (evaluating-bgs-mods shipped)
 
-**Delivered (feature branch `feat/sixiang-evaluating-bgs-mods`, pushed; not yet merged):** the architecture spec for the whole 思想论 judgment layer (5 standalone skills + 5 tool-skill injections + KB plan) plus the FIRST skill `evaluating-bgs-mods`. Built subagent-driven, grounded in the curator's own tutorial corpus (F-drive scripts + Bilibili AI subtitles + Bethesda design-philosophy essays, archived under `.opencode/artifacts/sixiang-sources/`).
+**Delivered (merged to `main` ff via `feat/sixiang-evaluating-bgs-mods` -> commit `1d7962a`; KB Release `kb-2026.06.23` published; vendor clone at `D:\Starfield MO2\.opencode\vendor\bgs-modding-superpowers` synced):** the architecture spec for the whole 思想论 judgment layer (5 standalone skills + 5 tool-skill injections + KB plan) plus the FIRST skill `evaluating-bgs-mods`. Built subagent-driven, grounded in the curator's own tutorial corpus (F-drive scripts + Bilibili AI subtitles + Bethesda design-philosophy essays, archived under `.opencode/artifacts/sixiang-sources/`). Live acceptance passed: `bgs_kb_query` returns the 3 new `mod-evaluation` records at score 1.0 for expected queries; Skill_tool loads `evaluating-bgs-mods` with all 3 oracle-review fixes intact.
 
 - **Architecture**: hybrid carving (cross-stage judgment → standalone skills; tool-bound judgment → injected into the existing tool skill); game-agnostic skill body + per-game KB facts. Decided via multi-perspective brainstorm (oracle×2 + explorer + librarian + wildcard).
 - **evaluating-bgs-mods**: BB84 systems-simulationist, anti-checklist framework; Iron Law (fit the pack's 风格 + reinforce systemic feedback; popularity/visuals/downloads are inputs not proof); query-KB-never-inline discipline; route gate + terminal handoff to `interpreting-mod-author-instructions`.
@@ -141,7 +141,11 @@ Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01:
 - Bilibili AI subtitles require login (`need_login_subtitle:true`); pulled via the user's SESSDATA + WBI signing; the full 13-video curriculum is archived.
 - **Target 1 invariant confirmed**: only the `core` pack materializes into the portable plugin tree; per-game KB facts (the FO4 precombine/BA2 records here) live in source and reach end-users via a KB Release artifact, NOT the plugin tree.
 
-**Next:** remaining 思想论 skills per spec sequencing (xEdit patch-judgment injections → `curating-bgs-modpack` + `interpreting-mod-author-instructions` → `diagnosing-bgs-problems` → `testing-bgs-modpack`); publish a KB Release for the new FO4 records; vendor-clone sync + OpenCode restart to verify retrieval live (Task 6b — user-gated).
+**Also shipped in the same batch:**
+- `bgs_kb_get` glossary-pack regression fix (`tools/bgs-kb-mcp/src/tools/get.ts` + `query.ts` defensive regex broadening + 2 regression tests in `tool-get.test.ts`). Root cause: `findRecordById` iterated all loaded packs and crashed with `no such column: canonical_answer` on the glossary-shape `bgs-l10n-starfield-zhhans` pack. Fix follows the same try/catch + skippedPacks pattern `query.ts` already uses for the `records_fts` case. Commits `49f93ed` (src+dist+tests) + `87fe3f2` (materialize).
+- KB Release `kb-2026.06.23` (https://github.com/BB-84C/bgs-modding-superpowers/releases/tag/kb-2026.06.23) — 7 assets: `core-2026.06.23.zip` + `bgs-kb-fallout4-2026.06.23.zip` (changed) + 4 unchanged packs re-published for index completeness + `manifest-index.json`. `bgs_kb_check_updates` verifies the live release.
+
+**Next:** remaining 思想论 skills per spec sequencing (xEdit patch-judgment injections → `curating-bgs-modpack` + `interpreting-mod-author-instructions` → `diagnosing-bgs-problems` → `testing-bgs-modpack`).
 
 ## 2026-06-16 — MO2 MCP v1.1.x LOW polish deferrals
 
