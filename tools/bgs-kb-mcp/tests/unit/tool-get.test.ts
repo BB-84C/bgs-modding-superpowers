@@ -1,6 +1,12 @@
 import { writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
+
+// node:sqlite is an experimental Node builtin; TS/Vitest can't statically
+// resolve it, so we createRequire it the same way scripts/rebuild-locked-pack.mjs does.
+const requireFromHere = createRequire(import.meta.url);
+const { DatabaseSync } = requireFromHere("node:sqlite") as typeof import("node:sqlite");
 
 import { buildPack } from "../../src/build/index.js";
 import type { LoadedPack, PackRoot } from "../../src/discovery/types.js";
@@ -324,5 +330,91 @@ test("get renders variant warning callouts in markdown", async () => {
     const env = await tool({ id: "archive-precedence.loose-over-archive.v1", game: "Fallout4" });
 
     expect(env.ok && env.data.record.bodyMd).toContain("> [!WARNING] [PREVIS|high] Check precombine/previs before blaming plugin load order.");
+  });
+});
+
+// Hand-construct a glossary-shape pack: has a `records` table but is missing
+// the `canonical_answer` column the standard records-shape pack carries. This
+// mirrors `bgs-l10n-starfield-zhhans` and is the root cause of the
+// "no such column: canonical_answer" runtime regression observed on 2026-06-23
+// when bgs_kb_get iterated all loaded packs without a packId filter.
+async function buildGlossaryShapePack(packId: string): Promise<LoadedPack> {
+  const packRoot = await makeTempPack(`kb-glossary-${packId}-`);
+  await writeFile(
+    join(packRoot, "bgs-kb-meta.yml"),
+    `packId: ${packId}\ndisplayName: ${packId} glossary fixture\nversion: 2026.06.23\nschemaVersion: 1\nminPluginVersion: 0.2.0\nowner: tests\nlicense: MIT\n`,
+    "utf8",
+  );
+  const kbPath = join(packRoot, "kb.sqlite");
+  const db = new DatabaseSync(kbPath, { readOnly: false });
+  try {
+    // Mirrors the real `bgs-l10n-starfield-zhhans` records-table shape (5 cols),
+    // which has id/pack_id/kind/title/body_md but is missing canonical_answer
+    // and all other standard records columns. The standard get.ts SELECT
+    // succeeds through `body_md` and then fails on `canonical_answer`,
+    // reproducing the live runtime error exactly.
+    db.exec("CREATE TABLE records (id TEXT PRIMARY KEY, pack_id TEXT, kind TEXT, title TEXT, body_md TEXT)");
+    db.exec("CREATE TABLE glossary_entries (id TEXT PRIMARY KEY, en TEXT, zh TEXT)");
+    db.exec(`INSERT INTO glossary_entries (id, en, zh) VALUES ('e1','Vault','避难所')`);
+  } finally {
+    db.close();
+  }
+  const manifestPath = join(packRoot, "manifest.json");
+  const manifest = {
+    packId,
+    displayName: `${packId} glossary fixture`,
+    version: "2026.06.23",
+    schemaVersion: 1,
+    minPluginVersion: "0.2.0",
+    games: ["Starfield"],
+    domains: ["glossary"],
+    engineFamilies: ["creation-engine-2"],
+    owner: "tests",
+    license: "MIT",
+    recordCount: 1,
+    builtAt: "2026-06-23T00:00:00.000Z",
+    sha256: { "kb.sqlite": "test-fixture" },
+  };
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+  return {
+    packId,
+    displayName: manifest.displayName,
+    version: manifest.version,
+    schemaVersion: manifest.schemaVersion,
+    minPluginVersion: manifest.minPluginVersion,
+    root: "bundled",
+    rootPath: packRoot,
+    packRoot,
+    kbSqlitePath: kbPath,
+    manifestPath,
+    manifest: manifest as unknown as LoadedPack["manifest"],
+    integrityOk: true,
+    loadedAt,
+  };
+}
+
+test("get tolerates glossary-shape packs (no canonical_answer column) when iterating without packId", async () => {
+  const normalPack = await buildLoadedPack("normal-pack", baseRecords());
+  const glossaryPack = await buildGlossaryShapePack("bgs-l10n-fixture");
+  // Glossary pack listed FIRST so iteration hits the schema-mismatch path before the normal pack.
+  await withGetTool([glossaryPack, normalPack], async (tool) => {
+    const env = await tool({ id: "archive-precedence.loose-over-archive.v1" });
+
+    expect(env.ok).toBe(true);
+    if (!env.ok) throw new Error("expected ok envelope despite glossary pack present");
+    expect(env.data.record).toMatchObject({ id: "archive-precedence.loose-over-archive.v1", packId: "normal-pack" });
+    expect(env.warnings).toContainEqual(expect.objectContaining({ code: "skipped_non_record_packs", severity: "MEDIUM" }));
+  });
+});
+
+test("get returns RECORD_NOT_FOUND with skippedPacks surfaced when only a glossary pack is loaded", async () => {
+  const glossaryPack = await buildGlossaryShapePack("bgs-l10n-only");
+  await withGetTool([glossaryPack], async (tool) => {
+    const env = await tool({ id: "some.record.v1" });
+
+    expect(env.ok).toBe(false);
+    if (env.ok) throw new Error("expected refusal");
+    expect(env.code).toBe("record_not_found");
+    expect(env.detail).toMatchObject({ skippedPacks: [{ packId: "bgs-l10n-only", reason: "no_records_schema" }] });
   });
 });
