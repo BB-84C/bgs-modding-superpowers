@@ -58,9 +58,9 @@ anything," the plan is already broken.
 
 Use this section when you are about to author or judge a patch through the MCP.
 Use `xedit-conflict-audit` first when the question is still "what wins, what
-conflicts, and should this be patch-vs-reorder?" The forthcoming sibling section
-there owns the patch-vs-reorder call; this section owns whether the patch you
-are about to write is well-formed.
+conflicts, and should this be patch-vs-reorder?" That skill owns the
+patch-vs-reorder call; this section owns whether the patch you are about to
+write is well-formed.
 
 ### Decision flow: is this patch well-formed?
 
@@ -124,6 +124,19 @@ digraph patch_authoring_judgment {
   value and reduces conflict debt. A band-aid patch copies whole records, edits
   source mods, or tries to stitch every FormID because sorting was treated as
   irrelevant.
+
+### KB query discipline
+
+This judgment section is game-agnostic. Query KB for game-specific patching
+gotchas, record-family caveats, and current toolchain facts rather than
+fossilizing them here.
+
+```text
+bgs_kb_query({ query: "xedit patch authoring gotchas", domains: ["xedit", "load-order"], games: ["<current game>"] })
+```
+
+If KB is silent, mark `[GAP]` and keep the patching rule at the framework level
+instead of inventing a game-specific doctrine.
 
 ### Red Flags (STOP)
 

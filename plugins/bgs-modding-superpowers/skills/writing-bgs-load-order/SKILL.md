@@ -89,7 +89,7 @@ digraph sort_or_patch {
   sort [label="Solve by order: later winner goes after earlier loser; mirror loadorder.txt in MO2", shape=box];
   stitch [label="Need fields/data from multiple plugins in one final state?", shape=diamond];
   patch [label="Hand off to xedit-conflict-audit / xedit-automation and build or inspect a patch", shape=box];
-  group [label="Is this about a per-game group template (lighting/weather/USSEP-style)?", shape=diamond];
+  group [label="Is this about a per-game group template (lighting/weather/major compatibility-fix style)?", shape=diamond];
   kb [label="Query KB domain=load-order for the target game; if silent, mark [GAP]", shape=box];
   done [label="Verify winning override / loaded file chain", shape=doublecircle];
 
@@ -129,7 +129,7 @@ digraph sort_or_patch {
   equipment-slot rule and another content mod casually edits one vanilla slot,
   the system-rule mod usually belongs later. Verify the actual records.
 - Do **not** inline per-game group templates here. For lighting, weather,
-  USSEP-style fixes, major overhauls, or game-specific community group layouts,
+  major compatibility-fix placement, major overhauls, or game-specific community group layouts,
   query the KB first:
 
   ```text
@@ -157,7 +157,7 @@ digraph sort_or_patch {
 | "Same group means no conflict." | Same group means conflicts should be rare. When two same-group mods touch the same record, decide winner or patch. |
 | "Manager UI shows no conflict, so there is no conflict." | Record conflicts require xEdit readback. Asset/archive conflicts require asset-precedence inspection. |
 | "Just put every patch last and forget the rest." | Patches late is correct, but a patch can only express decisions you actually audited. |
-| "Lighting/weather/USSEP-style placement is universal." | Those are per-game template facts. Query KB and mark `[GAP]` if the pack has no record. |
+| "Lighting/weather/major compatibility-fix placement is universal." | Those are per-game template facts. Query KB and mark `[GAP]` if the pack has no record. |
 
 ### Rationalizations
 

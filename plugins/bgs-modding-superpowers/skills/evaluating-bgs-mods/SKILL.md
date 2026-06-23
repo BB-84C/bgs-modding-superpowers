@@ -28,7 +28,7 @@ Do **not** use this skill as the primary skill for adjacent intents:
 | Edit, enable, disable, sort, or reason about `plugins.txt` / load order | `writing-bgs-load-order` |
 | Inspect actual records, winners, overrides, or conflict severity | `xedit-conflict-audit` |
 
-Terminal handoff: after an **INCLUDE** or **CONDITIONAL INCLUDE** verdict, stop judging and hand the mod page to `interpreting-mod-author-instructions` (forthcoming sibling skill; until it ships, follow the author's install instructions directly). Inclusion says "worth considering"; it does not mean "install however you feel like it."
+Terminal handoff: after an **INCLUDE** or **CONDITIONAL INCLUDE** verdict, stop judging and hand the mod page to `interpreting-mod-author-instructions`. Inclusion says "worth considering"; it does not mean "install however you feel like it."
 
 ## When to use / When NOT
 
@@ -45,7 +45,7 @@ Do not use when:
 - The user is already committed to install and needs author-instruction interpretation.
 - The question is load-order mechanics or plugin enablement.
 - The question is actual record-level conflict readback.
-- The pack 风格 has not been declared; first declare it — via `curating-bgs-modpack` when it ships, otherwise the curator declares the pack 风格 directly — to name the axis being judged.
+- The pack 风格 has not been declared; first declare it via `curating-bgs-modpack` to name the axis being judged.
 - You are tempted to replace judgment with a generic popularity/recency checklist. BB84's framework is anti-checklist: situational thought over rules.
 
 ## Process Flow
@@ -137,6 +137,6 @@ bgs_kb_query({
 
 ## See also
 
-- `interpreting-mod-author-instructions` (forthcoming) — terminal handoff after an INCLUDE/CONDITIONAL INCLUDE verdict; this skill decides fit, that skill reads how to install. Until it ships, follow the author's install instructions directly.
-- `curating-bgs-modpack` (forthcoming) — defines the pack 风格 this skill judges against. Until it ships, the curator declares the 风格 directly.
+- `interpreting-mod-author-instructions` — terminal handoff after an INCLUDE/CONDITIONAL INCLUDE verdict; this skill decides fit, that skill reads how to install.
+- `curating-bgs-modpack` — defines the pack 风格 this skill judges against.
 - `bgs_kb_query` — query domains `install-planning` and `engine`, including the community-operational-signals record, for game-specific and current operational risk facts.

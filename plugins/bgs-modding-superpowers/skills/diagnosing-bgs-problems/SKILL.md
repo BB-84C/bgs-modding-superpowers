@@ -1,6 +1,6 @@
 ---
 name: diagnosing-bgs-problems
-description: Use when a BGS modded game has CTD, crash log, FPS drop, stuttering, Buffout, freeze, performance, won't start, 崩溃, 掉帧, 卡顿 symptoms and the user needs a symptom-first diagnostic ladder. NOT for proactive post-install testing; use testing-bgs-modpack when it ships.
+description: Use when a BGS modded game has CTD, crash log, FPS drop, stuttering, freeze, performance, won't start, 崩溃, 掉帧, 卡顿 symptoms and the user needs a symptom-first diagnostic ladder. NOT for proactive post-install testing; use testing-bgs-modpack.
 ---
 
 # Diagnosing BGS Problems (judgment skill)
@@ -24,7 +24,7 @@ Do **not** use this skill as the primary skill for adjacent intents:
 
 | User intent | Primary skill |
 |---|---|
-| "I installed a batch; how do I proactively verify it before playing?" | `testing-bgs-modpack` (forthcoming) |
+| "I installed a batch; how do I proactively verify it before playing?" | `testing-bgs-modpack` |
 | "Which record wins / why is this override wrong / should I patch or reorder?" | `xedit-conflict-audit` |
 | "Is this archive/loose asset conflict causing the problem?" | `using-bgs-archive`, then KB for game-specific asset/precombine facts |
 | "Should this mod be in the pack at all?" | `evaluating-bgs-mods` |
@@ -35,7 +35,7 @@ Terminal handoff: once the ladder identifies the root-cause class, stop diagnosi
 
 Use when:
 
-- The user says CTD, crash log, Buffout, freeze, won't start, FPS drop, stuttering, performance, 崩溃, 掉帧, or 卡顿.
+- The user says CTD, crash log, freeze, won't start, FPS drop, stuttering, performance, 崩溃, 掉帧, or 卡顿.
 - A scanner or crash log named something and the user wants to know whether to remove it.
 - A specific place/action/save route reliably crashes or tanks FPS.
 - The game boots but the same area, menu, combat event, save load, or scene still fails.
@@ -43,7 +43,7 @@ Use when:
 
 Do not use when:
 
-- The user is doing planned post-install smoke/semantic verification before symptoms appear; use `testing-bgs-modpack` when available.
+- The user is doing planned post-install smoke/semantic verification before symptoms appear; use `testing-bgs-modpack`.
 - The user asks for a broad conflict survey rather than a symptom-first failure ladder.
 - The user wants a generic optimization shopping list without a reproducible problem.
 - You are about to inline game-specific logger names, crash signatures, console commands, or toolchain facts. Query KB instead.
@@ -107,7 +107,7 @@ bgs_kb_query({
 
 If the KB has no record for the current game's logger or signature, say so as `[GAP]`, then proceed only with game-agnostic evidence: reproducibility, recent-change window, isolation/bisect, and readback from the appropriate tool surface.
 
-[STOP] If you are about to write "Buffout says...", ".NET Script Framework says...", "Trainwreck says...", or a console command into this skill body, STOP. That belongs in a KB record. This skill may instruct the agent to query for those facts; it must not fossilize them.
+[STOP] If you are about to write a specific crash logger name, signature phrase, or console command into this skill body, STOP. That belongs in a KB record. This skill may instruct the agent to query for those facts; it must not fossilize them.
 
 ## Checklist
 
@@ -149,7 +149,7 @@ If the KB has no record for the current game's logger or signature, say so as `[
 
 ## See also
 
-- `testing-bgs-modpack` (forthcoming) — proactive post-install verification before a crash/performance symptom exists.
+- `testing-bgs-modpack` — proactive post-install verification before a crash/performance symptom exists.
 - `xedit-conflict-audit` — record-level root causes, winning overrides, and conflict severity after diagnosis points at plugin data.
 - `using-bgs-archive` — archive/loose-file asset root causes; query KB for game-specific asset/precompute/precombine facts.
 - `writing-bgs-load-order` — plugin enablement and load-order file mechanics when diagnosis points at plugin ordering.

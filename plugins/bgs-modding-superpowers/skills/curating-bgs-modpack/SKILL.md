@@ -25,7 +25,7 @@ Do **not** use this skill as the primary skill for adjacent intents:
 | User intent | Primary skill |
 |---|---|
 | "Should this mod be included?" / judge quality, risk, and pack fit | `evaluating-bgs-mods` |
-| "How do I install this mod correctly?" / read author instructions / choose files or FOMOD options | `interpreting-mod-author-instructions` (forthcoming sibling) |
+| "How do I install this mod correctly?" / read author instructions / choose files or FOMOD options | `interpreting-mod-author-instructions` |
 | Record a pack decision, batch boundary, or lesson learned | `writing-modpack-devlog` |
 | Enable/disable/sort `plugins.txt` or `loadorder.txt` | `writing-bgs-load-order` |
 | Inspect actual conflicts, winning overrides, or whether reorder-vs-patch is safe | `xedit-conflict-audit` |
@@ -46,7 +46,7 @@ Use when:
 Do not use when:
 
 - The only question is whether one mod should be included; use `evaluating-bgs-mods`.
-- The user has already chosen the mod and needs install instructions; use `interpreting-mod-author-instructions` when available.
+- The user has already chosen the mod and needs install instructions; use `interpreting-mod-author-instructions`.
 - The question is actual plugin order, master ordering, ESL flagging, or xEdit record state.
 - You are about to write FO4/Skyrim/Starfield-specific facts into this skill. Query KB; do not fossilize game lore here.
 - You are trying to replace judgment with a checklist of "N mods per batch". BB84's framework is anti-checklist: situational thought over ritual.
@@ -154,7 +154,7 @@ bgs_kb_query({
 ## See also
 
 - `evaluating-bgs-mods` — downstream per-mod fit gate. This skill declares the pack axis; that skill decides whether a candidate reinforces it.
-- `interpreting-mod-author-instructions` (forthcoming) — downstream install-instruction reading after a mod has passed the include gate.
+- `interpreting-mod-author-instructions` — downstream install-instruction reading after a mod has passed the include gate.
 - `writing-modpack-devlog` — terminal handoff for recording style declarations, batch boundaries, rollback points, and lessons learned.
 - `writing-bgs-load-order` — plugin activation and load-order mechanics after the batch exists.
 - `xedit-conflict-audit` — actual record-level conflict readback; do not infer conflict safety from curation notes.
