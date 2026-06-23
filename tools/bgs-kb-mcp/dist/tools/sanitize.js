@@ -58,6 +58,12 @@ function sanitizeBare(value) {
         .trim();
     if (cleaned.length === 0)
         return "";
-    return cleaned.includes(".") ? `"${cleaned}"` : cleaned;
+    // Wrap as a phrase if the token contains anything other than letters,
+    // digits, or underscores. This covers dots (plugins.txt), internal
+    // hyphens (mis-attribution, CP-1252, UTF-8, BB84-philosophy), slashes,
+    // and any other surviving punctuation that would confuse FTS5's query
+    // parser — which can interpret unfamiliar hyphen-bearing tokens as
+    // column references and crash with "no such column: <suffix>".
+    return /^[\p{L}\p{N}_]+$/u.test(cleaned) ? cleaned : `"${cleaned}"`;
 }
 //# sourceMappingURL=sanitize.js.map
