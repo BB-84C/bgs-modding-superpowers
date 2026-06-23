@@ -44,6 +44,108 @@ For deep reference material, query the structured BGS KB first (`bgs_kb_query`
 
 **The agent should never have a reason to bypass the MCP.** Atomic passthrough exists for that.
 
+## 补丁创作判断 / Patch authoring judgment
+
+### Overview
+
+Patch authoring is not "make the red go away." It is a small compatibility
+argument: preserve the current winner, forward only the upstream values that
+should still survive, and leave behind a reversible patch plugin whose contents
+say what you meant. Sorting is a single-choice lever; patching is how you keep
+two mods' intended values active at once. But true-in-principle is not
+true-at-pack-scale: if the plan is to stitch every FormID because "xEdit can fix
+anything," the plan is already broken.
+
+Use this section when you are about to author or judge a patch through the MCP.
+Use `xedit-conflict-audit` first when the question is still "what wins, what
+conflicts, and should this be patch-vs-reorder?" The forthcoming sibling section
+there owns the patch-vs-reorder call; this section owns whether the patch you
+are about to write is well-formed.
+
+### Decision flow: is this patch well-formed?
+
+```dot
+digraph patch_authoring_judgment {
+  rankdir=TB;
+  node [shape=box];
+
+  start [shape=doublecircle, label="Need a patch?"];
+  audit [label="Audit actual winner + conflict fields\n(xedit-conflict-audit if not already done)"];
+  reorder [shape=diamond, label="Is ordering enough\nwithout losing needed values?"];
+  no_patch [shape=doublecircle, label="No patch: reorder / leave winner\nthen verify readback"];
+  winner [label="Copy/target the current winner\nnot an older loser"];
+  intent [label="Name each value to forward\nWhat does it do? Why should it survive?"];
+  noise [shape=diamond, label="Any unchanged copied values\nor green/ITM-style noise?"];
+  clean [label="Remove unchanged/no-intent values"];
+  refs [shape=diamond, label="Deleting or mark-deleting\nrecords/elements?"];
+  referenced [label="Run referenced_by / reference audit\nStop if consequences are unknown"];
+  esl [label="Choose patch form deliberately\nUsually ESP flagged ESL when safe; avoid native ESL/ESM if sort freedom matters"];
+  reversible [shape=diamond, label="Separate reversible patch\n(no direct source-mod edit, no unmanaged overwrite spill)?"];
+  fix_shape [label="Move into managed MO2 mod\nor create dedicated patch plugin"];
+  verify [label="Save + restart + readback\nwinning override shows intended values"];
+  pass [shape=doublecircle, label="Well-formed patch"];
+
+  start -> audit -> reorder;
+  reorder -> no_patch [label="yes"];
+  reorder -> winner [label="no, need combined values"];
+  winner -> intent -> noise;
+  noise -> clean [label="yes"];
+  noise -> refs [label="no"];
+  clean -> refs;
+  refs -> referenced [label="yes"];
+  refs -> esl [label="no"];
+  referenced -> esl;
+  esl -> reversible;
+  reversible -> fix_shape [label="no"];
+  reversible -> verify [label="yes"];
+  fix_shape -> verify -> pass;
+}
+```
+
+### Authoring checks
+
+- **Forward the winner.** The game reads the final/winning override for a
+  FormID. Build the patch from the current winner, then forward only the older
+  mod values that still need to survive.
+- **No unchanged cargo.** If a copied value does not change meaning, it is
+  ITM-style noise, not compatibility. Remove it unless you can state why it is
+  intentionally carried.
+- **Patch as separate layer.** Do not drag values directly into the source mod
+  just because it is the rightmost column today. A patch should be reversible by
+  disabling/removing the patch layer, not by hand-deleting fields from someone
+  else's plugin.
+- **Preserve references.** If deletion or mark-delete enters the plan, stop and
+  run the referenced-by/readback path first. Unknown references mean unknown
+  blast radius.
+- **Choose plugin form deliberately.** Ordinary compatibility patches usually
+  want normal ESP sort freedom plus ESL flagging when safe. Native ESL/ESM
+  load-order behavior is not a free cleanliness upgrade.
+- **Good patch vs band-aid patch.** A good patch has named intent per forwarded
+  value and reduces conflict debt. A band-aid patch copies whole records, edits
+  source mods, or tries to stitch every FormID because sorting was treated as
+  irrelevant.
+
+### Red Flags (STOP)
+
+| Thought | Reality |
+|---|---|
+| "It's red, so copy the left value." | Red is a prompt to inspect. It is not a verdict that the losing value should survive. |
+| "The rightmost mod is wrong; I'll edit it directly." | Then you made the source mod the patch. Use a separate override patch so reversal is clean. |
+| "Sorting does not matter because xEdit can patch anything." | In principle, yes; across hundreds of thousands of FormIDs, no. Use ordering to reduce repair debt, then patch the meaningful remainder. |
+| "Green/unchanged copied values are harmless." | They are no-intent cargo. If they do not change meaning, remove them. |
+| "Native ESL is cleaner than ESP flagged ESL." | Native ESL/ESM can cost normal sort freedom. Use ESP flagged ESL when that is the safe patch shape. |
+| "This looks unused; delete it." | Referenced-by first. Deletion without reference knowledge is unknown blast radius. |
+
+### Rationalizations
+
+| Excuse | Reality |
+|---|---|
+| "I'll just drag one field into the winning plugin." | One field is still a source-mod edit. Make a patch layer, or future-you hand-removes stray fields one by one. |
+| "The patch should preserve everything any mod touched." | Preserve intent, not history. Some edits are core to the mod; some are incidental author preference that should lose to a systemic rule. |
+| "I do not know what this field does, so I'll copy the version that looks plausible." | Unknown field meaning is a research task, not a dice roll. Read the record structure, CK/wiki/community examples, and actual in-pack behavior. |
+| "Overwrite is fine; MO2 sees it." | Overwrite is spill. A real patch belongs in a managed mod layer with a name future-you can understand. |
+| "The response said ok; the patch is done." | Patch acceptance is winning-override readback after save/restart, with the intended values visible and no unintended cargo. |
+
 ## R6 progressive-disclosure capability checks
 
 Do not assume every daemon is r6. Read `xedit_list_capabilities` once and branch
