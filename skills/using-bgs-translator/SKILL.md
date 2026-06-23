@@ -112,7 +112,7 @@ digraph localization_judgment {
 }
 ```
 
-### Red flags (protected-span discipline)
+### Protected-span red flags
 
 Never localize a span just because it appears in an extracted text table. The
 safe default is: player-facing prose can be translated; identifiers and engine

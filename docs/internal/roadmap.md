@@ -128,6 +128,22 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
 
+## 2026-06-23 — 思想论 judgment layer batch2 built (pushed branch, pending merge)
+
+**Delivered on feature branch `feat/sixiang-judgment-layer-batch2` (pushed, pending final user merge decision):** 4 new standalone judgment skills + 5 injected judgment sections + 3 new core KB records, all built on top of the flagship `evaluating-bgs-mods` pattern and reviewed/fixed in one batch.
+
+- **4 standalone skills**: `interpreting-mod-author-instructions`, `curating-bgs-modpack`, `diagnosing-bgs-problems`, `testing-bgs-modpack`.
+- **5 injections**: `xedit-conflict-audit` patch-vs-reorder, `xedit-automation` patch authoring judgment, `writing-bgs-load-order` ordering judgment, `using-bgs-archive` asset precedence judgment, `using-bgs-translator` localization judgment.
+- **3 new core KB records**: `mod-evaluation.author-instruction-signals.v1`, `pack-curation.incremental-batching.v1`, `debugging.scanner-attribution-skepticism.v1`.
+- **One batch-specific fix loop**: stale sibling references removed after all 4 skills existed; xEdit injections gained section-local KB query discipline; several game-specific inline examples were pushed back behind KB query walls.
+
+**Now known:**
+- Once the flagship anatomy is locked, the remaining judgment-layer construction is batchable: 9 worker lanes + one orchestrator fan-in worked cleanly when each fixer staged only its own paths.
+- `testing-bgs-modpack` has intentionally thin substrate (34 `[GAP]` markers across skill + extraction). That is acceptable for now: honest gaps are better than generic QA filler.
+- The bootstrap router has become the practical integration point for the whole judgment layer. Source and materialized plugin tree both now advertise all 5 judgment skills.
+
+**Next after merge:** materialized vendor sync + OpenCode restart + spot-check live skill loading / KB retrieval, then continue to per-game KB backfill (Skyrim animation/script specifics, Starfield toolchain specifics, testing command catalogs/routes).
+
 ## 2026-06-23 — 思想论 judgment layer started (evaluating-bgs-mods shipped)
 
 **Delivered (merged to `main` ff via `feat/sixiang-evaluating-bgs-mods` -> commit `1d7962a`; KB Release `kb-2026.06.23` published; vendor clone at `D:\Starfield MO2\.opencode\vendor\bgs-modding-superpowers` synced):** the architecture spec for the whole 思想论 judgment layer (5 standalone skills + 5 tool-skill injections + KB plan) plus the FIRST skill `evaluating-bgs-mods`. Built subagent-driven, grounded in the curator's own tutorial corpus (F-drive scripts + Bilibili AI subtitles + Bethesda design-philosophy essays, archived under `.opencode/artifacts/sixiang-sources/`). Live acceptance passed: `bgs_kb_query` returns the 3 new `mod-evaluation` records at score 1.0 for expected queries; Skill_tool loads `evaluating-bgs-mods` with all 3 oracle-review fixes intact.
