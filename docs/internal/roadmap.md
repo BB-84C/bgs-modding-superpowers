@@ -32,7 +32,7 @@ This plugin exists for professional BGS modpack curation across Skyrim, Fallout 
 | repository/standards | Shipped | `README.md`, `CONTRIBUTING.md`, `LICENSE`, `RELEASE-NOTES.md`, and `docs/internal/standards/repo-hygiene.md` now define the public and internal surfaces cleanly. |
 | multi-harness packaging | Shipped (v0.1 dev shape) | Root `package.json`, `.claude-plugin/`, `.codex-plugin/`, `.mcp.json`, `.opencode/plugins/bgs-modding-superpowers.js`, `.version-bump.json`, and `hooks/` all land and install locally. |
 | repo-bootstrap guidance | Shipped | The old `agents/repo-bootstrap/` persona is retired; its responsibilities live in `docs/internal/repo-bootstrap.md`. |
-| mod evaluator | Scaffolded only | Moved to `docs/internal/future-skills/mod-evaluator/` as a design note. |
+| mod evaluator | Shipped (judgment skill) 2026-06-23 | `skills/evaluating-bgs-mods/` — BB84 systems-simulationist framework (anti-checklist), game-agnostic body + core `mod-evaluation` KB records (`systemic-design-fit`, `quality-and-risk-signals`, `community-operational-signals` labeled non-BB84) + FO4 `fo4-previs` facts. First skill of the 思想论 judgment layer. Spec `docs/internal/plans/2026-06-23-sixiang-judgment-layer-architecture.md`; plan `docs/internal/plans/2026-06-23-evaluating-bgs-mods-implementation.md`. |
 | install planner | Scaffolded only | Moved to `docs/internal/future-skills/install-planner/`; no real workflow yet. |
 | conflict auditor | Shipped | The real workflow is now `skills/xedit-conflict-audit/` backed by the bundled xEdit MCP. |
 | archive/loose-file reasoning helpers | Shipped 2026-06-13 | `tools/mo2-assets-engine/` Python engine + `mo2-assets` CLI + `tools/mo2-control-plane/live-bridge/mo2_assets_inspector*` IPluginTool GUI. Single shared engine; CLI and GUI agree on every verdict. Coverage: FO4 vanilla BA2 (GNRL + DX10), Skyrim LE/SE/AE/VR BSA v104/v105, FO3/FNV BSA v104, Starfield BA2 v2/v3, loose-file enumeration, 6-bucket conflict resolution mirroring MO2's `doConflictCheck`. 54 automated tests passing; sampled against `B:\WastelandBlues 2.0` (803 mods / 421k files / 80k conflicts) across 7 diverse cases with no semantic bugs. Known scope limits: INI `SArchiveList` (non-standard-named archives like `Fallout4 - Textures1.ba2`) deferred to Phase 3; FO4 next-gen BA2 v7/v8 deferred. See `docs/internal/plans/2026-06-13-mo2-assets-engine-and-cli.md` and `docs/internal/plans/2026-06-13-mo2-assets-inspector-ipluginthool-gui.md`. |
@@ -127,6 +127,21 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 4. **Read-only xEdit completion** — Batch 2 carry-forwards #2 / #4 / #5 / #6 are closed (see STATUS file). 2026-06-11 update: CF #7 closed-with-finding (PowerShell adapter ~3.5 s/call floor → Batch 3 must use direct Node named-pipe client; see `.opencode/artifacts/xedit-mcp/acceptance/batch2/cf7-latency/SUMMARY.md`); CF #3 agent half done (MCP envelopes for `Fallout4.esm` WRLD `0x0000003C` saved under `.opencode/artifacts/xedit-mcp/acceptance/batch2/manual-parity/fo4-WRLD-0000003C/`; human-side `xedit-gui.png` screenshot still pending); CF #1 (representative W2 matrix `breaking` fixture) deferred indefinitely until a real-world bug report justifies the fixture-hunt cost.
 
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
+
+## 2026-06-23 — 思想论 judgment layer started (evaluating-bgs-mods shipped)
+
+**Delivered (feature branch `feat/sixiang-evaluating-bgs-mods`, pushed; not yet merged):** the architecture spec for the whole 思想论 judgment layer (5 standalone skills + 5 tool-skill injections + KB plan) plus the FIRST skill `evaluating-bgs-mods`. Built subagent-driven, grounded in the curator's own tutorial corpus (F-drive scripts + Bilibili AI subtitles + Bethesda design-philosophy essays, archived under `.opencode/artifacts/sixiang-sources/`).
+
+- **Architecture**: hybrid carving (cross-stage judgment → standalone skills; tool-bound judgment → injected into the existing tool skill); game-agnostic skill body + per-game KB facts. Decided via multi-perspective brainstorm (oracle×2 + explorer + librarian + wildcard).
+- **evaluating-bgs-mods**: BB84 systems-simulationist, anti-checklist framework; Iron Law (fit the pack's 风格 + reinforce systemic feedback; popularity/visuals/downloads are inputs not proof); query-KB-never-inline discipline; route gate + terminal handoff to `interpreting-mod-author-instructions`.
+- **KB**: core `mod-evaluation` records faithful to BB84 (`systemic-design-fit`, `quality-and-risk-signals`) + a `community-operational-signals` record explicitly labeled non-BB84 (user-approved hybrid) + FO4 `fo4-previs` precombine/BA2 facts.
+
+**Now known:**
+- The curator's corpus is deliberately PHILOSOPHY/PROCESS-weighted, not checklist-weighted. Judgment skills should be strong on posture; modern operational signals belong in KB labeled "community-standard", never inlined into the skill body.
+- Bilibili AI subtitles require login (`need_login_subtitle:true`); pulled via the user's SESSDATA + WBI signing; the full 13-video curriculum is archived.
+- **Target 1 invariant confirmed**: only the `core` pack materializes into the portable plugin tree; per-game KB facts (the FO4 precombine/BA2 records here) live in source and reach end-users via a KB Release artifact, NOT the plugin tree.
+
+**Next:** remaining 思想论 skills per spec sequencing (xEdit patch-judgment injections → `curating-bgs-modpack` + `interpreting-mod-author-instructions` → `diagnosing-bgs-problems` → `testing-bgs-modpack`); publish a KB Release for the new FO4 records; vendor-clone sync + OpenCode restart to verify retrieval live (Task 6b — user-gated).
 
 ## 2026-06-16 — MO2 MCP v1.1.x LOW polish deferrals
 
