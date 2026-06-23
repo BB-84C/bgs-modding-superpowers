@@ -142,7 +142,13 @@ Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01:
 - `testing-bgs-modpack` has intentionally thin substrate (34 `[GAP]` markers across skill + extraction). That is acceptable for now: honest gaps are better than generic QA filler.
 - The bootstrap router has become the practical integration point for the whole judgment layer. Source and materialized plugin tree both now advertise all 5 judgment skills.
 
-**Next after merge:** materialized vendor sync + OpenCode restart + spot-check live skill loading / KB retrieval, then continue to per-game KB backfill (Skyrim animation/script specifics, Starfield toolchain specifics, testing command catalogs/routes).
+**Post-merge closeout (same day):**
+- Merged feature branch to `main` via fast-forward (`39f7858..db9f271`); vendor clone at `D:\Starfield MO2\.opencode\vendor\bgs-modding-superpowers` synced.
+- Live acceptance pass: 6 packs / 151670 records loaded, 0 warnings; all 3 new core records returned at score 1.0 for expected queries; `Skill_tool` loads new judgment skills clean; all `(forthcoming)` markers verified gone.
+- Hotfix `fix(bgs-kb-mcp): wrap hyphen-bearing tokens as phrases` (commit `6359851`): live acceptance surfaced a pre-existing FTS5 query bug (`no such column: <suffix>` on tokens like `mis-attribution`, `CP-1252`, `UTF-8`). `sanitizeBare` now phrase-wraps any token containing chars outside `[\p{L}\p{N}_]` (Unicode-aware). 5 new regression tests in `tools/bgs-kb-mcp/tests/unit/sanitize.test.ts`; full suite 133/133 green. Existing OpenCode sessions must restart to load the fixed MCP code.
+- KB Release `kb-2026.06.23` updated in-place (no version bump): `core-2026.06.23.zip` (298 KB / 125 records → 314 KB / 128 records) and `manifest-index.json` re-uploaded via `gh release upload --clobber`. Other 5 pack assets unchanged. Trade-off: `bgs_kb_check_updates` still says "no upgrade" for existing v2026.06.23 installs even though the artifact changed — explicit per-user decision to avoid a release-version bump cascade.
+
+**Next:** remaining per-game KB backfill (Skyrim animation/script specifics, Starfield toolchain specifics, testing command catalogs/routes); revisit the FTS5 hyphen scope in AGENTS.md if other related parser quirks surface.
 
 ## 2026-06-23 — 思想论 judgment layer started (evaluating-bgs-mods shipped)
 
