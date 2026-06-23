@@ -8,7 +8,7 @@ appliesTo:
 canonical:
   answer: In Fallout 4, precombined geometry and previs visibility data must be treated together; mods that invalidate one side can produce FPS loss, flicker, pop-in, or missing geometry.
   confidence: medium
-queryKeys: [Fallout 4 precombines, previs, PRVS, PRECOMB, broken precombines]
+queryKeys: [Fallout 4 precombines, previs, PRVS, PRECOMB, broken precombines, mod evaluation, precombine breaking, placed objects]
 severity: critical
 sources:
   - kind: community-forum
