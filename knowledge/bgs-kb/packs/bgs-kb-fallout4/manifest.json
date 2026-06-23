@@ -1,5 +1,5 @@
 {
-  "builtAt": "2026-06-23T19:18:04.598Z",
+  "builtAt": "2026-06-23T20:34:03.109Z",
   "displayName": "BGS Modding Knowledge — Fallout 4 (incl. FO4 VR)",
   "domains": [
     "archive-precedence",
@@ -28,8 +28,8 @@
   "recordCount": 35,
   "schemaVersion": 1,
   "sha256": {
-    "kb.sqlite": "560126f400e7447a027e5429223cc20977909484926ec729d488223ff62e1a09"
+    "kb.sqlite": "46c24f9c2fc95e9859a674facd72b27e05c203e668eb478f56596bb6ac8d1b71"
   },
-  "sourceCommit": "7566bfd39ad68c5acb1e5d32fc958d5d83f8743c",
-  "version": "2026.06.02"
+  "sourceCommit": "87fe3f200e7499b13618320a741df545d6f02422",
+  "version": "2026.06.23"
 }
