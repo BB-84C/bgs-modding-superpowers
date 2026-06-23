@@ -60,6 +60,119 @@ Verbatim parser rules (from `libloadorder/src/load_order/asterisk_based.rs`):
 - Order: first line = lowest load-order index = loaded first. Last line = wins
   conflicts.
 
+## 排序判断 / Ordering judgment
+
+Ordering is not list housekeeping. It decides which plugin record or archive
+payload the game actually sees when two mods touch the same thing: later wins.
+For loose files, remember the separate asset layer: loose files can win over
+BA2/BSA archive contents even when their plugin loads earlier. Use ordering to
+choose whole-record / whole-archive winners; use a patch when you need one final
+record stitched from multiple mods.
+
+Iron law: **if the desired result cannot be expressed as "one later plugin wins
+over one earlier plugin," stop sorting and audit/patch the conflict.**
+
+The source-mined principle comes from BB84's Vortex-era sorting lesson and the
+later xEdit "终极奥义": order is theoretically replaceable by a final
+compatibility patch, but patching every conflicting FormID in a real pack is not
+realistic. A sane order reduces the patch surface; it does not eliminate patching.
+
+```dot
+digraph sort_or_patch {
+  rankdir=TB;
+  start [label="Conflict or ordering question", shape=doublecircle];
+  exists [label="Do the involved plugins actually load and have valid masters?", shape=diamond];
+  fixfile [label="Fix plugins.txt/loadorder.txt validity first", shape=box];
+  author [label="Does the mod author specify order or patch requirement?", shape=diamond];
+  obey [label="Follow author instruction; verify with xEdit/readback", shape=box];
+  winner [label="Can one plugin/archive win wholesale without losing needed data?", shape=diamond];
+  sort [label="Solve by order: later winner goes after earlier loser; mirror loadorder.txt in MO2", shape=box];
+  stitch [label="Need fields/data from multiple plugins in one final state?", shape=diamond];
+  patch [label="Hand off to xedit-conflict-audit / xedit-automation and build or inspect a patch", shape=box];
+  group [label="Is this about a per-game group template (lighting/weather/USSEP-style)?", shape=diamond];
+  kb [label="Query KB domain=load-order for the target game; if silent, mark [GAP]", shape=box];
+  done [label="Verify winning override / loaded file chain", shape=doublecircle];
+
+  start -> exists;
+  exists -> fixfile [label="no"];
+  exists -> author [label="yes"];
+  fixfile -> done;
+  author -> obey [label="yes"];
+  author -> winner [label="no"];
+  obey -> done;
+  winner -> sort [label="yes"];
+  winner -> stitch [label="no"];
+  sort -> done;
+  stitch -> patch [label="yes"];
+  stitch -> group [label="not sure"];
+  patch -> done;
+  group -> kb [label="yes"];
+  group -> patch [label="no"];
+  kb -> done;
+}
+```
+
+### Judgment rules
+
+- Sort solves **priority**: which complete plugin record or BA2/BSA archive wins
+  after a later-wins cascade.
+- Patch solves **composition**: which fields from multiple plugins must be
+  preserved together in one final winning record.
+- Group ordering is a scale tool, not magic. Put mods into purpose-based groups
+  so order can be reasoned about in batches; same-group conflicts still need a
+  specific winner or a patch.
+- Masters and official early-loading plugins are not discretionary. Infer them
+  from the current runtime as described below; user-managed patches generally
+  live late because they intentionally carry final stitched decisions.
+- Prefer the later winner that expresses the pack's system rule over incidental
+  edits from a content mod. Example principle: if one mod imposes the pack-wide
+  equipment-slot rule and another content mod casually edits one vanilla slot,
+  the system-rule mod usually belongs later. Verify the actual records.
+- Do **not** inline per-game group templates here. For lighting, weather,
+  USSEP-style fixes, major overhauls, or game-specific community group layouts,
+  query the KB first:
+
+  ```text
+  bgs_kb_query({ query: "load order group template lighting weather patch", games: ["<Game>"], domains: ["load-order"] })
+  ```
+
+  If the KB is silent, mark `[GAP]` instead of inventing a generic position.
+
+### LOOT / automatic sort vs manual sort
+
+| Situation | Default |
+|---|---|
+| Beginner / small pack, no author instruction, no known conflict | Use LOOT or the manager's automatic sort as a baseline, then validate. |
+| Author specifies order, dependency, or required compatibility patch | Follow the author first; verify with xEdit/readback. |
+| xEdit shows the automatic result chose the wrong winner | Manually reorder if one winner is enough; patch if fields must be stitched. |
+| Per-game group placement question | Query KB `load-order` records; do not hardcode a cross-game template in this skill. |
+| Recurring conflict family across many mods | Create/adjust a group rule, then patch only the records the group rule cannot express. |
+
+### Red flags
+
+| Thought | Reality |
+|---|---|
+| "排序无所谓，xEdit能补一切." | True only in principle; exhaustive FormID stitching is not realistic at pack scale. Sort first to reduce the patch surface. |
+| "LOOT / auto-sort ran, so ordering judgment is done." | Auto-sort is a baseline. It cannot know every pack-specific winner or every author-required exception. |
+| "Same group means no conflict." | Same group means conflicts should be rare. When two same-group mods touch the same record, decide winner or patch. |
+| "Manager UI shows no conflict, so there is no conflict." | Record conflicts require xEdit readback. Asset/archive conflicts require asset-precedence inspection. |
+| "Just put every patch last and forget the rest." | Patches late is correct, but a patch can only express decisions you actually audited. |
+| "Lighting/weather/USSEP-style placement is universal." | Those are per-game template facts. Query KB and mark `[GAP]` if the pack has no record. |
+
+### Rationalizations
+
+| Excuse | Reality |
+|---|---|
+| "I'll patch everything later." | That is the impossible endgame. A sane order is how you avoid patching irrelevant conflicts one by one. |
+| "Manual sorting is just vibes." | Manual sorting is only legitimate when tied to a known winner, author instruction, group rule, or xEdit readback. |
+| "The content mod should win because it adds new things." | Content mods often carry incidental edits. A systemic-rule mod may be the right later winner. |
+| "If two mods are incompatible, sorting harder will fix it." | Some conflicts are ordering conflicts; some are real incompatibilities. Escalate to audit instead of looping order changes. |
+| "Archive conflicts are invisible, so ignore them." | Invisibility is why BA2/BSA precedence must be inspected rather than guessed. |
+
+If sorting does not produce the intended winning override, hand off to
+`xedit-conflict-audit`: inspect the record, name the winning override, decide
+whether the current winner is safe, and only then route to patch authoring.
+
 ## Official / vanilla masters — infer them from the current game, do not hardcode
 
 The engine loads each game's official plugins at fixed positions before reading
