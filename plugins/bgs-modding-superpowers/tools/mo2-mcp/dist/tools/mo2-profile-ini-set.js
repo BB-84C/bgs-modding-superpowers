@@ -11,7 +11,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { atomicWriteText } from "../atomic.js";
 import { upsertIniValue } from "../ini-helpers.js";
-import { readMoIni } from "../mo-ini.js";
+import { readMoIni, resolveGameName } from "../mo-ini.js";
 import { detectMo2Running } from "../detection.js";
 import { requireBoundContext } from "../binding.js";
 // BUG-10 fix (2026-06-17): section + key + plan_id + lease_token gain .min(1).
@@ -31,7 +31,11 @@ const inputSchema = z.discriminatedUnion("mode", [
 async function _resolveIniPath(args, ctx) {
     const mo2Root = requireBoundContext(ctx).config.mo2Root;
     const ini = await readMoIni(join(mo2Root, "ModOrganizer.ini"));
-    const game = ini.general.game ?? "fallout4";
+    // Per-game INI filenames use the TitleCase display NAME, not the lowercase
+    // internal key — e.g. "Starfield.ini", "StarfieldPrefs.ini" (NOT
+    // "starfield.ini"). resolveGameName prefers `gameName=` from MO2's
+    // `[General]` section and falls back to mapping `game=` (older MO2).
+    const game = resolveGameName(ini.general);
     const fileMap = {
         game: `${game}.ini`,
         prefs: `${game}Prefs.ini`,

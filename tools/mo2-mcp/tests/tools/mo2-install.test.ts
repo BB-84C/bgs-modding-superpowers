@@ -253,7 +253,14 @@ describe("mo2_install", () => {
 
     const meta = await readFile(join(root, "mods", "NewSimple", "meta.ini"), "utf8");
     expect(meta).toContain("installationFile=test.7z");
-    expect(meta).toContain("gameName=fallout4");
+    // Note: meta.ini gameName field expects TitleCase (e.g. "Fallout4"), NOT
+    // the lowercase internal key. The bugfix in mo-ini.ts resolveGameName()
+    // (2026-06-24, BB84 Starfield audit round) maps the lowercase `game=`
+    // value from ModOrganizer.ini back to its TitleCase display name via
+    // GAME_KEY_TO_NAME. Pre-fix this wrote `gameName=fallout4` which was
+    // wrong but harmless (no consumer of the field cared); post-fix it
+    // writes the correct `gameName=Fallout4`.
+    expect(meta).toContain("gameName=Fallout4");
     expect(meta).toContain("validated=true");
 
     const modlist = await readFile(join(root, "profiles", "Default", "modlist.txt"), "utf8");

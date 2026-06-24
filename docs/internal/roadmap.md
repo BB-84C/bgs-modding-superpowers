@@ -1730,3 +1730,79 @@ Skills (5 SKILL.md): `evaluating-bgs-mods` / `curating-bgs-modpack` / `diagnosin
 - Plugin mirror tree materialized to `plugins/bgs-modding-superpowers/` via `scripts/build-portable-plugin.ps1`.
 - Real readback queries against post-restart OpenCode session passed (5/5 sample queries hit new records at score≥0.99).
 
+
+---
+
+## 2026-06-24 ## BB84 Starfield modpack live audit + MO2 MCP bugfixes + Option B workflow validation
+
+### What this round delivered
+
+Real-world workflow round on BB84's `D:\Starfield MO2\` instance — a live 393-mod Starfield modpack — to enrich skills + KB through actual use. Substrate-build batch (2026-06-23) had landed the perspective discipline + 47 new records the day before; this round exercised the new substrate against a real curator's environment.
+
+**4 user-facing tasks all complete**:
+
+- **Task 1a** — 172 Nexus mods got Chinese `notes=` (1-2 句简短 + `[UPDATE→vX]` 标记 if stale). 4 fixer lanes parallel. 0 failures. 30 mods flagged from cached newestVersion.
+- **Task 1b** — 132 CC mod folders (79 originals + 53 SC) got Chinese `[CC]` / `[CC·汉化版]` notes. 3 fixer lanes parallel + Exa web search for Bethesda Creations marketplace names. 125/132 found (94.7%); 6 unique stems unfound (No Loading Ship, astrogate, bubegg, satou_sr2_destroy01, tankgirlsxenologyexpanded, rvexplore). 79 CC originals had NO meta.ini and required create-from-scratch.
+- **Task 2** — `docs/dev-log.md` + `docs/release-changelog.md` substrate at project-local `D:\Starfield MO2\docs\` + mirror at `docs/modpack-dev-logs/bb84-starfield/` for plugin substrate.
+- **Task 3** — `docs/mod-update-audit.md` (initial stale-cache version showed 30 UPDATE; fresh-refresh pass via Option B uncovered **162 actual updates** + 8 removed/hidden on Nexus, exposing 132 missed by the stale ~2025-08 cache).
+- **Task 4** — SFSE 0.2.20 → 0.2.21 upgrade via full agent-driven workflow: Premium API `download_link.json` → 7 CDN mirrors → download to `F:\Starfield Mods\Utilities\` (BB84 personal rule) → 7-Zip extract → backup current 4 sfse_* files to `<MO2Root>/.backups/` → COPY new dll + REPLACE readme/whatsnew + DELETE old runtime dll → sha256 verify all 4. Game launch-ready against Steam Starfield 1.16.244.
+
+**MO2 MCP bugfixes (Tier B codification)**:
+- BUG: `decodeIniValue` in `mo-ini.ts` only handled `\\` → `\` (double-backslash). Real MO2 instances with non-ASCII profile names store `selected_profile=@ByteArray(BB84\xe8\x87\xaa\xe7\x94\xa8\x32)`. The bug returned literal `BB84\xe8\x87...` as filename, causing ENOENT on every profile-aware tool call.
+- FIX: Rewrote `decodeIniValue` to iterate escape sequences: `\xHH` → byte 0xHH, `\\` → backslash byte, plain ASCII → code byte, non-ASCII source chars → UTF-8 bytes, then `TextDecoder("utf-8")` the buffer. Added 5 vitest regression cases.
+- BUG: `binding.ts:188`, `mo2-install.ts:202`, `mo2-profile-ini-set.ts:39` all read `ini.general.game ?? "fallout4"`. Modern MO2 writes `gameName=Starfield` (TitleCase display) NOT `game=starfield` (lowercase key). Effect: every modern MO2 instance was reported as `fallout4` regardless of actual game, silently mis-routing to FO4 sidecar enum.
+- FIX: Added `resolveGameKey()` / `resolveGameName()` helpers in `mo-ini.ts` with `GAME_NAME_TO_KEY` + reverse map covering 13 BGS games. Updated all 3 call sites. Added 10 vitest cases for the helpers + 1 integration case for `readMoIni` parsing a Chinese-profile-name Starfield INI fixture.
+- Test result: 504 passed / 0 failed (was 503 → now 514 with 11 new tests + 1 fixed test).
+
+**Plugin codification (Tier A + B)**:
+- 5 new KB records in `core/`:
+  - `install-planning.mo2-windows-credential-mining.v1` — MO2 stores Nexus API key globally in Windows Credential Manager (`ModOrganizer2_APIKEY` legacy + `ModOrganizer2_NEXUS_OAUTH_TOKENS` modern OAuth), read via Win32 `CredReadW` P/Invoke. Universal cross-game.
+  - `install-planning.cc-content-pipeline.v1` — Creation Club content's 3-stage pipeline (in-game download REQUIRES user → MO2 `overwrite/` → materialization script). Agent boundary is at the in-game step.
+  - `install-planning.nexus-direct-api-update-check.v1` — Option B workflow documentation. mobase gap, endpoint shapes, write-back pattern, 20k/day budget.
+  - `engine.xse-update-workflow.v1` — SFSE/SKSE/F4SE/NVSE update procedure. Game-root drop (NOT MO2 mods/), runtime-pinned dll, **7z archive expands to versioned subdir** (glob-find, never hardcode path), backup-before-replace + sha256 verify.
+  - `mod-evaluation.bb84-personal-download-organization.v1` — SUBJECTIVE record marked `kind: explanation`; documents BB84's `F:\Starfield Mods\<37-category>\` convention. Explicit "not a universal rubric" + perspective split body.
+- 3 new sections in `skills/maintaining-modding-environments/SKILL.md`:
+  - "Refreshing Nexus update state without opening MO2 (Option B)" — full code template
+  - "Reading Nexus credentials from MO2's Windows Credential Manager store" — P/Invoke CredRead pattern
+  - "Script Extender (xSE) update workflow — game-root drop, runtime-pinned" — full workflow including 7z subdir gotcha
+  - File grew 361 → 530 lines (+169)
+- 1 new hard rule (rule 8) in `skills/using-bgs-modding-superpowers/SKILL.md` bootstrap: Nexus credentials + Premium download workflow pointers
+- 3 production scripts in `scripts/`:
+  - `install-cc-as-mods.py` (168 lines) — generalized version of BB84's `make_mods_from_cc.py` with CLI args, dry-run, multi-game support, JSON output
+  - `refresh-nexus-update-state.ps1` (239 lines) — Option B production helper, reads CredMan key, 100ms rate-limit, 404/429 handling, UTF-8 no BOM writes
+  - `install-xse-update.ps1` (302 lines) — SFSE/SKSE/F4SE/NVSE generic updater, Premium download_link API, 7z glob-find, backup + verify
+- 2 new rules (16, 17) in `.opencode/memory/45-mo2-mcp-internals.md`:
+  - Rule 16: `@ByteArray` decode must handle `\xHH` escapes — never weaken
+  - Rule 17: Resolve game field via `resolveGameKey` / `resolveGameName` helpers, never read `ini.general.game` directly
+
+### What is now known
+
+- **MO2 Nexus auth is global, not per-instance.** Stored in Windows Credential Manager under fixed target names `ModOrganizer2_APIKEY` and `ModOrganizer2_NEXUS_OAUTH_TOKENS` per `settings.cpp` `getWindowsCredential` / `setWindowsCredential`. All MO2 instances on one Windows user share the same credentials. This invalidates the earlier-in-this-round false conclusion that "Starfield MO2 has never been authenticated" — user explicitly corrected this with "mo2的nexus登录是全局的".
+- **`cmdkey /list | grep nexus` returns nothing** because the target name has no "nexus" in it. Use `grep ModOrganizer2`. HKCU registry has only 3 cosmetic flags. ModOrganizer.ini Settings section has no auth fields. The credential lives in Win Credential Vault, period.
+- **MO2 update-check is GUI-only on the mobase Python API side.** Discovered via explorer subagent: `IModInterface` exposes `setNewestVersion` but NOT `setNexusFileStatus` / `setLastNexusUpdate` / `setLastNexusQuery` (those live on the concrete `ModInfoRegular` not the abstract interface Python sees). `ModListViewActions::checkModsForUpdates()` is the GUI menu action; `ModInfo::checkAllForUpdate()` is the static caller; neither is reachable via mobase. Option B (direct Nexus API + `mo2_edit_meta` write-back) is the right architecture.
+- **Premium API `download_link.json` returns 7 CDN mirrors** (Chicago, Amsterdam, Prague, LA, Miami, Dallas, Nexus Global CDN). All temporary signed URLs. First mirror is typically fine — auto-pick fastest is optional optimization.
+- **SFSE / xSE 7z archives expand to versioned subdir `<xse>_<version>/`, NOT flat.** Critical for any download-extract-deploy script — must glob-find files via `Get-ChildItem -Recurse -Filter "sfse_*.dll"`. Hardcoded `$stagingDir\sfse_*.dll` paths fail. Codified in `engine.xse-update-workflow.v1` + `scripts/install-xse-update.ps1`.
+- **PowerShell scripts must use `$ErrorActionPreference = "Stop"` at the top and print AFTER actions confirm, not before.** First SFSE script printed `"copied: ..."` BEFORE the actual `Copy-Item` call and the Copy-Item failed silently. Pattern fixed in production script. Codified in dev-log Task 4 "lessons" section.
+- **Real Nexus state is far more dynamic than cached state.** ~2025-08 cache showed 30 UPDATE-tagged; actual June 2026 state showed 162 actual updates + 8 removed/hidden = 170 mods worth investigating (vs 30 the user thought). Stale meta.ini is misleading; periodic refresh is necessary.
+
+### What later phases should do differently / open items
+
+- **Closed bugs**: MO2 MCP `@ByteArray` decoder limitation + game field resolution bug. Both have shipped fixes + regression tests in this round.
+- **New MCP capability candidate (Tier C deferred)**: `mo2_nexus_refresh_state` tool wrapping Option B for first-party agent access. Current workaround = call `mo2_edit_meta` from a fixer script that does the API calls itself; works but verbose. Defer until 2+ users request the convenience.
+- **Open Tier C**: full MO2 MCP rebuild + redeploy to BB84's instance to verify the Starfield enum fix in live binding round-trip. Currently the build artifacts are in `dist/` but `D:\Starfield MO2\plugins\Mo2AgentControl\bootstrap\` would need re-materialization for the broker to pick up. Broker had no changes (Python side) so deferred; if next round needs the bugfix live, re-materialize the bootstrap dir.
+- **Per-game KB version bump still deferred** (per 2026-06-23 closeout). 5 new core records justify a bundled `kb-2026.07.xx` release; defer until next codification round adds more.
+- **The 6 CC mods Exa couldn't find marketplace names for** (No Loading Ship, astrogate, bubegg, satou_sr2_destroy01, tankgirlsxenologyexpanded, rvexplore) may be:
+  - Bethesda Creations content that was delisted post-purchase
+  - Modder-resource content not on the marketplace
+  - Re-named SC translations of obscure CCs
+  - Worth manual in-game verification round if user cares; not blocking.
+
+### Test state
+
+- **MO2 MCP**: `cd tools/mo2-mcp && npm test` — 79 test files, 504 tests passed, 0 failed, 19 skipped, 5.4s.
+- **KB pack**: `cli.js validate D:\awesome-bgs-mod-master\knowledge\bgs-kb\packs\core` — 145 records valid (was 140, +5 new).
+- **Production scripts**: `python -m py_compile scripts\install-cc-as-mods.py` + PowerShell AST parse both `.ps1` — all pass.
+- **Real-world semantic verification**:
+  - 304 mod meta.ini files updated, sha256 of UTF-8 Chinese content verified via PowerShell explicit decoder.
+  - SFSE upgrade: 4 files in game root, all sha256 match staging, old `sfse_1_15_222.dll` removed, backup intact at `D:\Starfield MO2\.backups\sfse-0.2.20_pre-0.2.21-update_2026-06-24_1804\`.
+  - Fresh refresh: 172 Nexus mods refreshed, 0 API errors, hourly budget 1825/2500 remaining, daily 19825/20000 remaining.

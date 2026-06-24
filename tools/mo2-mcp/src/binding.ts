@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { loadConfig, type Config } from "./config.js";
-import { readMoIni, type MoIni } from "./mo-ini.js";
+import { readMoIni, resolveGameKey, type MoIni } from "./mo-ini.js";
 import { detectMo2Running, type DetectionResult } from "./detection.js";
 import { PipeClient } from "./pipe-client.js";
 import { SidecarClient, type SidecarGame } from "./sidecar-client.js";
@@ -185,7 +185,12 @@ export class BindingManager {
       const config = promoteBoundProfile(loadedConfig, effectiveProfile);
       const ini = await this.readMoIniFn(join(args.mo2Root, "ModOrganizer.ini"));
       const profileDir = join(args.mo2Root, "profiles", effectiveProfile);
-      const game = ini.general.game ?? "fallout4";
+      // Resolve internal game KEY from either `game=` (older MO2) or `gameName=`
+      // (newer MO2 — what real installs actually write). Without this fallback,
+      // every modern MO2 instance reports `fallout4` (the legacy default),
+      // which silently mis-routes a Starfield instance to the FO4 sidecar
+      // game enum. See `resolveGameKey` in mo-ini.ts.
+      const game = resolveGameKey(ini.general);
 
       sidecar = await this.tryStartSidecar(args.mo2Root, ini, profileDir, game);
       const detection = await this.detectMo2RunningFn({ mo2Root: args.mo2Root, profileDir });

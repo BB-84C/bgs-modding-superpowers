@@ -26,7 +26,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { atomicWriteText } from "../atomic.js";
 import { resolveModsDir, resolveProfileDir } from "../path-helpers.js";
-import { readMoIni } from "../mo-ini.js";
+import { readMoIni, resolveGameName } from "../mo-ini.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext } from "../binding.js";
@@ -182,9 +182,13 @@ const handler = {
         }
         // 3. Write meta.ini (oracle §4.3 fields).
         const ini = await readMoIni(join(bound.config.mo2Root, "ModOrganizer.ini"));
+        // meta.ini's `gameName=` field expects the TitleCase display name
+        // (e.g. "Starfield", "Fallout4", "SkyrimSE"), not the lowercase internal
+        // key. Use resolveGameName which prefers `gameName=` directly and falls
+        // back to reverse-mapping `game=` (older MO2).
         const meta = [
             "[General]",
-            `gameName=${ini.general.game ?? ""}`,
+            `gameName=${resolveGameName(ini.general)}`,
             `modid=${args.nexus_mod_id ?? 0}`,
             `version=${args.version ?? ""}`,
             `installationFile=${basename(archivePath)}`,

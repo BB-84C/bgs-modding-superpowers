@@ -141,6 +141,20 @@ actual plugin, load-order, and record readback.
 7. **First-run state**: if MO2 / xEdit / the control-plane Python plugin are
    not yet set up on this machine, invoke `setting-up-bgs-modding-environment`
    BEFORE any modpack work. That skill orchestrates detection and install.
+8. **Nexus credentials and Premium download paths**: MO2 stores the user's
+   Nexus API key globally in Windows Credential Manager under target
+   `ModOrganizer2_APIKEY` (legacy) / `ModOrganizer2_NEXUS_OAUTH_TOKENS`
+   (modern OAuth). Reading the key requires explicit per-session user consent
+   and the key must be masked in any visible output. The agent-friendly
+   refresh path for Nexus update state is "Option B" — direct API call to
+   `/v1/games/{game}/mods/{id}.json` + write back to `meta.ini` via
+   `mo2_edit_meta`, no MO2 GUI launch needed. Both workflows are documented in
+   the `maintaining-modding-environments` skill and in KB records
+   `install-planning.mo2-windows-credential-mining.v1` +
+   `install-planning.nexus-direct-api-update-check.v1`. For Premium-account
+   direct downloads, use `POST /v1/games/{game}/mods/{id}/files/{file_id}/download_link.json`
+   (returns 7 CDN mirrors) — Premium-only; free accounts must use the Nexus
+   browser flow.
 
 ## How to use this bootstrap
 

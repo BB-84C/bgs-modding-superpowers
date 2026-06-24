@@ -353,6 +353,175 @@ If maintenance touched MO2 or xEdit runtime state, also use the appropriate setu
 - Do not install or upgrade KB packs with a `minPluginVersion` the current plugin does not satisfy.
 - Do not delete all old cache versions; keep current + previous unless the user explicitly chooses otherwise.
 
+## Refreshing Nexus update state without opening MO2 (Option B)
+
+Use this when the user wants fresh `newestVersion`, `nexusFileStatus`,
+`lastNexusQuery`, and `lastNexusUpdate` metadata without opening MO2 and running
+`Tools -> Check All for Updates`.
+
+Why this exists: mobase's Python API does not expose the GUI update-check
+trigger, and three of the four timestamp fields are not on the abstract
+`IModInterface`. See KB record
+`install-planning.nexus-direct-api-update-check.v1`. The direct Nexus API read
+path works for both Free and Premium accounts; these read endpoints are not
+Premium-gated.
+
+Prerequisite: the user must already have Nexus auth configured in MO2. That same
+MO2 credential store is the API-key source for the agent; see the next section.
+
+Endpoints used:
+
+```text
+GET https://api.nexusmods.com/v1/games/{game_domain}/mods/updated.json?period=1m
+GET https://api.nexusmods.com/v1/games/{game_domain}/mods/{id}.json
+```
+
+The first endpoint is one bulk call to discover recently updated mods. The
+second endpoint is one per-mod call for fresh metadata. Nexus' rate budget is
+20,000 calls/day; a full 300-mod refresh is about 301 calls and is comfortable.
+
+Per-mod `meta.ini` update shape:
+
+```powershell
+$statusMap = @{ "published"=1; "hidden"=9; "removed"=6; "wastebinned"=6; "under_moderation"=9 }
+$mod = Invoke-RestMethod -Uri "https://api.nexusmods.com/v1/games/starfield/mods/$modid.json" -Headers $headers
+$statusInt = if ($statusMap.ContainsKey($mod.status)) { $statusMap[$mod.status] } else { 1 }
+$nowIso = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+$updatedIso = [DateTimeOffset]::FromUnixTimeSeconds($mod.updated_timestamp).ToString("yyyy-MM-ddTHH:mm:ssZ")
+$content = [IO.File]::ReadAllText($metaPath, [Text.UTF8Encoding]::new($false))
+$content = $content -replace '(?m)^newestVersion=.*$', "newestVersion=$($mod.version)"
+$content = $content -replace '(?m)^nexusFileStatus=.*$', "nexusFileStatus=$statusInt"
+$content = $content -replace '(?m)^lastNexusQuery=.*$', "lastNexusQuery=$nowIso"
+$content = $content -replace '(?m)^lastNexusUpdate=.*$', "lastNexusUpdate=$updatedIso"
+[IO.File]::WriteAllText($metaPath, $content, [Text.UTF8Encoding]::new($false))
+```
+
+For production-grade automation, prefer the helper script:
+
+```powershell
+pwsh scripts\refresh-nexus-update-state.ps1 -MO2Root <path> -Game starfield
+```
+
+Caveat: direct `meta.ini` writes do not refresh MO2's in-memory
+`ModInfoRegular` until the next `organizer.refresh()` or MO2 restart.
+
+## Reading Nexus credentials from MO2's Windows Credential Manager store
+
+MO2 stores Nexus credentials globally for the current Windows user, not per MO2
+instance. All portable MO2 instances under the same Windows account share them.
+MO2 uses `getWindowsCredential` / `setWindowsCredential` in `settings.cpp`.
+
+Credential Manager targets:
+
+| Target | Meaning |
+|---|---|
+| `ModOrganizer2_APIKEY` | Legacy 162-character personal API key. |
+| `ModOrganizer2_NEXUS_OAUTH_TOKENS` | Compact JSON `{access_token, refresh_token, expires_at, scope, token_type}` from the modern OAuth flow. |
+
+Read pattern:
+
+```powershell
+$signature = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class CredMan {
+  [DllImport("advapi32.dll", SetLastError=true, EntryPoint="CredReadW", CharSet=CharSet.Unicode)]
+  static extern bool CredRead(string target, uint type, uint flag, out IntPtr cred);
+  [DllImport("advapi32.dll")] static extern void CredFree(IntPtr p);
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+  public struct CREDENTIAL { public uint Flags,Type; public IntPtr TargetName,Comment; public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten; public uint CredentialBlobSize; public IntPtr CredentialBlob; public uint Persist,AttributeCount; public IntPtr Attributes,TargetAlias,UserName; }
+  public static string Read(string t) { IntPtr p; if (!CredRead(t,1,0,out p)) return null; try { var c=(CREDENTIAL)Marshal.PtrToStructure(p,typeof(CREDENTIAL)); byte[] b=new byte[c.CredentialBlobSize]; Marshal.Copy(c.CredentialBlob,b,0,(int)c.CredentialBlobSize); int nz=0; for(int i=1;i<b.Length;i+=2)if(b[i]==0)nz++; return nz>(b.Length/4)?Encoding.Unicode.GetString(b):Encoding.UTF8.GetString(b); } finally { CredFree(p); } }
+}
+'@
+Add-Type -TypeDefinition $signature -Language CSharp
+$apiKey = [CredMan]::Read("ModOrganizer2_APIKEY")
+$oauthJson = [CredMan]::Read("ModOrganizer2_NEXUS_OAUTH_TOKENS")
+```
+
+Verification call:
+
+```powershell
+Invoke-RestMethod -Uri "https://api.nexusmods.com/v1/users/validate.json" -Headers @{ APIKEY = $apiKey }
+```
+
+Expected fields include `user_id`, `name`, `is_premium`, and `is_supporter`.
+
+[WARNING]
+Reading user credentials requires explicit user consent. Mask the key in any
+logged output, for example `d0Ra...72d4 (len=162)`. Recommend key rotation after
+the session if there is any leak risk.
+
+Failure modes:
+
+- `cmdkey /list | findstr nexus` returns nothing because the target name has no
+  `nexus` string. Use `cmdkey /list | findstr ModOrganizer2` instead.
+- HKCU registry entries such as `HideCreateInstanceIntro` are cosmetic flags,
+  not credentials.
+- `ModOrganizer.ini` `[Settings]` has no auth fields.
+- If `CredRead` returns null, Nexus auth is not set up in MO2 yet. Direct the
+  user to `Settings -> Nexus -> Connect to Nexus`.
+
+See KB record `install-planning.mo2-windows-credential-mining.v1`.
+
+## Script Extender (xSE) update workflow — game-root drop, runtime-pinned
+
+Use this when Steam updates the game runtime and the existing xSE DLL no longer
+matches it. The signal is a launch refusal through the xSE loader because the
+DLL runtime tag does not match the current `<game>.exe` `FileVersion`.
+
+Detection:
+
+```powershell
+# Current xSE version (filename pattern)
+Get-ChildItem "$gameRoot\sfse_*.dll" | Select Name  # e.g. sfse_1_15_222.dll = SFSE for runtime 1.15.222
+
+# Current Steam runtime
+(Get-Item "$gameRoot\Starfield.exe").VersionInfo.FileVersion  # e.g. 1.16.244.0
+
+# If they do not match, update is needed.
+```
+
+Latest-version sources: silverlock.org points to Nexus mod `#106` for SFSE,
+`#100216` for SKSE64, and `#42147` for F4SE.
+
+Update workflow:
+
+1. Get the latest `file_id` from
+   `/v1/games/{game}/mods/{xse_mod_id}/files.json`; use the file with
+   `category_name=MAIN`.
+2. Premium: call
+   `POST /v1/games/{game}/mods/{xse_mod_id}/files/{file_id}/download_link.json`.
+   The response is an array of seven CDN mirrors (Chicago, Amsterdam, Prague,
+   LA, Miami, Dallas, plus Nexus CDN). Pick the first URL.
+3. Free: open the Nexus page in a browser, click manual download, and save the
+   `.7z` to a known location.
+4. Extract the `.7z`. Gotcha: the archive expands to an `<xse>_<version>/`
+   subdirectory, such as `sfse_0_2_21/`, not a flat folder. Glob-find files:
+   `Get-ChildItem -Recurse -Filter "sfse_*.dll" | Select-Object -First 1`.
+5. Backup current game-root xSE files to
+   `<MO2_Root>\.backups\sfse-<oldver>_pre-<newver>-update_<timestamp>\`.
+6. Copy the new DLL, readme, and whatsnew files to the game root. Skip files
+   with unchanged sha256; the `<xse>_loader.exe` often does not change between
+   minor versions.
+7. Delete the old runtime DLL. This is optional but recommended for cleanliness;
+   the loader auto-picks by runtime match and does not need the old DLL.
+8. Verify sha256 for all four game-root files against staging.
+
+[WARNING]
+This writes to the real game install, for example
+`D:\SteamLibrary\steamapps\common\<game>\`. It requires explicit per-session
+user confirmation. xSE has no MO2 VFS overlay path: the loader must spawn
+`<game>.exe`, so it has to live next to it.
+
+For production-grade automation:
+
+```powershell
+pwsh scripts\install-xse-update.ps1 -GameRoot <path> -XseMod sfse|skse|f4se|nvse
+```
+
+See KB record `engine.xse-update-workflow.v1`.
+
 ## See also
 
 - `setting-up-bgs-modding-environment` — first-run MO2 / xEdit / KB acquisition orchestrator.
