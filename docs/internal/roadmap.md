@@ -1687,3 +1687,46 @@ Branch `feat/archive-papyrus-cli-tools` (35 commits): two standalone agent-nativ
 - Feature branch `feat/archive-papyrus-cli-tools` merged to `main` (`9cafedd`, --no-ff) and deleted; vendor clone refreshed to `9cafedd`.
 - `bgs-archive v0.1.0` published: https://github.com/BB-84C/bgs-modding-superpowers/releases/tag/bgs-archive-v0.1.0 (asset `bgs-archive-windows-x64.exe`, sha256 `73C985D000D1E3...`). Closes the "binary needs a Release" open item. Other platforms build from source.
 - Coverage final: archive read all families + real Starfield v2/v3 (LZ4 bug fixed); Papyrus compile Starfield+FO4 via real CK, decompile Starfield/FO4/Skyrim. Only Skyrim *compile* unverified (no Skyrim CK on machine).
+
+---
+
+## 2026-06-24 ## Sixiang per-game KB backfill substrate (47 records + 5 SKILL curator-lens sections)
+
+### What this round delivered
+
+Substrate-only batch driven by BB84 questionnaire + 5-lane parallel recon (WL2 modpack / Starfield modpack / 废土蓝调 transcripts / Bethesda Breakdown corpus ×2 vendor-diverse explorers). Sign-off-gated 9-lane fan-out (1 spec design lane + 7 record lanes + 1 skills lane) on `main` (no feature branch — work was settled via brainstorm sign-off, not contested). 47 KB records landed in `kb+skills` commit `8cad137`, plugin mirror in `7050dc0`. Release `kb-2026.06.23` updated in-place (sha256 re-readback verified). Vendor clone at `D:\Starfield MO2\.opencode\vendor\bgs-modding-superpowers` fast-forwarded to `7050dc0`.
+
+Records (47 = 45 new + 2 reworks):
+- per-game: skyrim / fo4 / fnv / starfield × (A-tier 4 + B-tier 4) = 32
+- starfield extras: `starfield-curation.creations-marketplace-impact` + `starfield-engine.fo4-to-starfield-deltas` (both internal-wiki-derived with explicit `paraphrased from a community-archived CK wiki snapshot` RE marker per spec §1.3)
+- fo4 extra: `fo4-engine.animation-mod-minefield` (no Nemesis-equivalent on FO4 = structural fact)
+- core install-planning: `fomod-pattern-taxonomy` / `script-extender-version-matrix` / `numeric-fetish-anti-signal`
+- core pack-curation: 5 new objective rules — `pre-install-prediction-discipline` / `leveled-list-overhaul-coherence-discipline` / `testing-cost-economics` / `deprecate-not-delete-on-upgrade` / `localization-layer-discipline`
+- core papyrus: `vanilla-script-modification-red-flag` (BB84 Q3 verbatim)
+- core xedit: `override-vs-new-record-decision`
+- core mod-evaluation: 2 new (`author-signals` + `bb84-curator-perspective-reference`) + 2 reworks (`community-operational-signals` de-numericized to directional language; `systemic-design-fit` split into objective fit framework + BB84 subjective lens)
+
+Skills (5 SKILL.md): `evaluating-bgs-mods` / `curating-bgs-modpack` / `diagnosing-bgs-problems` / `testing-bgs-modpack` / `interpreting-mod-author-instructions` each get a `## Recommended Approach: Senior Curator's Lens` section with yield-to-user-intent disclaimer + cross-ref to S1 KB record.
+
+### What is now known
+
+- **Perspective discipline is a design constraint, not a record-level decoration.** Subjective curator taste (BB84's lore-friendly / immersion / RP / 原汁原味 lens) and objective curation rules (don't modify vanilla Papyrus, save-baking exists, no FO4 animation framework) require different KB shapes. Objective rules ship as `kind: rule, confidence: high` with ≥2 public sources; subjective views ship as `kind: explanation` records explicitly flagged "for reference only, must not be used as universal rubric"; mixed records split into `## Perspective: OBJECTIVE` and `## Perspective: SUBJECTIVE — BB84 curator reference (not a universal rubric)` body halves.
+- **Skills can carry subjective recommendations IF wrapped in yield-to-user-intent disclaimer.** New convention: `## Recommended Approach: Senior Curator's Lens` section in 5 sixiang skills, opening with explicit "RECOMMENDED guidance, not enforced rule; if user has explicit alternative intent (e.g. tactical FO4 / pure aesthetic), agent SHOULD adapt rather than push these defaults." This is the mechanism for distilling BB84's curator experience into the plugin without imposing it.
+- **N10 `deprecate-not-delete-on-upgrade` is ephemeral upgrade-time discipline, NOT permanent retention.** Disable old version when upgrading for (1) rollback insurance especially on save-baked mods, (2) diff capability for patch strategy authoring. Eventually deletable after migration confidence — not a museum policy.
+- **"SC" in BB84's Starfield separator/mod naming = Simplified Chinese (汉化), not Starfield Community Patch.** Initial explorer recon hallucinated the latter. This drove the addition of N11 `pack-curation.localization-layer-discipline` — localization is structural curation infrastructure in non-English locales, not optional polish (verified by WL2's 250+ `- 汉化` companion folders + Starfield `- SC` suffix pattern).
+- **Spec design errors compound across parallel fan-out.** My initial design spec gave `domain` (singular) + top-level `confidence` + plain-string `sources`; canonical v1 schema actually uses `domains` (plural) + `appliesTo.games/engineFamilies` + `canonical.confidence` (nested) + structured `sources[{kind, url, ref}]` + required `queryKeys` / `severity` / `lastReviewed` / `schemaVersion`. L1/L5/L7 fixers followed (wrong) spec; L2/L3/L4/L6 fixers correctly checked existing records and used real schema. Cleanup lane rewrote 18 records to canonical shape. Lesson: spec docs for fan-out batches must reference at least 2 actually-validated existing records as format truth, not be derived from memory.
+- **5 sample queries against new OpenCode session all hit new records at score≥0.99**: `pack-curation.deprecate-not-delete-on-upgrade.v1`, `fo4-engine.animation-mod-minefield.v1`, `starfield-curation.creations-marketplace-impact.v1`, `papyrus.vanilla-script-modification-red-flag.v1`, `mod-evaluation.bb84-curator-perspective-reference.v1`. Substrate is queryable.
+
+### What later phases should do differently / open items
+
+- **This batch is SCAFFOLDING.** User explicitly framed it as substrate before a live workflow round: "等这一轮施工完成后，我会拉着你走一轮真实的 Nexus mod 选取 + 我个人的 starfield mo2 mod 详细 review 和评审的过程". Next round will exercise these records and skills against real Nexus mod review + Starfield install audit, generating empirical signal that flows back into both KB and skills.
+- **Per-game pack version bump deferred.** This batch's per-game records landed in skyrim 2026.06.02 / fo4 2026.06.23 / fnv 2026.06.02 / starfield 2026.06.02 (versions unchanged because rebuild-locked-pack preserves existing manifest version). Release `kb-2026.06.23` updated in-place; `bgs_kb_check_updates` will not surface this batch to existing pack installs unless versions bump. Decision: defer version bump until live workflow round adds substantive content, then bundle a kb-2026.06.30-class release with version bumps across all touched packs.
+- **Open ROADMAP items unaffected by this batch:** nexus-metadata MCP (Specified only), loot-metadata MCP (Specified only), translation-memory MCP (Specified only), benchmark/smoke-test harness (Planned), save-safety automation (deferred), Codex marketplace publish (local-workaround).
+
+### Test state
+
+- Validation: all 5 packs pass `node tools/bgs-kb-mcp/dist/cli.js validate` (core 140 / skyrim 41 / fo4 44 / fnv 36 / starfield 30 records).
+- kb.sqlite rebuilt for all 5 packs via `scripts/rebuild-locked-pack.mjs` (Windows handle-lock workaround for `EBUSY: resource busy or locked, unlink ... kb.sqlite`).
+- Plugin mirror tree materialized to `plugins/bgs-modding-superpowers/` via `scripts/build-portable-plugin.ps1`.
+- Real readback queries against post-restart OpenCode session passed (5/5 sample queries hit new records at score≥0.99).
+
