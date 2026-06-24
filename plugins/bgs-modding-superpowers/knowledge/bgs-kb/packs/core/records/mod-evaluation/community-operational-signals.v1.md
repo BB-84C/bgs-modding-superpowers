@@ -1,36 +1,43 @@
 ---
 id: mod-evaluation.community-operational-signals.v1
-title: Community-standard operational mod signals (NOT BB84-sourced)
+title: Community operational signals are contextual, not numeric thresholds
+kind: rule
 domains: [install-planning, load-order]
 appliesTo:
   games: [SkyrimLE, SkyrimSE, SkyrimAE, SkyrimVR, Fallout4, Fallout4VR, Fallout3, FalloutNV, Starfield]
   engineFamilies: [gamebryo, creation-engine, creation-engine-2]
 canonical:
-  answer: Standard community operational checks complement, but do not replace, systemic-fit judgment; high endorsements are a sanity input, never proof of fit.
-  confidence: medium
+  answer: Community operational signals are directional checks against same-game, same-category context; hard numeric thresholds are 拍脑袋 and do not prove pack fit.
+  confidence: high
 queryKeys: [endorsements, last updated, version compatibility, leveled list, NPC overhaul, save baking, master order, ESL flag, requirements]
 severity: medium
 sources:
   - kind: wiki
     url: "https://stepmodifications.org/wiki/Main_Page"
     ref: community modding conventions (STEP / Nexus norms)
+  - kind: tooling-docs
+    url: "https://loot.github.io/docs/help/Introduction-To-Load-Orders.html"
+    ref: LOOT load-order and plugin-dependency guidance
+  - kind: tooling-docs
+    url: "https://wrye-bash.github.io/docs/Wrye%20Bash%20General%20Readme.html"
+    ref: Wrye Bash bashed-patch and mod-management documentation
 related: [mod-evaluation.quality-and-risk-signals.v1]
-lastReviewed: "2026-06-23"
+lastReviewed: "2026-06-24"
 schemaVersion: 1
 ---
 
-# Community-standard operational mod signals (NOT BB84-sourced)
+# Community operational signals are contextual, not numeric thresholds
 
-These are community-standard operational signals, NOT from BB84's tutorials. They complement the anti-checklist systemic-fit framework; they never replace it.
+Use community operational signals as context, not as a scoreboard. Endorsements, downloads, update dates, comments, requirements, and bug reports are useful because they show how a mod behaves in the public ecosystem. They do not prove the mod fits your pack's 风格, conflict profile, or long-play stability.
 
-Endorsement and download counts are sanity signals only. High counts can indicate that many users have tried the mod, but they do not prove the mod fits your pack's 风格 or conflict profile. Very low counts on an old mod are a caution sign, especially when the author说明, requirements, or comments provide little operational evidence.
+Watch when endorsement-to-download ratio is materially below the same game's same-category baseline. A niche utility, texture replacer, quest mod, and framework dependency have different expected community shapes. Compare like with like before treating the signal as meaningful.
 
-Check last-updated dates against the current game version and runtime branch. A stale mod can still be excellent, but game updates, next-gen changes, script-extender updates, and ecosystem shifts can make old instructions unsafe without a compatibility note.
+Watch when last-updated is old relative to the mod's framework dependencies: for example, a script-extender plugin that predates a runtime migration needs much more scrutiny than a stable mesh replacer. A stale mod can still be excellent, but old instructions become unsafe when the game, script extender, address library, or master plugin changed underneath it.
 
-Leveled-list and NPC-overhaul mods have broad conflict surfaces. They often need bashed or merged patches, explicit compatibility patches, or specific ordering so the intended edits survive. Treat them as high-review mods rather than cosmetic add-ons.
+Watch when recent comments trend negative or when bug reports accumulate without author engagement. A single unanswered report is noise; a pattern of unresolved compatibility failures, missing masters, or broken installs is operational evidence.
 
-Script-heavy mods can bake state into saves. Decide on them before starting a playthrough when possible, and avoid casual mid-save removal unless the author provides a safe uninstall path. Removing a scripted mod from an active save can corrupt or destabilize the save even when the mod manager disables the files cleanly.
+Watch when the author has gone quiet across all their mods. Single-mod abandonment can be intentional completion; ecosystem-wide silence on active bug reports is a different signal.
 
-Master ordering and ESL flags are operational hazards where applicable. Missing masters can cause a crash or failed load before the main menu on any game. ESL flagging applies only where the engine supports it (Skyrim SE/AE/VR, Fallout 4, Starfield — not Skyrim LE, Fallout 3, or New Vegas); where supported it must respect FormID limits and compacting rules, and careless ESL conversion or inconsistent master order can break references.
+Keep the old operational checks: broad leveled-list or NPC overhauls need higher review than cosmetic add-ons; script-heavy mods can bake state into saves; master ordering, ESL or medium-plugin flags, and requirements remain hard install hazards. The rework is about interpretation: hard thresholds are 拍脑袋. Contextual direction beats fake precision.
 
-Verify requirements and dependencies before installation, where applicable. Confirm the game's script extender (SKSE for Skyrim, F4SE for Fallout 4, SFSE for Starfield, FOSE for Fallout 3, NVSE for New Vegas), required master plugins, library mods, and patch stacks are present at compatible versions before treating the mod as ready for evaluation.
+BB84's Q9-Q12 intentionally did not supply numeric cutoffs. That absence is the rule: operational signals guide where to inspect, not what to install automatically.

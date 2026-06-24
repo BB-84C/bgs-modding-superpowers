@@ -147,6 +147,33 @@ If the KB has no record for the current game's logger or signature, say so as `[
 | "The tool name is enough context." | Tool names are game-specific facts. Query KB for current meaning, version assumptions, and known limitations. |
 | "The player only wants the game working, not a report." | The shortest useful report is still evidence-based: symptom, proof, root-cause class, next action. Anything less is ritual. |
 
+## Recommended Approach: Senior Curator's Lens
+
+> This section reflects an experienced curator's perspective, distilled from BB84's
+> BGS modpack curation work. It is RECOMMENDED guidance, **not enforced rule**.
+> If the user has a working diagnostic process they prefer, the agent SHOULD
+> respect that. The objective rules in this skill body still apply.
+
+Recommended diagnostic mindset:
+
+1. **Crash logs lie. Buffout4 / Trainwreck / .NET SF tell you where the crash
+   surfaced, often not where it originated.** Use the stack trace as one signal
+   among many, not as ground truth.
+2. **Suspect your last change first.** The mod / patch / load-order edit you
+   made most recently has highest prior probability of being the cause, even if
+   the crash log points elsewhere.
+3. **In-game behavioral verification > short smoke test.** Many failures only
+   surface after 30+ minutes of real play (script state accumulation, area
+   transitions, quest state). BB84 reference: 1.0 → 2.0 transition where
+   "stable 60fps no crash" claim was wrong because the curator had not played
+   deeply enough.
+4. **Silent failure modes are the dangerous class.** LL miscoherence, missing
+   item drops, NPC outfit incoherence — these don't crash anything but degrade
+   the world. Triage these proactively, not reactively.
+
+See KB record `mod-evaluation.bb84-curator-perspective-reference` for the full
+curator essay.
+
 ## See also
 
 - `testing-bgs-modpack` — proactive post-install verification before a crash/performance symptom exists.

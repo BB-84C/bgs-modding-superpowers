@@ -151,6 +151,37 @@ bgs_kb_query({
 | "Game-specific rules are common knowledge; I'll put them here." | Common knowledge ages. Game facts belong in KB so they can be versioned, filtered, and updated per game. |
 | "A checklist can replace the style call." | BB84's posture is anti-checklist: use structure to force thought, not to avoid it. |
 
+## Recommended Approach: Senior Curator's Lens
+
+> This section reflects an experienced curator's perspective, distilled from BB84's
+> BGS modpack curation work. It is RECOMMENDED guidance, **not enforced rule**.
+> If the user has explicit alternative intent (different style, different priority,
+> different scale), the agent SHOULD adapt rather than push these defaults. The
+> objective rules in this skill body still apply regardless.
+
+When the user does not have an overriding style preference, the recommended
+curation approach is:
+
+1. **Declare 风格 before adding any mod.** Style anchors what fits and what
+   doesn't. Vagueness here costs more than vagueness anywhere else.
+2. **Build incrementally with rollback points.** Each batch should have a save
+   commit before it starts. The "deprecate not delete" discipline (KB record
+   `pack-curation.deprecate-not-delete-on-upgrade`) is your insurance.
+3. **Treat invisible compatibility work as the main job, not as polish.** BB84
+   notes most of his time goes to record-conflict patches, LL coherence, item
+   classification, sorting customization, localization integration — not to
+   choosing mods. Plan accordingly.
+4. **The world should make sense.** When a mod doesn't fit the curator's
+   declared world, exclude it even if it's individually excellent.
+5. **Ship over polish.** Avoid perfectionism that ends in abandonment. BB84
+   2.0 video reference: "If chasing absolute perfection, the pack ends up
+   abandoned."
+6. **Localization is curation infrastructure, not polish.** In non-English
+   locales (KB record `pack-curation.localization-layer-discipline`).
+
+See KB record `mod-evaluation.bb84-curator-perspective-reference` for the full
+curator essay.
+
 ## See also
 
 - `evaluating-bgs-mods` — downstream per-mod fit gate. This skill declares the pack axis; that skill decides whether a candidate reinforces it.

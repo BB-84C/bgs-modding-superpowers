@@ -145,6 +145,29 @@ bgs_kb_query({
 | "A generic route through a few popular cells is good enough." | Routes must match the batch's intended impact and current game. Generic tourism is not proof. |
 | "The user wants confidence, not gaps." | False confidence is worse than a marked gap. Honest `[GAP]` is the correct deliverable when the corpus is silent. |
 
+## Recommended Approach: Senior Curator's Lens
+
+> This section reflects an experienced curator's perspective, distilled from BB84's
+> BGS modpack curation work. It is RECOMMENDED guidance, **not enforced rule**.
+> If the user has a working testing process they prefer, the agent SHOULD respect
+> that.
+
+Recommended testing rhythm:
+
+1. **Stage-test after each batch, not after each mod.** Single-mod testing has
+   infinite time cost (KB record `pack-curation.testing-cost-economics`). Batch
+   together additive low-risk mods, then enter a staged-test phase.
+2. **Test the silent failure surface, not just the crash surface.** Walk through
+   areas known to be touched by recent mods; check NPC outfit logic; check
+   inventory drops; sample dialog flow; observe save file size growth pattern.
+3. **Commit save before risky batches.** Saves are the rollback substrate.
+4. **Long-session discovery is part of the testing rhythm.** Many defects only
+   emerge after 10+ hours of real play. Don't claim "stable" from 30 minutes of
+   smoke test.
+
+See KB record `mod-evaluation.bb84-curator-perspective-reference` for the full
+curator essay.
+
 ## See also
 
 - `diagnosing-bgs-problems` — use after any crash, severe FPS drop, missing content, broken mechanic, log error, or failed verification signal.

@@ -153,6 +153,26 @@ bgs_kb_query({
 | "This is just a translation/asset/optional file." | Optional components still change ownership, conflict surfaces, and uninstall behavior. |
 | "A generic install checklist is faster." | BB84's point is not checklist compliance; it is active reading and consequence awareness. |
 
+## Recommended Approach: Senior Curator's Lens
+
+> This section reflects an experienced curator's perspective, distilled from BB84's
+> BGS modpack curation work. It is RECOMMENDED guidance, **not enforced rule**.
+> If the user has explicit alternative intent (different install policy, different
+> risk tolerance, or pack-specific convention), the agent SHOULD adapt rather than
+> push these defaults. The objective rules in this skill body still apply.
+
+Recommended author-instruction lens:
+
+1. **Honest detailed instructions = green flag.** Author who lists prerequisites,
+   conflicts, version compatibility, FOMOD option meanings, and known issues
+   earns trust. Curt or evasive instructions earn skepticism.
+2. **Patreon-locked main version or essential patches = red flag.** Walls
+   critical content behind paywall while expecting community patches; structurally
+   breaks the community patch ecosystem.
+
+See KB record `mod-evaluation.author-signals` (KB) and
+`mod-evaluation.bb84-curator-perspective-reference` for full curator essay.
+
 ## See also
 
 - `evaluating-bgs-mods` — upstream judgment: decides whether the mod belongs in the pack before this skill interprets installation.

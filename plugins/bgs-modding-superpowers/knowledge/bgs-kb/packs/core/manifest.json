@@ -1,5 +1,5 @@
 {
-  "builtAt": "2026-06-23T21:44:47.934Z",
+  "builtAt": "2026-06-24T03:18:25.174Z",
   "displayName": "BGS Modding Core Knowledge",
   "domains": [
     "archive-precedence",
@@ -37,11 +37,11 @@
   "minPluginVersion": "0.2.0",
   "owner": "bgs-modding-superpowers maintainers",
   "packId": "bgs-kb-core",
-  "recordCount": 128,
+  "recordCount": 140,
   "schemaVersion": 1,
   "sha256": {
-    "kb.sqlite": "a1815ce3bc0eba1387a3cfab298ec9f6f2bc9aa03e7330435e84bea79526153b"
+    "kb.sqlite": "5e6097e6284312578c7ae4f955f0b28422b7254ca7659aa3f36b0e1c450f6459"
   },
-  "sourceCommit": "bbb4e4a639d9e7e55a5bc3895d56165c8dabbb98",
+  "sourceCommit": "4a28a4f81e0e9d5fb1994dd560305fd30734fcd3",
   "version": "2026.06.23"
 }
