@@ -1,5 +1,5 @@
 {
-  "builtAt": "2026-06-02T23:17:40.201Z",
+  "builtAt": "2026-06-24T03:18:26.345Z",
   "displayName": "BGS Modding Knowledge — Fallout 3 + Fallout New Vegas",
   "domains": [
     "debugging",
@@ -8,6 +8,7 @@
     "install-planning",
     "load-order",
     "plugin-format",
+    "save-file",
     "tooling.loot",
     "version-differences",
     "xedit"
@@ -23,11 +24,11 @@
   "minPluginVersion": "0.2.0",
   "owner": "bgs-modding-superpowers maintainers",
   "packId": "bgs-kb-fallout3-fnv",
-  "recordCount": 28,
+  "recordCount": 36,
   "schemaVersion": 1,
   "sha256": {
-    "kb.sqlite": "e75d54d88c38a45504d69f8337ef5e8cfd3c2786705e5569e0f757e8f7666b39"
+    "kb.sqlite": "21774b9306386315421601a1f81c2256fe011648e384754050803e4f9462b6d2"
   },
-  "sourceCommit": "50246b4dedb3a172df2f54a28688d766e71bee68",
+  "sourceCommit": "4a28a4f81e0e9d5fb1994dd560305fd30734fcd3",
   "version": "2026.06.02"
 }

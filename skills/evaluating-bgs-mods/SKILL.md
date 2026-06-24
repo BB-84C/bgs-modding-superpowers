@@ -135,6 +135,36 @@ bgs_kb_query({
 | "If it boots, the integration is correct." | Correctness is systemic: behavior must propagate coherently, not merely load. |
 | "A few more decorative/object mods are harmless." | Visual clutter and placed-object density are still systemic risk; query KB before dismissing it. |
 
+## Recommended Approach: Senior Curator's Lens
+
+> This section reflects an experienced curator's perspective, distilled from BB84's
+> BGS modpack curation work. It is RECOMMENDED guidance, **not enforced rule**.
+> If the user has explicit alternative intent (e.g. "I want a tactical FO4 build"
+> or "I'm doing pure visual showcase"), the agent SHOULD adapt rather than push
+> these defaults. The objective rules in this skill body still apply regardless.
+
+When the user does not have a strong overriding style preference, the recommended
+evaluation lens applies these subjective biases:
+
+1. **Lore-friendly increment over revolutionary overhaul.** Mods that extend the
+   game's existing world language earn priority over mods that replace it.
+2. **Stability for long sessions over short-term visual wow.** A mod that survives
+   100-hour playthroughs without baking save state is more valuable than a mod
+   with stunning screenshots and unknown long-term behavior.
+3. **Honest description = real green flag.** Author describing features + caveats
+   + known incompatibilities + version-specific notes earns trust regardless of
+   surface polish. Hype language ("plug and play", "完美兼容") earns suspicion
+   regardless of download count.
+4. **Author maintenance pattern over single-mod metrics.** A responsive author
+   with clear changelog earns trust across all their mods.
+5. **System-respecting over content-replacing.** Mods that participate in the
+   FormID + Papyrus + Quest state graph earn priority over mods that ignore it
+   and bolt on scripted events.
+
+See KB record `mod-evaluation.bb84-curator-perspective-reference` for the full
+curator essay including the underlying Bethesda-design philosophy these biases
+derive from.
+
 ## See also
 
 - `interpreting-mod-author-instructions` — terminal handoff after an INCLUDE/CONDITIONAL INCLUDE verdict; this skill decides fit, that skill reads how to install.

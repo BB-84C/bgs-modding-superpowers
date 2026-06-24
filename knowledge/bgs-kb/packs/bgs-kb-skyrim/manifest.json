@@ -1,5 +1,5 @@
 {
-  "builtAt": "2026-06-02T22:56:24.038Z",
+  "builtAt": "2026-06-24T03:18:25.704Z",
   "displayName": "BGS Modding Knowledge — Skyrim (LE/SE/AE/VR)",
   "domains": [
     "archive-precedence",
@@ -12,10 +12,12 @@
     "papyrus",
     "plugin-format",
     "save-file",
-    "version-differences"
+    "version-differences",
+    "xedit"
   ],
   "engineFamilies": [
-    "creation-engine"
+    "creation-engine",
+    "gamebryo"
   ],
   "games": [
     "SkyrimAE",
@@ -27,11 +29,11 @@
   "minPluginVersion": "0.2.0",
   "owner": "bgs-modding-superpowers maintainers",
   "packId": "bgs-kb-skyrim",
-  "recordCount": 33,
+  "recordCount": 41,
   "schemaVersion": 1,
   "sha256": {
-    "kb.sqlite": "0ae0e7199c275c5be0c41e836b5b9e1f251bc7208d6811b5f3aef82a03b5f23d"
+    "kb.sqlite": "ba3122974afc6db14ad667a3c15bc57ee9a196cf98c0774dd98fc35ebf3819f7"
   },
-  "sourceCommit": "0392cb5733628fffbfab65afaa386028ae6789e4",
+  "sourceCommit": "4a28a4f81e0e9d5fb1994dd560305fd30734fcd3",
   "version": "2026.06.02"
 }
