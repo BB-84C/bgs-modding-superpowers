@@ -921,3 +921,71 @@ Mod left at installed v1.4.0 (not updated to 1.4.1) pending user re-pick. Archiv
 - D:\Starfield MO2\.backups\plugins-decision-batch-20260625-174028.txt
 - D:\Starfield MO2\.backups\plugins-astrogate-fix-<ts>.txt
 - Per-mod backups: \mods\Xeno Master\.backup-20260625-174028\\\ (old 1.1.5 content), \mods\Left Align XP Bar\.backup-<ts>\\\ (old f1.05 content)
+
+## 2026-06-25 -- Round-4 followup: 严格归类 + NMT 诊断 + 元数据同步
+
+User feedback closeout:
+- "Strict" separator semantic chosen: new installs go to FUNCTIONAL category groups (disabled state), not 观望
+- 观望 private convention recorded (BB84's own words): "我不是很想装但是又怕真给忘掉了的mod" — mods BB84 doesn't really want to install but is afraid of forgetting. NOT a generic 'pending review' category. **This is BB84's personal convention; NOT for KB.**
+- More Visualized Docking + UCMO Complete Edition: user manually installed, replacing old. Required metadata sync.
+- NMT Plus 1.3 三方对不上 (folder name / meta.ini version / Nexus latest) — investigated.
+
+### Strict reorg
+
+- 7 SECQ v4.1 mods moved 观望 -> 武器装备 - 调整 group (disabled). Reasoning: SECQ is a weapon/armor crafting quality framework; functionally peers with UCMO + No More Tiers + Weapons of Fate already in 武器装备 - 调整.
+- 1 Astrogate v5.8 moved 观望 -> 沉浸感增强 - 功能体验 group (disabled). Reasoning: Astrogate changes FTL/grav-jump cinematic experience; functionally peers with Seamless Grav Jump 2.2 already in this group.
+- 观望 group now CLEAN: only the 4 truly-watching mods (Airlocks - Modders Resource, NPCNOSPREAD, Skill Challenges Removed, HBI - Breakable Window) — per BB84 convention these are mods kept as visible reminders rather than items pending evaluation.
+- Backup: D:\Starfield MO2\.backups\modlist-decision-final-20260625-183246.txt
+
+### NMT Plus 1.3 三方诊断
+
+| dimension | value |
+|---|---|
+| mod folder name | "No More Tiers Plus 1.3" (embedded 1.3) |
+| meta.ini version | **1.2.0.0** ← incorrect, didn't get bumped when 1.3 installed |
+| meta.ini newestVersion | 1.4.0.0 |
+| installationFile | "...-9848-1-3-1730956427.7z" (correctly 1.3) |
+| installed ESM | NoMoreTiersCK_Plus.esm (28.5 KB) |
+| Nexus #9848 latest MAIN | v1.4 file 54961 (2025-07-21) |
+
+Root cause: BB84 manually installed v1.3 via MO2 GUI/FOMOD path, which left the ersion= field at the prior 1.2.0.0 value (FOMOD installer paths do not always rewrite version field). Folder rename to "Plus 1.3" was the only signal the install bumped.
+
+Action this round (safe fix):
+- meta.ini version 1.2.0.0 -> 1.3.0.0 (corrects internal inconsistency without yet updating to 1.4)
+- Comment marker [FIXED 2026-06-25] explains the situation
+
+Still pending: actual 1.4 update (file 54961, 2025-07-21). Will surface to BB84 for decision.
+
+Same author (jkruse05) also has:
+- "No More Tiers for Shattered Space" #9848 OPTIONAL file (v1.0.0.0 currently installed) — Nexus may have a 1.4-era SS update; needs separate lookup
+- "No More Tiers Plus 1 - SC" (modid=0, BB84 local SC translation) — follows main mod version
+
+### Metadata sync for user-manual-installed mods
+
+**UCMO Complete Edition #12085 (you手装 v1.3 via MO2):**
+- meta.ini version 1.3.0.0 ✓ (already current)
+- ESM filename changed v1.2 -> v1.3: UCMO_CE_Tweaks_Visors.esm -> UCMO_CE_Tweaks.esm (no suffix)
+- plugins.txt had stale "*UCMO_CE_Tweaks_Visors.esm" — would have prevented v1.3 ESM from loading
+- Fix: replaced stale plugin name with "*UCMO_CE_Tweaks.esm" (preserved enabled flag + line position)
+- Comment marker [USER-INSTALLED 2026-06-25] added
+- Textures BA2 8.7GB present (texture replacers were INCLUDED in FOMOD selection)
+
+**More Visualized Docking #4679 (you手装 v1.3.2 via MO2):**
+- meta.ini version 1.3.2.0 ✓
+- ESM MoreVisualizedDocking.esm in place (plugins.txt entry intact)
+- Folder clean
+- Comment marker [USER-INSTALLED 2026-06-25] added — but FOMOD variant choice unknown (Default/Semi-Immersive/Simple/Vanilla Enhanced/Alternative/Instant Undocking). Will ask BB84 to fill in.
+
+### Plug-ins.txt + modlist file backups
+- D:\Starfield MO2\.backups\modlist-decision-final-20260625-183246.txt
+- D:\Starfield MO2\.backups\plugins-decision-final-20260625-183246.txt
+
+### 观望 separator semantics (BB84 private convention)
+
+Recorded here NOT in KB per user directive. BB84's own definition:
+> "观望 是指我不是很想装但是又怕真给忘掉了的mod"
+
+i.e. mods kept disabled as visible reminders that they exist; BB84 isn't actively wanting to install them but doesn't want to lose track. **NOT a 'pending review' or 'Lane 3 evaluation' category.** Future agent operations:
+- DO NOT auto-route Lane-3-pending or just-installed-but-disabled mods into 观望.
+- DO route mods that meet the actual semantic: "考虑过但暂时不装" — kept around as reminder.
+- For functional mods just installed disabled: route to their FUNCTIONAL category group (e.g. 武器装备 - 调整, 沉浸感增强 - 功能体验) per the strict convention chosen this round.
