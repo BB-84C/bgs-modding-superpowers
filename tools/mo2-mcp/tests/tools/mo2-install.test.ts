@@ -331,10 +331,14 @@ describe("mo2_install", () => {
     expect(modlist).toContain("+LiveMod");
     // BUG-9 fix (2026-06-17): buildPlan now also runs assertActiveProfile,
     // which adds an extra profile.active call before the apply guard.
+    // BUG-14 BUG-E fix (issue #14): apply now calls organizer.refresh
+    // after writing plugins.txt so MO2's in-memory plugin list re-reads
+    // the freshly-registered plugin.
     expect(brokerCalls.map((call) => call.method)).toEqual([
       "profile.active", // buildPlan guard
       "profile.active", // applyMutation guard
       "installation.create_mod_from_directory",
+      "organizer.refresh", // post-plugins.txt refresh (BUG-14 BUG-E)
     ]);
   });
 
@@ -371,6 +375,376 @@ describe("mo2_install", () => {
       ctx,
     )).rejects.toThrow(/cross_profile_live_mutation_blocked/);
     expect(existsSync(join(ctx.config.mo2Root, "mods", "BlockedLive"))).toBe(false);
+  });
+
+  // BUG-14 BUG-D + BUG-E regression (issue #14):
+  //   - BUG-D: archive wraps content in a top-level Data/ directory; install
+  //     must flatten so the plugin lands at mods/<name>/<plugin>.esm, not
+  //     mods/<name>/Data/<plugin>.esm (where the MO2 VFS double-prefixes it).
+  //   - BUG-E: install must register the discovered plugin in plugins.txt
+  //     so the agent doesn't have to do a separate N×toggle_plugin call to
+  //     activate it.
+  describe("BUG-14 BUG-D + BUG-E: install flattens Data/ wrapper and registers plugins", () => {
+    it("flattens Data/ wrapper produced by typical BGS archives", async () => {
+      const { root, ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            // Real-world BB84 case: Astrogate v5.8 ships its ESMs inside
+            // a top-level Data/ directory. Simulate that exact layout.
+            const dest = (params as { dest: string }).dest;
+            await mkdir(join(dest, "Data"), { recursive: true });
+            await writeFile(join(dest, "Data", "Astrogate.esm"), "fake-esm", "utf8");
+            await writeFile(
+              join(dest, "Data", "AstrogateGravJumpMod.esm"),
+              "fake-esm-2",
+              "utf8",
+            );
+            await writeFile(
+              join(dest, "Data", "Astrogate - Main.ba2"),
+              "fake-ba2",
+              "utf8",
+            );
+            return { files: ["Data/Astrogate.esm", "Data/AstrogateGravJumpMod.esm", "Data/Astrogate - Main.ba2"], file_count: 3, dest, format: "zip" };
+          }
+          if (method === "world.invalidate") return { invalidated: true };
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+
+      const tool = getTool("mo2_install")!;
+      const plan = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/astrogate.zip", mod_name: "Astrogate" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+      const apply = (await tool.handler(
+        { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+      )) as { ok: boolean; result: { plugins_registered: string[] } };
+
+      expect(apply.ok).toBe(true);
+      // Pre-fix: files lived at mods/Astrogate/Data/<plugin>.esm.
+      // Post-fix: files at mods/Astrogate/<plugin>.esm (Data/ flattened).
+      expect(existsSync(join(root, "mods", "Astrogate", "Astrogate.esm"))).toBe(true);
+      expect(existsSync(join(root, "mods", "Astrogate", "AstrogateGravJumpMod.esm"))).toBe(true);
+      expect(existsSync(join(root, "mods", "Astrogate", "Astrogate - Main.ba2"))).toBe(true);
+      // Data/ directory should not survive the flatten.
+      expect(existsSync(join(root, "mods", "Astrogate", "Data"))).toBe(false);
+      // plugins.txt registration (BUG-E) — both ESMs added.
+      expect(apply.result.plugins_registered).toEqual([
+        "Astrogate.esm",
+        "AstrogateGravJumpMod.esm",
+      ]);
+    });
+
+    it("does not flatten when plugin already at staging root (most simple archives)", async () => {
+      const { root, ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(dest, { recursive: true });
+            await writeFile(join(dest, "FlatMod.esp"), "fake", "utf8");
+            return { files: ["FlatMod.esp"], file_count: 1, dest, format: "zip" };
+          }
+          if (method === "world.invalidate") return { invalidated: true };
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+
+      const tool = getTool("mo2_install")!;
+      const plan = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/flat.zip", mod_name: "FlatMod" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+      const apply = (await tool.handler(
+        { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+      )) as { ok: boolean };
+      expect(apply.ok).toBe(true);
+      expect(existsSync(join(root, "mods", "FlatMod", "FlatMod.esp"))).toBe(true);
+    });
+
+    it("flattens single-wrapper subdir without a Data/ name (e.g. <ModName>/plugin.esp)", async () => {
+      const { root, ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(join(dest, "WrappedMod_v1.2"), { recursive: true });
+            await writeFile(
+              join(dest, "WrappedMod_v1.2", "WrappedMod.esp"),
+              "fake",
+              "utf8",
+            );
+            return { files: ["WrappedMod_v1.2/WrappedMod.esp"], file_count: 1, dest, format: "zip" };
+          }
+          if (method === "world.invalidate") return { invalidated: true };
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+
+      const tool = getTool("mo2_install")!;
+      const plan = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/wrapped.zip", mod_name: "WrappedMod" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+      const apply = (await tool.handler(
+        { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+      )) as { ok: boolean };
+      expect(apply.ok).toBe(true);
+      expect(existsSync(join(root, "mods", "WrappedMod", "WrappedMod.esp"))).toBe(true);
+      expect(existsSync(join(root, "mods", "WrappedMod", "WrappedMod_v1.2"))).toBe(false);
+    });
+
+    it("flattens asset-only mod (textures/ at Data/ wrapper, no plugin)", async () => {
+      const { root, ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(join(dest, "Data", "textures"), { recursive: true });
+            await writeFile(
+              join(dest, "Data", "textures", "diffuse.dds"),
+              Buffer.from("DDS "),
+              "utf8",
+            );
+            return { files: ["Data/textures/diffuse.dds"], file_count: 1, dest, format: "zip" };
+          }
+          if (method === "world.invalidate") return { invalidated: true };
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+
+      const tool = getTool("mo2_install")!;
+      const plan = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/textures.zip", mod_name: "TexMod" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+      const apply = (await tool.handler(
+        { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+      )) as { ok: boolean; result: { plugins_registered: string[] } };
+      expect(apply.ok).toBe(true);
+      // textures/ at root, no Data/ wrapper survives.
+      expect(existsSync(join(root, "mods", "TexMod", "textures", "diffuse.dds"))).toBe(true);
+      expect(existsSync(join(root, "mods", "TexMod", "Data"))).toBe(false);
+      // No plugins to register for an asset-only mod.
+      expect(apply.result.plugins_registered).toEqual([]);
+    });
+
+    it("BUG-E: plugins.txt is written with the asterisk-enabled prefix and persisted", async () => {
+      const { root, ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(dest, { recursive: true });
+            await writeFile(join(dest, "RegisterMe.esp"), "fake", "utf8");
+            return { files: ["RegisterMe.esp"], file_count: 1, dest, format: "zip" };
+          }
+          if (method === "world.invalidate") return { invalidated: true };
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+      // Seed plugins.txt with an existing comment + plugin so we can prove
+      // the new line was appended (not overwriting existing content).
+      await writeFile(
+        join(ctx.config.mo2Root, "profiles", "Default", "plugins.txt"),
+        "# existing comment\n*ExistingPlugin.esp\n",
+        "utf8",
+      );
+
+      const tool = getTool("mo2_install")!;
+      const plan = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/reg.zip", mod_name: "RegisterMeMod" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+      const apply = (await tool.handler(
+        { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+      )) as { ok: boolean; result: { plugins_registered: string[] } };
+
+      expect(apply.ok).toBe(true);
+      expect(apply.result.plugins_registered).toEqual(["RegisterMe.esp"]);
+      const pluginsTxt = await readFile(
+        join(root, "profiles", "Default", "plugins.txt"),
+        "utf8",
+      );
+      // Pre-existing content preserved.
+      expect(pluginsTxt).toContain("# existing comment");
+      expect(pluginsTxt).toContain("*ExistingPlugin.esp");
+      // New plugin appended with the FO4/SSE asterisk-enabled prefix.
+      expect(pluginsTxt).toContain("*RegisterMe.esp");
+    });
+
+    it("BUG-E: live broker path calls organizer.refresh after writing plugins.txt", async () => {
+      const { root, ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(dest, { recursive: true });
+            await writeFile(join(dest, "LivePlugin.esp"), "fake", "utf8");
+            return { files: ["LivePlugin.esp"], file_count: 1, dest, format: "zip" };
+          }
+          if (method === "world.invalidate") return { invalidated: true };
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+      const brokerCalls: string[] = [];
+      ctx.pipeClient = {
+        call: async (method: string) => {
+          brokerCalls.push(method);
+          if (method === "profile.active")
+            return { ok: true, result: { name: "Default" }, error: null };
+          if (method === "installation.create_mod_from_directory") {
+            const absolutePath = join(root, "mods", "LivePluginMod");
+            await mkdir(absolutePath, { recursive: true });
+            return { ok: true, result: { name: "LivePluginMod", absolute_path: absolutePath }, error: null };
+          }
+          if (method === "organizer.refresh")
+            return { ok: true, result: { refreshed: true }, error: null };
+          throw new Error(`unmocked broker: ${method}`);
+        },
+        close: () => {},
+        discoverAndConnect: async () => {},
+        isConnected: () => true,
+      } as unknown as ToolContext["pipeClient"];
+
+      const tool = getTool("mo2_install")!;
+      const plan = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/live.zip", mod_name: "LivePluginMod" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+      const apply = (await tool.handler(
+        { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+      )) as { ok: boolean; result: { plugins_registered: string[] } };
+
+      expect(apply.ok).toBe(true);
+      expect(apply.result.plugins_registered).toEqual(["LivePlugin.esp"]);
+      // organizer.refresh fired after plugins.txt was rewritten so MO2's
+      // in-memory plugin list re-reads the file.
+      expect(brokerCalls).toContain("organizer.refresh");
+    });
+  });
+
+  // BUG-14 BUG-F regression (issue #14): plan-only operations must be
+  // reentrant for distinct mod_name targets even though they share the
+  // same profile's modlist.txt / plugins.txt lease surface. Before the
+  // fix, two parallel plans for different mods triggered:
+  //   {ok:false, error:{code:"lease_held", message:"Target is already
+  //    locked by mo2_install in MCP process N"}}
+  // for the second+ plan. Now plan is reentrant; apply serializes.
+  describe("BUG-14 BUG-F: parallel plans for distinct mod_names are reentrant", () => {
+    it("two parallel plans for different mod_names both succeed", async () => {
+      const { ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(dest, { recursive: true });
+            await writeFile(join(dest, "x.esp"), "fake", "utf8");
+            return { files: ["x.esp"], file_count: 1, dest, format: "zip" };
+          }
+          if (method === "world.invalidate") return { invalidated: true };
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+
+      const tool = getTool("mo2_install")!;
+      const [plan1, plan2, plan3] = (await Promise.all([
+        tool.handler(
+          { mode: "plan", archive_path: "/tmp/a.zip", mod_name: "ParallelA" },
+          ctx,
+        ),
+        tool.handler(
+          { mode: "plan", archive_path: "/tmp/b.zip", mod_name: "ParallelB" },
+          ctx,
+        ),
+        tool.handler(
+          { mode: "plan", archive_path: "/tmp/c.zip", mod_name: "ParallelC" },
+          ctx,
+        ),
+      ])) as Array<{ ok: boolean; result?: unknown; error?: { code: string } }>;
+
+      // Pre-fix: plan2 and plan3 would have returned ok:false / lease_held.
+      expect(plan1.ok, `plan1 failed: ${JSON.stringify(plan1.error)}`).toBe(true);
+      expect(plan2.ok, `plan2 failed: ${JSON.stringify(plan2.error)}`).toBe(true);
+      expect(plan3.ok, `plan3 failed: ${JSON.stringify(plan3.error)}`).toBe(true);
+    });
+
+    it("apply still serializes via apply-time lock acquisition", async () => {
+      const { ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(dest, { recursive: true });
+            await writeFile(join(dest, "ser.esp"), "fake", "utf8");
+            return { files: ["ser.esp"], file_count: 1, dest, format: "zip" };
+          }
+          if (method === "world.invalidate") return { invalidated: true };
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+
+      const tool = getTool("mo2_install")!;
+      const plan1 = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/s1.zip", mod_name: "SerialA" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+      const plan2 = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/s2.zip", mod_name: "SerialB" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+      expect(plan1.ok).toBe(true);
+      expect(plan2.ok).toBe(true);
+
+      // First apply succeeds + mutates modlist.txt + plugins.txt.
+      const apply1 = (await tool.handler(
+        { mode: "apply", plan_id: plan1.result.planId, lease_token: plan1.result.lease_token },
+        ctx,
+      )) as { ok: boolean };
+      expect(apply1.ok).toBe(true);
+
+      // Second apply: plugins.txt + modlist.txt have drifted since plan2
+      // was generated. The apply-time lock acquires successfully (no other
+      // lock holder), but verifyLease detects the drift and returns
+      // lease_violation. Caller re-plans.
+      const apply2 = (await tool.handler(
+        { mode: "apply", plan_id: plan2.result.planId, lease_token: plan2.result.lease_token },
+        ctx,
+      )) as { ok: boolean; error?: { code: string } };
+      expect(apply2.ok).toBe(false);
+      expect(apply2.error?.code).toBe("lease_violation");
+    });
   });
 
   it("apply offline path preserves the destPath clobber guard", async () => {

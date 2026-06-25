@@ -112,6 +112,19 @@ export class PipeClient {
     if (!this.pipeName) {
       throw new Error("pipe not discovered (call discoverAndConnect first)");
     }
+    // BUG-14 BUG-A (issue #14): lazy stale-pipe detection. The cached
+    // pipeName embeds the MO2 PID at the time of discoverAndConnect.
+    // If MO2 has been restarted since (new PID -> new broker pipe), this
+    // cached pipeName is dead and every T3 dispatch fails with
+    // `ENOENT \\.\pipe\mo2-control-plane-<oldPID>` even though MO2 is
+    // alive at a new PID. Re-read endpoint.json (fast: <1ms local file
+    // read) before each call; if the published endpoint differs from
+    // the cached pipeName, transparently auto-rebind. Without this,
+    // mo2_session reports `pipeConnected: true` (cached), but every
+    // mutating call silently routes to the dead pipe.
+    if (this.mo2Root) {
+      await this._maybeRefreshStaleEndpoint();
+    }
     const startedAt = Date.now();
     try {
       return await this._rawCall(method, payload, timeoutMs);
@@ -119,6 +132,48 @@ export class PipeClient {
       // No mo2Root means we can't drive the enrichment probes; rethrow raw.
       if (!this.mo2Root) throw err;
       throw await enrichBrokerError(err, method, this.mo2Root, startedAt);
+    }
+  }
+
+  /**
+   * Re-read endpoint.json and update the cached pipeName if it has changed.
+   *
+   * Used by `call()` to recover transparently when MO2 has been restarted
+   * since the original `discoverAndConnect`. We deliberately do NOT re-run
+   * the full discoverAndConnect cycle here:
+   *   - the broker publishes the new endpoint.json on every startup, so a
+   *     simple file read is enough to learn the new pipename;
+   *   - the full ping cycle would block every T3 dispatch in the steady-state
+   *     "pipe is still healthy" path, which is the overwhelming majority of
+   *     calls.
+   *
+   * If `endpoint.json` cannot be read (MO2 closed, plugin removed, IO
+   * race), this method silently returns; the subsequent `_rawCall` will
+   * fail normally and L1/L2 enrichment kicks in. This keeps the stale-pipe
+   * recovery best-effort and never adds a new failure mode.
+   */
+  async _maybeRefreshStaleEndpoint(): Promise<void> {
+    if (!this.mo2Root || !this.pipeName) return;
+    const endpointPath = join(
+      this.mo2Root,
+      "plugins",
+      "Mo2AgentControl",
+      "bootstrap",
+      "runtime",
+      "endpoint.json",
+    );
+    let endpoint: EndpointFile;
+    try {
+      endpoint = await readEndpoint(endpointPath, this.mo2Root);
+    } catch {
+      return;
+    }
+    const currentPipeName = pipeNameOnly(endpoint.endpoint);
+    if (currentPipeName && currentPipeName !== this.pipeName) {
+      process.stderr.write(
+        `[mo2-mcp] pipe endpoint changed (${this.pipeName} -> ${currentPipeName}); auto-rebinding\n`,
+      );
+      this.pipeName = currentPipeName;
     }
   }
 

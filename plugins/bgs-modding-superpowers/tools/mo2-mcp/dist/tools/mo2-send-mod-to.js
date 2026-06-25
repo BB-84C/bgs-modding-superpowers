@@ -45,9 +45,28 @@ async function _computeTargetPriority(args, ctx, profile) {
     const p = await readProfile(join(bound.config.mo2Root, "profiles", profile));
     const nonSep = p.mods.filter((m) => !m.isSeparator);
     const mode = args.target_mode;
+    // BUG-14 BUG-B fix (issue #14): the broker's `mods.set_priority`
+    // validates `priority <= len(non_separator_mods)` and then calls
+    // mobase.IModList.setPriority in non-separator priority space.
+    // `profile-reader.ts` assigns priorities from the FULL modlist.txt
+    // line count (which includes separators). So a value computed in
+    // full-priority space (e.g. `sep.priority + 1`) overshoots the
+    // broker validator whenever separators occupy upper slots — the
+    // real-world BB84 case: separator at full priority 391 with 30
+    // separators above produced plan→392, broker rejected with
+    // "priority 392 out of [0..375]".
+    //
+    // Convert via `nonSepRank(fullPrio)` = count of non-separator mods
+    // strictly below `fullPrio` in full-priority space. That count is
+    // exactly the non-separator slot just above the given full-prio
+    // position. Clamp to [0, nonSep.length - 1] to stay within broker
+    // bounds.
+    const nonSepRank = (fullPrio) => nonSep.filter((m) => m.priority < fullPrio).length;
+    const maxNonSepPri = Math.max(0, nonSep.length - 1);
+    const clamp = (v) => Math.max(0, Math.min(v, maxNonSepPri));
     switch (mode) {
         case "top":
-            return Math.max(nonSep.length - 1, 0);
+            return maxNonSepPri;
         case "bottom":
             return 0;
         case "priority":
@@ -56,7 +75,7 @@ async function _computeTargetPriority(args, ctx, profile) {
             const sep = p.mods.find((m) => m.isSeparator && m.name === args.target_separator);
             if (!sep)
                 throw new Error(`separator_not_found: ${args.target_separator}`);
-            return sep.priority + 1;
+            return clamp(nonSepRank(sep.priority));
         }
         case "above_first_conflict":
         case "below_last_conflict": {
@@ -74,11 +93,16 @@ async function _computeTargetPriority(args, ctx, profile) {
             if (conflictMods.length === 0) {
                 throw new Error("no_conflicts_found");
             }
-            const conflictPriorities = conflictMods
-                .map((n) => p.mods.find((m) => m.name === n)?.priority ?? 0);
+            const conflictRanks = conflictMods
+                .map((n) => p.mods.find((m) => m.name === n))
+                .filter((m) => m !== undefined && !m.isSeparator)
+                .map((m) => nonSepRank(m.priority));
+            if (conflictRanks.length === 0) {
+                throw new Error("no_conflicts_found");
+            }
             if (mode === "above_first_conflict")
-                return Math.max(...conflictPriorities) + 1;
-            return Math.max(Math.min(...conflictPriorities) - 1, 0);
+                return clamp(Math.max(...conflictRanks) + 1);
+            return clamp(Math.min(...conflictRanks) - 1);
         }
         default:
             throw new Error(`unknown_mode: ${mode}`);

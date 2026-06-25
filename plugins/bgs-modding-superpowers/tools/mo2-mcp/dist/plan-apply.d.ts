@@ -33,9 +33,19 @@ export declare class PlanCache {
  * Handler that an individual T2/T3 tool implements.
  * - buildPlan: compute diff + affected files + lease targets
  * - applyMutation: execute the mutation given the validated plan
+ * - acquirePlanLock?: opt out of plan-time filesystem lease locking
+ *   (default true). When false, runPlanMode records the lease fingerprint
+ *   without acquiring a filesystem lock; runApplyMode acquires the lock
+ *   briefly at apply time, verifies the fingerprint, mutates, releases.
+ *   Use for tools whose plan phase is pure read and whose lease targets
+ *   are shared write surfaces (multiple plans for distinct mods that all
+ *   land in the same profile's modlist.txt / plugins.txt). BUG-14 BUG-F
+ *   (issue #14): mo2_install opts in so parallel plans for distinct
+ *   mod_names don't block each other.
  */
 export interface PlanApplyHandler {
     toolName: string;
+    acquirePlanLock?: boolean;
     buildPlan(args: Record<string, unknown>, ctx: ToolContext): Promise<{
         diff: string;
         affectedFiles: string[];
