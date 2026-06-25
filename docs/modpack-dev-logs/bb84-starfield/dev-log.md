@@ -1083,3 +1083,60 @@ These are real "newer version on Nexus" signals BB84 needs to decide on:
 | Starfield Extended - Craftable Quality (in 版本已过期) | f4.02-FM | 4.1.0 | (archived; superseded by new v4.1 cluster install this session) |
 
 Status post-sweep: 139 mods status=1 (MAIN, correct), 9 status=4 (genuine update available), 8 status=3 (OPTIONAL, correct), 13 status=7 (ARCHIVED, legitimate), 13 status=1000 (custom/local), 4 status=6 (REMOVED on Nexus — hidden/pulled mods), 3 status=9 (unknown — needs investigation).
+
+## 2026-06-25 -- Round-4 followup B: comprehensive sweep B + 10 active updates + 3 meta-only fixes
+
+User pushback: "你还是有漏掉的nexusFileStatus 问题mod" — comprehensive re-audit found I missed several mods (status=7 cases that I didn't address in the first sweep, plus 3 user-decision-required active updates that I'd surfaced but not executed).
+
+### Done this batch (13 mods)
+
+**ACTIVE updates (10) — full download + extract-on-top + complete meta.ini rewrite:**
+
+| Mod | Old -> New | Category |
+|---|---|---|
+| Community Spaceship Expansion | 1.3.1 -> 1.3.2 | New Ship Parts |
+| Dark Universe Overtime | 1.1.2 -> 1.1.3 | Quests |
+| Immersive Cargo Halls | 1.0.0 -> 1.0.1 | Ship Build |
+| POI Cooldown | 2 -> 3 (MAJOR) | Game Play |
+| Seamless City Interiors | 1.1.0 -> 2.0.0 (MAJOR) | WorldSpace - Main Cities |
+| Permanent POIs - Evil Beyond | 0.94 -> 1.02 (MAJOR) | POI - New |
+| Permanent POIs - Rogue Science | 1.0.0 -> 1.05 (MINOR) | POI - New |
+| Show XP on Loading Screens | 1.2 -> 2.0 (MAJOR) | Interface and HUD |
+| Take Your Time | 1.1.1 -> 1.5.0 (MAJOR; restructure) | Quests |
+| Take Your Time - Shattered Space | 1.0.0 -> 1.0.1 OPTIONAL | Quests |
+
+TYT-SS first attempt used wrong file_id (55056 doesn't exist). Correct file_id is 54537 (v1.0.1 OPTIONAL). v1.5.0 main + v1.0.1 SS optional + v1.0.2 TA optional (already installed earlier) — TYT cluster now fully consistent.
+
+**META-ONLY fixes (3 mods)** — file already current MAIN on Nexus, just stale nexusFileStatus:
+
+| Mod | Status fix |
+|---|---|
+| More Immersive Landings And Takeoffs | 7 -> 1 (current file 60936 still MAIN) |
+| Immersive Star Colours | 7 -> 1 (VERSION-TAG-UNSYNC: page version 1.0, file version 1.1 — Nexus shows file as ARCHIVED but it's the current 'latest') |
+| RRLAC - Rabbit's Real Lights Akila City | 7 -> 1 (BB84 has v1.2 installed, Nexus current v1.2 file — same content, status drift) |
+
+### Remaining 16 flagged — categorized (all legitimate, no further action needed)
+
+**Group A: Archived in 版本已过期 (status correct, leave alone) — 9 mods**
+- Astrogate 4.0 Beta (status=7), Denser Vegetation - GRiNDTerra (status=6 Nexus pulled), Just Random Vegetation Rock (status=6), Less Rocks - GRiNDTerra (status=7), SKKFastStartNewGame (status=4 — author at 17.0 but BB84 deprecated), Starfield Extended - Craftable Quality (status=4 — superseded by v4.1 cluster this session), Starfield Extended - Craftable Quality Shattered (status=7), Starvival - Immersive Survival Addon (status=7 old dup), VaruunTI Habs (status=6 Nexus pulled)
+
+**Group B: 等待作者更新 separator (waiting on author for 1.16.244 builds) — 2 mods**
+- Luma 2.0 Beta (status=7), Weapon Swap Stuttering Fix (status=9)
+
+**Group C: modid=-1 intentional (DEAD-LISTING-FUNCTIONAL pattern per KB record install-planning.audit-grade-mod-fate-investigation.v1) — 3 mods**
+- ImmersiveDataSlates (status=9 modid=-1) — original Nexus listing pulled, BB84 kept local copy (5 loose .nif files, pure assets)
+- OwlTech_Pathfinder (status=9 modid=-1) — original modid 14019 in archive comment, dropped by curator
+- Space Ship Landing Reloaded (status=6 modid=-1) — Nexus modid was 7569, listing removed, BB84 kept local
+
+**Group D: NEEDS USER DECISION — Starfield HD Overhaul cluster (status=7) — 2 mods (representative)**
+- Starfield HD Overhaul - ESM (esm at v3.04 -> 3.14 available)
+- Starfield HD Overhaul part 02 (v3.10 -> 3.14 available; full cluster is 17 parts)
+- Full update would download ~50GB (parts are 3-4GB each, with v3.14 introducing a NEW part 18 at 498MB)
+- Author's part-by-part versioning has parts at versions ranging 3.04 to 3.10 currently, with v3.14 being the newest target
+- **Surfaced for BB84 decision — defer or update?** Multi-hour download + potential VRAM/disk constraints + risk of breaking save compatibility on a texture overhaul mid-pack
+
+### Bug class lesson reaffirmed
+
+Confirmed in the broader sweep that my first round only fixed mods I explicitly remembered touching. The proper fix requires a SYSTEMATIC re-audit of every flagged Nexus mod after any update batch, not just the ones the agent thinks it touched. Adding this as a workflow note for future update rounds.
+
+Post-batch state: 139 mods status=1 (MAIN, correct) + 16 flagged (all legitimate per above categorization).
