@@ -11,7 +11,7 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { atomicWriteText } from "../atomic.js";
 import { resolveModMetaPath } from "../path-helpers.js";
 import { upsertIniValue } from "../ini-helpers.js";
-import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { requireBoundContext } from "../binding.js";
 
 // BUG-10 fix (2026-06-17): name + plan_id + lease_token gain .min(1). `updates`
 // keys/values are arbitrary INI section/value pairs and may legitimately be
@@ -55,8 +55,20 @@ const handler: PlanApplyHandler = {
         name: args.name,
         updates,
       });
-      if (!resp.ok) throw new Error(resp.error?.message ?? "broker error");
-      return resp.result as Record<string, unknown>;
+      if (resp.ok) {
+        return resp.result as Record<string, unknown>;
+      }
+      // BUG-23 (issue #12) fix (2026-06-25): stale-broker deploys lack the
+      // mods.meta_write handler that exists in source. Gracefully fall
+      // through to the offline atomic INI rewrite below instead of bombing
+      // the whole apply. Real broker errors (lock contention, missing mod,
+      // etc.) still surface — only method_not_found triggers the fallback.
+      // The offline path's only semantic gap vs. broker is the
+      // modDataChanged signal MO2 picks up on its next refresh anyway.
+      if (resp.error?.code !== "method_not_found") {
+        throw new Error(resp.error?.message ?? "broker error");
+      }
+      warnStaleMetaWriteBroker();
     }
     let text = "";
     try {
@@ -70,9 +82,30 @@ const handler: PlanApplyHandler = {
       }
     }
     await atomicWriteText(metaPath, text);
-    return { name: args.name, sections_updated: Object.keys(updates), source: "offline" };
+    return {
+      name: args.name,
+      sections_updated: Object.keys(updates),
+      source: pipeClient ? "offline_fallback_stale_broker" : "offline",
+    };
   },
 };
+
+let META_WRITE_STALE_WARNED = false;
+
+function warnStaleMetaWriteBroker(): void {
+  if (META_WRITE_STALE_WARNED) return;
+  META_WRITE_STALE_WARNED = true;
+  process.stderr.write(
+    "[mo2-mcp] broker lacks 'mods.meta_write' handler; falling through to offline INI rewrite. " +
+      "Consider redeploying via tools/mo2-control-plane/install-mo2-control-plane.ps1 " +
+      "and restarting MO2.\n",
+  );
+}
+
+/** @internal test-only reset for the dedup'd warning state. */
+export function _resetMetaWriteStaleWarnedForTests(): void {
+  META_WRITE_STALE_WARNED = false;
+}
 
 registerTool({
   name: "mo2_edit_meta",

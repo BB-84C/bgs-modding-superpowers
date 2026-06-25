@@ -1,6 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { z } from "zod";
-import { assertActiveProfile, CrossProfileMutationError } from "../src/profile-guard.js";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import {
+  assertActiveProfile,
+  CrossProfileMutationError,
+  _resetStaleBrokerWarnedForTests,
+} from "../src/profile-guard.js";
 import { dispatchToolCall } from "../src/dispatch.js";
 import { AuditLogger } from "../src/audit.js";
 import { PlanCache } from "../src/plan-apply.js";
@@ -8,6 +15,63 @@ import { SnapshotManager } from "../src/snapshot.js";
 import { _clearToolsForTests, registerTool } from "../src/tool-registry.js";
 import type { ToolContext } from "../src/types.js";
 import type { Config } from "../src/config.js";
+
+/**
+ * Build a context where the pipe is alive but reports `method_not_found` for
+ * `profile.active` (the stale-broker scenario from issue #12). The bound
+ * mo2Root points at a temp dir containing a real ModOrganizer.ini whose
+ * [General] selected_profile is set to `iniProfile`. This mirrors how the
+ * fallback should resolve when the deployed broker is older than the source
+ * tree's profile.active handler.
+ */
+async function ctxWithStaleBrokerAndIni(opts: {
+  iniProfile?: string;
+  iniProfileByteArray?: boolean;
+  /** When set, returns this error code/message instead of method_not_found. */
+  brokerError?: { code: string; message: string };
+}): Promise<{ ctx: ToolContext; root: string }> {
+  const root = await mkdtemp(join(tmpdir(), "mo2-staleb-"));
+  if (opts.iniProfile) {
+    const profileLine = opts.iniProfileByteArray
+      ? `selected_profile=@ByteArray(${opts.iniProfile})`
+      : `selected_profile=${opts.iniProfile}`;
+    await writeFile(
+      join(root, "ModOrganizer.ini"),
+      `[General]\ngame=fallout4\ngameName=Fallout4\n${profileLine}\n[Settings]\nbase_directory=${root}\n`,
+      "utf8",
+    );
+  } else {
+    await writeFile(
+      join(root, "ModOrganizer.ini"),
+      `[General]\ngame=fallout4\ngameName=Fallout4\n[Settings]\nbase_directory=${root}\n`,
+      "utf8",
+    );
+  }
+  const ctx = {
+    config: {
+      mo2Root: root,
+      allowedProfiles: ["Default"],
+      permissionCeiling: "metadata-editable",
+      deny: [],
+      snapshotRoot: join(root, ".mo2-mcp", "snapshots"),
+      auditRoot: join(root, ".mo2-mcp", "audit"),
+    },
+    pipeClient: {
+      call: async () => ({
+        ok: false,
+        result: null,
+        error: opts.brokerError ?? {
+          code: "method_not_found",
+          message: "Unsupported method: profile.active",
+        },
+      }),
+      close: () => {},
+      discoverAndConnect: async () => {},
+      isConnected: () => true,
+    },
+  } as unknown as ToolContext;
+  return { ctx, root };
+}
 
 function ctxWithActiveProfile(activeProfile?: string): ToolContext {
   // Legacy compat shape: ToolContext at runtime carries `binding`, but
@@ -48,6 +112,72 @@ describe("assertActiveProfile", () => {
   // CrossProfileMutationError so dispatch.ts can surface a structured envelope
   // with code='cross_profile_live_mutation_blocked' instead of collapsing it
   // to internal_error.
+  // BUG-23 (issue #12) fix (2026-06-25): when the deployed Python broker
+  // predates the addition of the `profile.active` handler, the broker returns
+  // `{ok: false, error: {code: "method_not_found", ...}}`. assertActiveProfile
+  // now treats that specific error as "fall back to ModOrganizer.ini
+  // [General] selected_profile" instead of bombing the whole T3 mutator
+  // chain. The ini fallback uses the same decodeIniValue path as
+  // mo2_modlist, so non-ASCII profile names round-trip correctly.
+  describe("BUG-23: stale-broker fallback for profile.active", () => {
+    const tempDirs: string[] = [];
+    beforeEach(() => {
+      _resetStaleBrokerWarnedForTests();
+    });
+    afterAll(async () => {
+      for (const dir of tempDirs) {
+        await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      }
+    });
+
+    it("falls back to ini selected_profile when broker returns method_not_found (match)", async () => {
+      const { ctx, root } = await ctxWithStaleBrokerAndIni({ iniProfile: "Default" });
+      tempDirs.push(root);
+      await expect(assertActiveProfile(ctx, "Default")).resolves.toBeUndefined();
+    });
+
+    it("falls back to ini selected_profile when broker returns method_not_found (mismatch -> CrossProfileMutationError)", async () => {
+      const { ctx, root } = await ctxWithStaleBrokerAndIni({ iniProfile: "Default" });
+      tempDirs.push(root);
+      try {
+        await assertActiveProfile(ctx, "OtherProfile");
+        throw new Error("expected CrossProfileMutationError");
+      } catch (e) {
+        expect(e).toBeInstanceOf(CrossProfileMutationError);
+        const err = e as CrossProfileMutationError;
+        expect(err.details).toEqual({
+          requested: "OtherProfile",
+          active: "Default",
+          hint: "Use mo2_switch_profile to switch first, or stop MO2 to use offline mutation.",
+        });
+      }
+    });
+
+    it("decodes @ByteArray(\\xHH) in ini fallback so Chinese profile names work end-to-end", async () => {
+      // Issue #12 Bug 1 + Bug 2 intersection: the user's real install has
+      // selected_profile=@ByteArray(BB84\xe8\x87\xaa\xe7\x94\xa8\x32) which
+      // decodes to "BB84自用2". assertActiveProfile must use the decoded form
+      // so cross-profile detection works against requests passing the same
+      // decoded form (which is what every other tool — Mo2Mo2Modlist,
+      // Mo2Mo2ToggleMod — uses).
+      const { ctx, root } = await ctxWithStaleBrokerAndIni({
+        iniProfile: "BB84\\xe8\\x87\\xaa\\xe7\\x94\\xa8\\x32",
+        iniProfileByteArray: true,
+      });
+      tempDirs.push(root);
+      await expect(assertActiveProfile(ctx, "BB84自用2")).resolves.toBeUndefined();
+    });
+
+    it("still surfaces non-method_not_found broker errors (does NOT swallow real failures)", async () => {
+      const { ctx, root } = await ctxWithStaleBrokerAndIni({
+        iniProfile: "Default",
+        brokerError: { code: "internal_error", message: "broker exploded" },
+      });
+      tempDirs.push(root);
+      await expect(assertActiveProfile(ctx, "Default")).rejects.toThrow(/broker exploded/);
+    });
+  });
+
   it("BUG-21: throws CrossProfileMutationError (not plain Error) on mismatch", async () => {
     try {
       await assertActiveProfile(ctxWithActiveProfile("Default"), "BB84自用");
