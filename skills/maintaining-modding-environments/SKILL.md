@@ -508,40 +508,75 @@ Update workflow:
    the loader auto-picks by runtime match and does not need the old DLL.
 8. Verify sha256 for all four game-root files against staging.
 
-### After SFSE: the cascade — Address Library → SFSE plugin mods
+### After SFSE: the cascade is the principle
 
-A game runtime bump cascades. Updating just SFSE leaves the user with
-non-working mods because their DLL plugins are pinned to specific runtime
-addresses via Address Library, and they probably also need their own
-version bumps.
+A game runtime bump is a dependency cascade, not a single-file event. xSE is
+only the first layer. Address Library and every runtime-bound DLL plugin also
+bind to runtime-specific addresses, so a correct maintenance pass follows the
+chain until the launch dialog stops reporting downstream leaks.
 
-1. **Address Library** (Nexus mod #3256 for Starfield, #32444 for SkyrimSE,
-   #47327 for Fallout4): standard MO2 mod, VFS into `Data\SFSE\Plugins\`.
-   NOT in game root. Bundles one `versionlib-<runtime>.bin` per supported
-   runtime. Filename includes target runtime: `All in one - v22 (1.16.244.0)
-   SFSE Address Library`.
+Read the chain this way:
 
-2. **Every SFSE plugin mod** the user has installed: check for new version
-   via the Option B refresh, then download + install per the standard
-   Nexus update workflow if available. The SFSE Plugin Loader dialog at
-   game launch lists exactly which mods need attention and why:
-   - `address library needs to be updated` → Step 1 above fixes
-   - `incompatible with current version of the game` → mod needs its own
-     bump from author
+1. **xSE binary** is the game-root layer and must match `<game>.exe`.
+2. **Address Library** (Nexus mod #3256 for Starfield, #32444 for SkyrimSE,
+   #47327 for Fallout4) is a normal MO2 mod projected into
+   `Data\SFSE\Plugins\`. It supplies `versionlib-<runtime>.bin` for the
+   current runtime.
+3. **SFSE/SKSE/F4SE plugin mods** each ship their own DLL and may need an
+   author-side rebuild.
 
-3. Mods with Nexus `status=not_published` or `status=hidden` mean the
-   author has pulled the page. Surface to user; do not silently disable.
+The SFSE Plugin Loader dialog is the cascade readback surface:
 
-For the actual update of each SFSE plugin mod, the pattern is the same as
-Address Library:
+- `address library needs to be updated` means the plugin could not find the new
+  versionlib file; update Address Library first.
+- `incompatible with current version of the game` means the plugin DLL itself
+  is behind the game runtime; investigate whether the author has released a
+  compatible build.
+
+For the actual update of each SFSE plugin mod, the mechanical pattern remains:
 - Premium API: `POST /v1/games/{game}/mods/{id}/files/{file_id}/download_link.json`
 - Extract to staging (remember the 7z subdirectory gotcha noted above)
 - Backup current MO2 mod folder contents
 - Replace files in mod folder
 - Update meta.ini's `version`, `newestVersion`, `installationFile`, `lastNexusUpdate`
-- If folder name encodes a version (BB84 convention `<modname> - AddLib 18`,
-  `<modname> - Game version 1.15.222`, etc.), rename folder AND update
-  `modlist.txt` to match.
+- If folder name encodes a version (for example `<modname> - AddLib 18` or
+  `<modname> - Game version 1.15.222`), rename folder and update `modlist.txt`
+  to match.
+
+If Nexus reports `status=not_published` or `status=hidden`, treat it as a
+continuity investigation signal, not an instant disable verdict. Check whether
+the same author republished or moved the release before proposing replacement.
+
+### Intent-aware mutation methodology
+
+A mod update is complete only when the observed post-state satisfies the intent
+that motivated the update. Replacing files proves one effect; it does not prove
+runtime compatibility, curator-visible classification, metadata consistency, or
+enablement.
+
+After acting, ask: **did this satisfy the intent across all dependent MO2 state
+dimensions, or only the dimension I directly touched?** The dependent dimensions
+usually include:
+
+- files in the mod folder;
+- `meta.ini` version/source/status fields and visible annotations;
+- folder name when it encodes version or runtime support;
+- `modlist.txt` line text after any rename;
+- separator ownership, especially for mods previously parked in
+  `版本已过期`, `等待作者更新`, or `[弃用]`;
+- enable flag when the original disable reason has been resolved;
+- for DLL plugins, the author's claimed runtime support versus the local game
+  runtime.
+
+This is a ReAct-style observation rule at the level of intent, not a rote
+checklist. If observation shows that only files changed while the mod remains in
+a waiting separator, still disabled, or still behind the current runtime, report
+the intent gap and propose the next reconciliation step before declaring done.
+Do not trust an action return value or a delegated fixer's summary as proof;
+read `modlist.txt`, read affected `meta.ini` files, and use launch readback when
+runtime compatibility is load-bearing.
+
+Cross-link: KB record `install-planning.mod-update-post-state-discipline.v1` for the full discipline.
 
 ### Placeholder dummy mod for xSE binary tracking (curator convention, optional)
 
@@ -569,28 +604,25 @@ pwsh scripts\install-xse-update.ps1 -GameRoot <path> -XseMod sfse|skse|f4se|nvse
 
 See KB record `engine.xse-update-workflow.v1`.
 
-## meta.ini `comments=` vs `notes=` field distinction
+## meta.ini `comments=` vs `notes=` as visibility design
 
-MO2's `meta.ini` has TWO note-shaped fields with different semantics:
+MO2 has two note-shaped fields because it has two different reading modes:
+visibility-at-a-glance and detail-on-demand.
 
-- **`comments=`** is the SHORT preview shown in the MO2 GUI mod list's
-  "Comments" column (visible at-a-glance per mod row). Use this for 1-2
-  sentence summaries of what the mod does, version status tags
-  (`[UPDATE→vX]`), CC marker (`[CC]`, `[CC·汉化版]`), etc.
+- **`comments=`** serves the at-a-glance mode. It appears in the mod-list
+  Comments column, so it is the right place for short summaries, status tags
+  (`[UPDATE→vX]`, `[WAITING-FOR-X.Y.Z]`), CC markers (`[CC]`, `[CC·汉化版]`),
+  and other information the curator should see without opening a dialog.
+- **`notes=`** serves the detail-on-demand mode. It appears only in the mod's
+  properties Notes tab, so it is the right place for install procedure memos,
+  FOMOD choice records, conflict-resolution notes, and verbose version history.
 
-- **`notes=`** is the LONGER text shown only in the mod's Notes tab when
-  the user opens the properties dialog. Use this for detailed install
-  notes, FOMOD choice records, conflict resolution memos, version history,
-  etc. — content that's verbose enough that putting it in the mod-list
-  column would clutter the view.
-
-Common mistake: writing 1-2 sentence summaries to `notes=` instead of
-`comments=`. MO2's GUI mod-list preview will then appear empty even though
-each mod has rich Chinese (or English) summaries. Migrate by moving
-`notes=<short>` → `comments=<short>` and clearing `notes=`.
-
-For automation that synthesizes per-mod summaries from `nexusDescription`,
-write to `comments=` by default.
+Choose the field by intended reader behavior. If the curator must see the fact
+while scanning the list, use `comments=`. If the fact is reference material for
+when the mod is already being inspected, use `notes=`. Automation that
+synthesizes 1-2 sentence per-mod summaries from `nexusDescription` therefore
+writes to `comments=` by default; putting those summaries in `notes=` makes the
+list look empty even though the information exists.
 
 ## See also
 

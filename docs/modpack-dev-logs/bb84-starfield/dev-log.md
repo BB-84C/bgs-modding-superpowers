@@ -238,3 +238,47 @@ API budget 余额 hourly 1952 / daily 19952。Premium download_link 总下载 ~7
 这个**用户手动下载 + agent 自动 process** 的混合模式应该 codify 到 skill。免 Premium 用户用 agent 节省的不是下载步骤，而是后续的解压 / install / meta 维护 / cascade 升级追踪。
 
 **Chrome cookies AES key vault**：`.opencode/artifacts/bb84-starfield-audit-2026-06-24/chrome-cookie-key.dpapi` 保留，供未来如果 Chrome 引入 v21 / 改回普通 DPAPI 或 v10/v11 旧版本测试时复用。51 个 nexus 加密 cookies 的 base64 vault 在 `%TEMP%\nexus-cookies-Default.json`。
+
+---
+
+### Round-2 fallout: separator/enable observability fixes
+
+发现两层观测漏洞：
+1. **Fixer 没自检**：替换文件但不验证 separator 归属 + enable 状态
+2. **我没核实**：信任 fixer summary 而非 grep modlist.txt 验证多维度 state
+
+#### Shader Injector + Perk Auto Level（已修复）
+- `Starfield Shader Injector - SFSE 1-12-30` → `Starfield Shader Injector - SFSE 1-16-236` + ENABLED + 移到 SFSE 功能模组
+- `Perk Auto Level - SFSE 1-8-86 Waiting For Update` → `Perk Auto Level - SFSE 0-2-21` + ENABLED + 移到 SFSE 功能模组
+- Shader Injector v1.10 作者声明 "Supports 1.16.236 and beyond"
+- Perk Auto Level v1.2 是 Nexus 最新发布版，SFSE 插件通过 Address Library v22 (含 1-16-244 bin) 自动绑定，应该工作
+
+#### Luma 评论调查（结论：留 等待作者更新 不动）
+Nexus #4821 评论页 1/39（2026-05~06 时间窗）：
+- 2026-05-24 作者 Filoppi: "We are working on it"
+- 2026-06-21 用户："It's been over a month at this point since the mod has worked"
+- 没有 1.16.244 / 1.16.236 兼容声明的 release
+- Nexus description 的 "compatible with Starfield 1.14.74" 真实不是 stale；最新 release 778860b 是 2025-03-15，那是 1.14.74 时代
+- **结论**：Luma 当前确实坏（自 1.5 patch 以来），作者维护中但未 ship 1.16.244 build。**保持 DISABLED + 留在 等待作者更新 是正确状态**
+
+#### CharGenMenu（重新分类到 等待作者更新）
+Nexus #6850 changelog：
+- v1.1.0.22 (2026-05-26): **"Added support for Game Version 1.16.242"** ← 只到 1.16.242
+- v1.1.0.21: "Game Version 1.16.236 support"
+
+**当前 Steam runtime 是 1.16.244 — 超出 CharGenMenu v1.1.0.22 支持范围**。Steam 论坛验证："Still waiting on CharGenMenu myself, only one popping an SFSE error box"。
+
+我之前的"修复"（modid 20→6850 + 升到 1.1.0.22）拿到了最新版本但**新版本本身还不支持当前游戏 runtime**。这是 ReAct 失误的第二例 — 我没核实"latest published" ≠ "compatible with current runtime"。
+
+操作：
+- 文件夹改名 `CharGenMenu` → `CharGenMenu - SFSE 1-16-242`
+- meta.ini comments 改为 [WAITING-FOR-1.16.244] 标记
+- modlist.txt 移到 等待作者更新 separator + DISABLED
+
+#### 当前 "等待作者更新" separator 终态
+1. `Weapon Swap Stuttering Fix - AddLib 5` (DISABLED) — 作者 hidden mod，#16464 是 backup
+2. `Luma 2.0 Beta - SFSE 1-14-70` (DISABLED) — 作者 Filoppi 正在修 1.5 patch
+3. `CharGenMenu - SFSE 1-16-242` (DISABLED) — 新加，等作者出 1.16.244 兼容
+
+#### 教训进 skill / KB / memory
+**"latest published Nexus version" ≠ "compatible with current runtime"** — 必须在升级前去 Nexus changelog / 评论 / 作者声明里**实证**新版本对当前 runtime 的支持。会进 `install-planning.mod-update-post-state-discipline.v1` 增加 section。
