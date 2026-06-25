@@ -282,3 +282,181 @@ Nexus #6850 changelog：
 
 #### 教训进 skill / KB / memory
 **"latest published Nexus version" ≠ "compatible with current runtime"** — 必须在升级前去 Nexus changelog / 评论 / 作者声明里**实证**新版本对当前 runtime 的支持。会进 `install-planning.mod-update-post-state-discipline.v1` 增加 section。
+
+---
+
+## 2026-06-25 — CC批量更新 v2: 35 个 CC mod 物化 + 全部 disabled（recovery准备）
+
+### 触发
+游戏 1.16.244 更新 + Terran Armada DLC + 之前的 mod 大半年没更新 → 进游戏时新亚特兰蒂斯城出现紫色/虹彩材质（环境地形）。
+另外发现 4 个 BGS DLC ESM（SFBGS050/SFBGS00D/BlueprintShips-SFBGS050/SFBGS047）在每次游戏退出后被 MO2 自动取消勾选 —— 已查明是 MO2 game_starfield.dll 插件硬编码"官方 ESM"白名单跟不上 BGS DLC 节奏，需要 Discord dev-builds 更新 DLL。
+
+### 决策
+按优先级批量排查 + 激活方式恢复，第一步：把 in-game 更新过的所有 CC 内容物化为 mod folder，**保持 disabled** 等待优先级激活批次。
+
+### 这一轮做的事
+
+**1. CC 物化（overwrite/ → mods/<prefix>-cc/）**
+- overwrite/ 中扫到 35 个 CC 前缀，54 个文件（35 ESM + 19 BA2）
+- 33 prefix 已有 -cc mod folder（round-1 物化的）→ **强制覆盖**（用 PowerShell + `Copy-Item -Force`，因为原 `install-cc-as-mods.py` 在目标文件已存在时会 skip，对 update 场景是 bug）
+- 2 个新 prefix（`rbt_suitup_re`, `stroudpremiumedition`）→ 创建新 mod folder + 写最小 meta.ini
+- 54 个文件复制完成后从 overwrite/ 删除原件（保留 SFSE/Textures/Backup/Caches 子目录）
+
+**2. modlist.txt 状态修正**
+- 35 个 `<prefix>-cc` 主 mod + 25 个 `<prefix>-cc - SC` 汉化伴随 mod 全部从 `+` 翻到 `-`（56 flips + 2 already disabled）
+- 2 个新 mod 在文件头插入为 disabled（rbt_suitup_re-cc, stroudpremiumedition-cc）
+- 总：35/35 主 CC mod 现在都是 disabled 状态
+
+**3. plugins.txt 状态修正**
+- 35 个 `<prefix>.esm` 全部 strip `*` 前缀 → inactive
+- 28 deactivated + 7 already inactive，0 still active
+- 0 missing（全部都已经在 plugins.txt 中有 line）
+
+### 备份
+- `D:\Starfield MO2\.backups\cc-materialize-20260625-003626\` 含原 modlist.txt + plugins.txt
+- 35 个新 mod folder 本身是新加进 mods/ 的，rollback 只需删 mod folder + restore 备份
+
+### 方法论捕获（待 KB 化）
+
+1. **"empty-profile diagnostic baseline"（用户本回合教的）**：MO2 profile 是天然的 isolation primitive。任何 mod-shaped 症状的第零步是用空 profile 跑一次，确认问题是不是真的在 mod 层。**比写 crash logger / 跑 LOOT / 用 xEdit conflict audit 都便宜，先于所有工具**。
+
+2. **"script skip-if-exists is broken for update scenarios"**：`install-cc-as-mods.py` 用 `shutil.copy2` + `if dest_file.exists(): skip`。对 first-install 场景对，对 update 场景错（旧 ESM 不被替换，update 静默丢失）。修复路径：要么加 `--overwrite` flag，要么换 `Copy-Item -Force`。这一轮选了后者（不动 script，让 script 保留 first-install-safe 语义；update workflow 走单独的 PowerShell 路径）。
+
+3. **"symmetric CC-and-SC disable rule"**：CC mod 跟它的 `- SC` 汉化伴随是 conceptual bundle，应该一起 disabled。否则会出现 "X-cc disabled but X-cc - SC enabled" 的孤儿态。本轮 25/35 prefix 有 SC 伴随，全部跟主 CC 一起 disabled。
+
+4. **"BGS DLC ESM auto-uncheck = MO2 game_starfield plugin lag"**：1.16.243/244 引入的 Terran Armada DLC 4 ESM 不在 `game_starfield.dll` 的 base-master 白名单 → 每次游戏关闭 MO2 把它们当 unmanaged 重写回 disabled。这跟用户操作无关，是 MO2 这边的已知 issue（GitHub #2358 + #2225 + #2107），fix 在 Discord `#dev-builds` 频道。历史上 1.13.61 引入 SFBGS004 时也有过完全一样的延迟。
+
+### 下一步（等待用户）
+- Lane 0: 用户去 MO2 Discord 拿 game_starfield.dll 更新版（用于修 4 ESM auto-uncheck）
+- Lane 1: 是否现在执行"全部 non-SFSE / non-BGS-official mod disable"批量操作？建议先 clone profile BB84自用2 → BB84自用2-pre-244-recovery
+- Lane 2: 是否启动 Nexus API 全量 mod staleness 审计（生成报告，不动 MO2 状态）？
+- Lane 3: 重新激活优先级框架（建议下一轮 multi-perspective consultation 设计）
+- Lane 4: 汉化保持禁用，等 mod 集合稳定后批量更新
+
+
+---
+
+## 2026-06-25 (晚) — 视觉问题根因定位：stale CK extract loose materials
+
+### 触发
+1.16.244 + Terran Armada DLC patch 后，BB84自用2 profile 进游戏到新亚特兰蒂斯城出现紫色/虹彩材质（环境地形 + 部分建模缺失）。先怀疑过 4 个 BGS DLC ESM 自动取消勾选问题（已通过 MO2 2.5.3 beta12 update 修好）+ Nexus mod stale 集合 + 高嫌疑 terrain mod。前三条都不是根因。
+
+### 网友给的线索
+> 这个因为 data 文件夹里的 materials 导致的，删掉这个就行了，用 ck 的时候再从回收站还原这个文件
+
+### 实测过程
+1. 检查 `D:\SteamLibrary\steamapps\common\Starfield\Data\Materials\` — 48,486 个 `.mat` 文件，全部 LastWrite=2024-09-16，总 547.9 MB。当时是 BB84 装 CK 的日期，CK 自动从 `Tools\ContentResources.zip` 把材质 authoring 文件 extract 到了 game root。
+2. 验证：`.mat` 是 JSON 文本（authoring-time 输入），runtime 读的是 `Starfield - Materials.ba2` 里的 compiled `.cdb` material database。
+3. `ContentResources.zip` 当前版本 155.7 MB / 2026-06-23 = 跟当前 patch 配套。任何时候 extract 都拿回 fresh + 当前版本。
+4. **删除决策**：archive invalidation 在 profile INI 中是开的 → loose `.mat` 永远覆盖新 BA2 → 老 material definitions + 新 mesh/shader pipeline = purple/iridescent。
+5. 用户授权 → 删 `Data\Materials\` → **BB84自用2 实测渲染恢复正常**。
+6. 同批 stale CK extract 跟着清理：`Data\Particles\` (99.4 MB, 同 2024-09-16) + `Data\Scripts\` (.psc 源码) + `Data\Source\` (.tif CK 材质源) + `Data\EditorFiles\` + `Data\DataViews\` + `Data\Textures\` (CK BrushAlphas)。总清理 ~670 MB。
+
+### 关键错误（自我 codification）
+
+我前一回合根据 "测试工作区 same-save 渲染正常" 这个观测，**把 stale-loose-materials 假说证伪了**，认为 root cause 必须包含 mod overlay 维度，规划了大规模 disable + bisect。
+
+错在哪：**asymmetric evidence 本身没被 falsify 过就被用来 falsify 简单假设**。测试工作区"看起来正常"很可能是：
+- 实际没真的走到新亚特兰蒂斯城同一视角
+- shader cache 状态不同
+- 渲染状态没暴露 broken material
+
+**真正的对照应该是：两个 profile 都明确走到同一 cell 同一视角同一光照状态，再下结论**。这次没做这件事，就让 asymmetric observation 直接驱动了昂贵的 bisect 规划。
+
+成本对比：
+- 删 Materials 1 步 → 实测修复 → 几秒钟操作 + 几分钟 Web 调研
+- 我曾打算执行的 mass disable + bisect → 几小时规划 + 几小时执行
+
+教训写到 KB `debugging.asymmetric-evidence-self-falsify.v1`。
+
+### 沉到 KB 的 3 条 methodology
+
+1. **`archive-precedence.stale-ck-extract-loose-files.v1`** — Stale CK extract 是 BGS 模组玩家跨 patch 边界的 silent killer。loose-overrides-archive 规则 + CK auto-extract + game patch 更新 BA2 = 三层叠加的陷阱。Starfield 因为 Creation Engine 2 引入了 compiled material database，extract 规模最大（48k+ files just for Materials），所以这个 trap 在 Starfield 最易触发。修复路径就是删除 stale loose extract，`ContentResources.zip` 永远是 recovery 源。
+2. **`debugging.asymmetric-evidence-self-falsify.v1`** — 用 asymmetric 证据 falsify 简单假设之前，先 falsify asymmetric observation 本身。两个观测必须真的是同一 surface 同一 condition 的对比，否则 asymmetry 是 artifact 不是 signal。
+3. **跨 patch maintenance discipline**：每次 game patch 后的标准 maintenance pass 应该加一步"扫 game-install Data\ 是否有 stale CK extract"，跟 xSE + Address Library + plugins 更新一起做。Skill 侧加进 `maintaining-modding-environments`。
+
+### Recovery 战役框架（结果驱动 reshape）
+
+视觉问题已经解决 → 不再需要 Lane 1 (mass disable + bisect)。BB84自用2 现在 245 个 mod 全部 enabled 状态渲染正常 → 现有 modset 是大体兼容的，只是版本陈旧。
+
+新 Lane 编排（按用户 2026-06-25 修正）：
+- **Lane 2**: Nexus 全量 staleness 审计（172 modid）→ 生成报告，不动 MO2 状态。下一步要做。
+- **Lane 3** (口径调整): 不是"重新激活优先级框架"。改为"对当前所有 enabled mod 按优先级 (heavy papyrus → 大型机制/剧情 → 小改/数据) 做审查 — staleness + 影响面 + 功能 + 内容"。决定 (a) 是否需要 patch 冲突 (b) 怎么优化 plugins.txt 排序。需要 multi-perspective consultation 设计 audit framework。
+- **Lane 4**: 汉化批量重译（最后）
+- **Lane 5**: 用 xEdit 实测验证 — 跟 Lane 3 audit 一起做（Lane 3 audit 出 red/yellow 的 mod 进 xEdit 看 conflict 实质）
+
+
+---
+
+## 2026-06-25 (深夜) — Lane 2 staleness audit 完成 + 方法论 KB codify + 报告生成
+
+### 任务
+对当前 BB84自用2 profile 的 172 个 Nexus mod 做 staleness 全审计；目标是搞清楚每个 mod 的真实命运（是被永久下架，还是作者改 id 重发，还是被整合，还是本质 essence 仍可保留），生成完整决策报告。
+
+### 执行路径
+两轮 fan-out fixer + orchestrator inline merge：
+
+1. **轮 1: 表层分类**（4 lane fixer × modulo 4）：每 lane 拉 Nexus API `/mods/{modid}.json` + `/files.json`，按表面信号分 Red/Yellow/Green。结果：51 Red + 57 Yellow + 67 Green + 2 Error。
+2. **用户纠正**：你不要被表象制约，要详尽调查每一个 mod 的命运。"Red — 找替代品" 的二元判决是错的。比如 ImmersiveDataSlates 本质就是一个贴图替换，留着没事。
+3. **方法论 codify**：新 KB record `install-planning.audit-grade-mod-fate-investigation.v1`。明确 4+ 个 outcome（CONTINUITY-REPUBLISHED / CONTINUITY-OFF-NEXUS / DEAD-LISTING-FUNCTIONAL / DEAD-LISTING-AT-RISK / REPLACEMENT-NEEDED + HEALTHY-FALSE-POSITIVE / GENUINE-UPDATE-AVAILABLE），强调 functional-essence 分析（pure-asset vs plugin-only vs scripted vs dll-plugin）+ 完整证据 reporting。KB 150 -> 151，push + vendor sync。
+4. **轮 2: 深度命运调查**（4 lane fixer × 12 个重点 mod）：每 mod 走完整 fate investigation —— 同作者 republish API check + 站外延续 web search + 本地 essence 文件分析 + 决定性 verdict。
+5. **Orchestrator inline merge**：4 lane classification + 4 lane fate + 版本归一化（解决 fixer comparator bug）→ 最终 verdict map。
+
+### 最终 Tier 分布（125 unique modid 去重）
+
+| Tier | Count |
+|---|---:|
+| HEALTHY | 95 |
+| YELLOW | 13 |
+| HEALTHY-FALSE-POSITIVE | 6 |
+| DEAD-LISTING-AT-RISK | 4 |
+| YELLOW-RECLASSIFIED | 3 |
+| CONTINUITY-REPUBLISHED | 2 |
+| GENUINE-UPDATE-AVAILABLE | 1 |
+| DEAD-LISTING-FUNCTIONAL | 1 |
+
+**总判断**: 81% (101/125) healthy。只 4-10 个 mod 真需要决策；其余 100+ 是 noise + 误报。
+
+### 关键发现
+
+**用户的 ImmersiveDataSlates 论断完全 validate**: modid 6004 essence 是 5 个 loose `.nif` mesh 替换（50 KB），零 esm/dll/pex。listing hidden by author 后本地 artifact 仍然 100% functional。**DEAD-LISTING-FUNCTIONAL** 范例。
+
+**2 个真 CONTINUITY-REPUBLISHED**:
+- modid 9710 Denser Vegetation - GRiNDTerra → 同作者 `Vanilla Biomes Enhanced - A GRiNDTerra Mod`
+- modid 11334 Just Random Vegetation Rock and Exotic Sizes → 同作者拆分为多个 GRiNDTerra 系列模块
+
+**4 个真 DEAD-LISTING-AT-RISK** (需监控):
+- modid 7569 Space Ship Landing Reloaded (ESM+BA2 systemic)
+- modid 14019 OwlTech_Pathfinder (ESM+2BA2)
+- modid 12083 VaruunTI Habs (ESM+BA2)
+- modid 2830 Weapon Swap Stuttering Fix (SFSE DLL)
+
+**1 个真 GENUINE-UPDATE-AVAILABLE**: modid 12330 Stroud Premium Edition 2.3.3 → 2.5.3（新版自带原生中文，可考虑退役独立 SC mod）。
+
+### 假阳性分析（5 类，feed back to classifier）
+
+1. **Version-comparator artifact** (~80 个 pseudo-Red 根因): MO2 存 `1.0.0.0` Nexus 存 `1.0` / `V1.0`，字符串比较全炸。修复：归一化 + 识别 BB84 的 `d2025.x.x.x` build-stamp。
+2. **In-game vocabulary collision**: "Abandoned Farm"/"Abandoned Mining Complex" 是 starfield POI 名，不是 mod 弃坑信号。修复：上下文敏感 regex + POI denylist。
+3. **Folder name embedding game-version**: BB84 把游戏版本写进 folder 名（如 `Starfield Engine Fixes - Game version 1.16.244`），fixer 把 folder name 喂进了 desc-regex。修复：只用 Nexus API description 字段。
+4. **Multi-variant mod 误报**: Eyes of Beauty 同 mod 多 file_id 对应不同 variant；用 page-version 比 file-version 会跨变体误报。修复：按 file_id 跟踪 variant lineage。
+5. **ARCHIVED/OPTIONAL 子文件描述误触发**: "THIS PATCH WILL BE DELETED AFTER THE 2.3.0 RELEASE" 是子补丁被并入父 mod 的注释，不是整个 mod 弃坑。修复：desc-regex 只 scope 到 MAIN 文件。
+
+### 产物
+
+- 报告: `D:\Starfield MO2\docs\mod-staleness-audit-2026-06-25.md` (40 KB / 333 lines)
+- Merged 数据: `merged-audit-results.json` (146 KB)
+- Per-lane raw: `lane-{A,B,C,D}-{results,fate-results}.json` (8 文件)
+- API cache: `api-cache/<modid>.json` (per-mod Nexus response)
+- 全部位于 `.opencode/artifacts/bb84-starfield-audit-2026-06-25/`
+
+### 沉到 KB
+- 新增: `install-planning.audit-grade-mod-fate-investigation.v1` (severity:high, kind:rule)
+- 强调 4+ outcome 区分、功能性 essence 分析、completeness reporting、surface verdicts 不是 verdicts
+
+### Lane 编排状态
+- Lane 0: MO2 2.5.3 beta12 ✓ (BGS DLC ESM 自动取消问题已解决)
+- Lane 1: ✓ 跳过（视觉问题在 Materials delete 后已解决，不需要 mass disable）
+- **Lane 2: ✓ 完成本轮**
+- Lane 3: pending — 真正的 mod 集合 priority audit + plugins.txt 排序优化。用本轮的 Section 1 (10 个真决策项) 作为切入点。需 multi-perspective consultation 设计 audit framework。Lane 5 已并入 Lane 3。
+- Lane 4: pending — 汉化批量重译（最后）
+
