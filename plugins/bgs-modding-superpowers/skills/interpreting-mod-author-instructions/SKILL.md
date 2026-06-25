@@ -173,6 +173,23 @@ Recommended author-instruction lens:
 See KB record `mod-evaluation.author-signals` (KB) and
 `mod-evaluation.bb84-curator-perspective-reference` for full curator essay.
 
+## Investigating Nexus mods marked not_published / hidden / removed
+
+When the agent or a MO2 refresh reports a mod as `status=not_published`, `status=hidden`, or `status=removed`, do NOT default to "disable + find replacement". The priority investigation order:
+
+1. **Author republish check** (highest yield) — fetch original mod's `author` + `user.member_id`; search Nexus for the same mod name; visit author's profile; confirm candidate new modid has the same `user.member_id`. Modders sometimes restart with a fresh modid instead of updating in place. The "dead" listing is just abandoned.
+2. **Author continuation off-Nexus** — GitHub source, Patreon, Discord.
+3. **Third-party maintenance fork** — Nexus search for `"<mod name>" continued / updated / patched`. Beware permission ambiguity.
+4. **Alternative implementation** — different author, possibly different approach (e.g., perk-based instead of SFSE-plugin-based).
+
+After finding the answer:
+
+- If author republished: update MO2 mod folder's `meta.ini` `modid=` and `installationFile=` to the new listing. Otherwise Option B refresh forever reports `not_published`.
+- If switched to alternative: backup old mod folder, disable in modlist.txt with `[弃用]` separator convention.
+- ALWAYS record the investigation in `docs/dev-log.md` so half-year-later "why did we switch X to Y?" is answerable.
+
+Cross-link: KB record `mod-evaluation.investigating-pulled-mods.v1` for the full pattern with example cases.
+
 ## See also
 
 - `evaluating-bgs-mods` — upstream judgment: decides whether the mod belongs in the pack before this skill interprets installation.

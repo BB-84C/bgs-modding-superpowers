@@ -508,6 +508,53 @@ Update workflow:
    the loader auto-picks by runtime match and does not need the old DLL.
 8. Verify sha256 for all four game-root files against staging.
 
+### After SFSE: the cascade — Address Library → SFSE plugin mods
+
+A game runtime bump cascades. Updating just SFSE leaves the user with
+non-working mods because their DLL plugins are pinned to specific runtime
+addresses via Address Library, and they probably also need their own
+version bumps.
+
+1. **Address Library** (Nexus mod #3256 for Starfield, #32444 for SkyrimSE,
+   #47327 for Fallout4): standard MO2 mod, VFS into `Data\SFSE\Plugins\`.
+   NOT in game root. Bundles one `versionlib-<runtime>.bin` per supported
+   runtime. Filename includes target runtime: `All in one - v22 (1.16.244.0)
+   SFSE Address Library`.
+
+2. **Every SFSE plugin mod** the user has installed: check for new version
+   via the Option B refresh, then download + install per the standard
+   Nexus update workflow if available. The SFSE Plugin Loader dialog at
+   game launch lists exactly which mods need attention and why:
+   - `address library needs to be updated` → Step 1 above fixes
+   - `incompatible with current version of the game` → mod needs its own
+     bump from author
+
+3. Mods with Nexus `status=not_published` or `status=hidden` mean the
+   author has pulled the page. Surface to user; do not silently disable.
+
+For the actual update of each SFSE plugin mod, the pattern is the same as
+Address Library:
+- Premium API: `POST /v1/games/{game}/mods/{id}/files/{file_id}/download_link.json`
+- Extract to staging (remember the 7z subdirectory gotcha noted above)
+- Backup current MO2 mod folder contents
+- Replace files in mod folder
+- Update meta.ini's `version`, `newestVersion`, `installationFile`, `lastNexusUpdate`
+- If folder name encodes a version (BB84 convention `<modname> - AddLib 18`,
+  `<modname> - Game version 1.15.222`, etc.), rename folder AND update
+  `modlist.txt` to match.
+
+### Placeholder dummy mod for xSE binary tracking (curator convention, optional)
+
+BB84's personal pattern: keep an empty MOD folder under `<MO2Root>/mods/<XSE
+Name> <runtime-tag>/` (e.g. `Starfield Script Extender 1-15-222/`) with a
+single `sfse_<binary-ver>/` empty subdir + a complete `meta.ini` carrying
+the real `modid=106` + `version=` + `installationFile=` + nexus-side
+metadata. Effect: the MO2 mod list visibly tracks the current SFSE binary
+version even though the actual SFSE binaries live in game root and are
+otherwise invisible to MO2's update-tracking. On each xSE update, rename
+both the outer folder and the inner marker dir, and update the meta.ini.
+This is a curator preference, not a required workflow.
+
 [WARNING]
 This writes to the real game install, for example
 `D:\SteamLibrary\steamapps\common\<game>\`. It requires explicit per-session
@@ -521,6 +568,29 @@ pwsh scripts\install-xse-update.ps1 -GameRoot <path> -XseMod sfse|skse|f4se|nvse
 ```
 
 See KB record `engine.xse-update-workflow.v1`.
+
+## meta.ini `comments=` vs `notes=` field distinction
+
+MO2's `meta.ini` has TWO note-shaped fields with different semantics:
+
+- **`comments=`** is the SHORT preview shown in the MO2 GUI mod list's
+  "Comments" column (visible at-a-glance per mod row). Use this for 1-2
+  sentence summaries of what the mod does, version status tags
+  (`[UPDATE→vX]`), CC marker (`[CC]`, `[CC·汉化版]`), etc.
+
+- **`notes=`** is the LONGER text shown only in the mod's Notes tab when
+  the user opens the properties dialog. Use this for detailed install
+  notes, FOMOD choice records, conflict resolution memos, version history,
+  etc. — content that's verbose enough that putting it in the mod-list
+  column would clutter the view.
+
+Common mistake: writing 1-2 sentence summaries to `notes=` instead of
+`comments=`. MO2's GUI mod-list preview will then appear empty even though
+each mod has rich Chinese (or English) summaries. Migrate by moving
+`notes=<short>` → `comments=<short>` and clearing `notes=`.
+
+For automation that synthesizes per-mod summaries from `nexusDescription`,
+write to `comments=` by default.
 
 ## See also
 
