@@ -131,4 +131,31 @@ describe("mo2_status profile resolution", () => {
     expect(response.ok).toBe(false);
     expect(response.error?.code).toBe("no_profile_available");
   });
+
+  // BUG-23 (issue #12) Bug 1 regression: real Starfield install with Chinese
+  // profile name "BB84自用2" stored as
+  //   selected_profile=@ByteArray(BB84\xe8\x87\xaa\xe7\x94\xa8\x32)
+  // Earlier deploys (pre 2026-06-24 decodeIniValue \xHH upgrade) returned the
+  // literal escaped form, causing readProfile to ENOENT on the wrong path. The
+  // decoder upgrade fixed it; this test locks in the end-to-end Status path
+  // against the exact byte sequence so the bug class cannot regress silently.
+  it("BUG-23 Bug 1: Status resolves Chinese profile name encoded as @ByteArray(\\xHH)", async () => {
+    const { ctx } = await setupRoot({
+      profiles: ["BB84自用2"],
+      // The escaped form @ByteArray(BB84\xe8\x87\xaa\xe7\x94\xa8\x32)
+      // decodes via decodeIniValue to "BB84自用2".
+      selectedProfile: "BB84\\xe8\\x87\\xaa\\xe7\\x94\\xa8\\x32",
+      allowedProfiles: ["Default"],
+    });
+
+    const response = await status({}, ctx);
+
+    expect(response.ok).toBe(true);
+    expect(response.result?.profile).toBe("BB84自用2");
+    expect(response.result?.counts?.mods_total).toBe(2);
+    // Critical: the error message in issue #12 contained literal `\xHH`. This
+    // assertion proves the resolved profileName is the *decoded* form, not
+    // the escaped wire form.
+    expect(response.result?.profile).not.toMatch(/\\x[0-9a-fA-F]{2}/);
+  });
 });
