@@ -989,3 +989,97 @@ i.e. mods kept disabled as visible reminders that they exist; BB84 isn't activel
 - DO NOT auto-route Lane-3-pending or just-installed-but-disabled mods into 观望.
 - DO route mods that meet the actual semantic: "考虑过但暂时不装" — kept around as reminder.
 - For functional mods just installed disabled: route to their FUNCTIONAL category group (e.g. 武器装备 - 调整, 沉浸感增强 - 功能体验) per the strict convention chosen this round.
+
+## 2026-06-25 -- Round-4 followup: installationFile mass-fix + nexusFileStatus bug class diagnosis
+
+User feedback: "Mo2当前有你负责升级维护的mod，哪怕版本号对上了，但是还是被标记为old. 查+修."
+
+### Root cause (BUG CLASS — bash extract-on-top install pattern)
+
+The "OLD" tooltip in MO2 ( This file has been marked as "Old". There is most likely an updated version of this file available.) comes from \meta.ini\ field \
+exusFileStatus=4\. MO2 sets this during Nexus update check (Option B refresh) by querying Nexus for the file referenced by \installationFile\ and checking its \category_id\.
+
+My bash extract-on-top \Update-NexusMod\ function (used for all session updates) DID update:
+- \ersion\, \
+ewestVersion\, \lastNexusQuery\, \lastNexusUpdate\
+- \1\fileid\ (when [installedFiles] section existed)
+- \comments\ marker
+
+But it DID NOT update:
+- **\installationFile\ field** ← THIS WAS THE BUG. Still pointed at the OLD archive path (e.g. \F:/Starfield Mods/Armors/UC Military Overhaul - All-In-One-11350-2-1-1727279254.7z\).
+- **\
+exusFileStatus\ field** ← stayed at whatever it was before the update.
+
+When BB84 (or earlier Option B refresh) queried Nexus for the file \...-2-1-...\ after author re-uploaded v2.2, Nexus reported file_id 44246 v2.1 as OLD_VERSION → MO2 set \
+exusFileStatus=4\ → red OLD warning.
+
+The mod folder CONTENT was actually correct (v2.2 ESMs in place from my extract-on-top), but the meta.ini "what we installed" pointer was stale.
+
+### Sweep + fix (17 mods)
+
+For each session-touched mod: queried Nexus current MAIN file_id (newest uploaded_timestamp where category_name=MAIN), updated \installationFile\ to new archive path, set \
+exusFileStatus=1\ (MAIN), moved new archive from \D:\Starfield MO2\downloads\\\ to BB84's \F:\Starfield Mods\<category>\\\ organization (category inferred from old installationFile path).
+
+Mods fixed (16 success + 1 TGAH retry):
+- Dark Universe - Takeover (POI - New)
+- NAT Station Lake Windows (WorldSpace - Main Cities)
+- Real Fuel - BETA (Game Play)
+- Revelation - Main Quest Temple Overhaul (Quests)
+- Stroud Premium Edition (Ship Build)
+- UC Military Overhaul - All-In-One (Armors)
+- UC Surplus Expanded - Immersive (Armors)
+- UCMO - Spec Ops Skin Pack (Armors)
+- Useful Brigs (Game Play)
+- Xeno Master (Game Play)
+- Left Align XP Bar (Interface and HUD)
+- Places Of Intrigue - GRiNDTerra (POI - Tweaks)
+- Ship Vendor Framework (Game Play)
+- Starshake - Vizualized Recoil (Visual)
+- Starvival - Immersive Survival Addon - New (Game Play)
+- RRLNA - Rabbit's Real Lights New Atlantis (Worldspace)
+- The Gang's All Here (Companions — fixed file_id 63403 not 63048 in first attempt)
+
+### NMT 1.3 -> 1.4 actual upgrade (per user 'NMT 1.3 → 1.4 升级 你去做')
+
+- Downloaded file 54961 v1.4 (2025-07-21) to F:\Starfield Mods\Game Play\
+- Extracted on top of mod folder
+- meta.ini: version 1.3.0.0 -> 1.4.0.0, nexusFileStatus=1, installationFile updated
+- **Folder renamed** "No More Tiers Plus 1.3" -> "No More Tiers Plus 1.4" + modlist.txt entry updated to match (1 entry changed)
+
+### More Visualized Docking FOMOD picks recorded (per user)
+
+meta.ini comment now reads: "FOMOD picks: Semi-Immersive (一个外部相机替换为驾驶舱视角) + Instant Undocking (跳过 undocking 序列)"
+
+### Bug class learning for future bash extract-on-top updates
+
+When bash-replacing mod content via extract-on-top, the meta.ini fields that MUST be updated to keep MO2 GUI consistent:
+1. \ersion\ (mod's installed version)
+2. \
+ewestVersion\ (Nexus latest)
+3. **\installationFile\ (path to archive — load-bearing for Nexus refresh)**
+4. **\
+exusFileStatus\ (set to 1=MAIN after fresh install, or MO2 will keep stale OLD/ARCHIVED)**
+5. \lastNexusQuery\, \lastNexusUpdate\ (refresh timestamps)
+6. \1\fileid\ if [installedFiles] section exists (file_id of installed archive)
+7. \comments\ (curator marker)
+8. \installedFiles\\1\modid\ if section exists
+
+Adding to update workflow KB record TBD.
+
+### Remaining status=4 (9 mods, GENUINE update available, NOT my session bugs)
+
+These are real "newer version on Nexus" signals BB84 needs to decide on:
+
+| mod | installed | newest |
+|---|---|---|
+| Community Spaceship Expansion | 1.3.1 | 1.3.2 (minor patch) |
+| Dark Universe Overtime | 1.1.2 | 1.1.3 (minor patch) |
+| Immersive Cargo Halls | 1.0.0 | 1.0.1 (patch) |
+| POI Cooldown | 2 | 3 (MAJOR) |
+| Seamless City Interiors | 1.1.0 | 1.2.0 (minor) |
+| Take Your Time | 1.1.1 | 1.5.0 (MAJOR — also has TA + SS variants) |
+| Take Your Time - Shattered Space | 1.0.0 | 1.0.1 (patch) |
+| SKKFastStartNewGame (in 版本已过期) | 14.0 | 17.0 | (archived; ignore unless reactivating) |
+| Starfield Extended - Craftable Quality (in 版本已过期) | f4.02-FM | 4.1.0 | (archived; superseded by new v4.1 cluster install this session) |
+
+Status post-sweep: 139 mods status=1 (MAIN, correct), 9 status=4 (genuine update available), 8 status=3 (OPTIONAL, correct), 13 status=7 (ARCHIVED, legitimate), 13 status=1000 (custom/local), 4 status=6 (REMOVED on Nexus — hidden/pulled mods), 3 status=9 (unknown — needs investigation).
