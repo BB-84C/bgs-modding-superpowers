@@ -91,9 +91,19 @@ export class PlanCache {
  * Handler that an individual T2/T3 tool implements.
  * - buildPlan: compute diff + affected files + lease targets
  * - applyMutation: execute the mutation given the validated plan
+ * - acquirePlanLock?: opt out of plan-time filesystem lease locking
+ *   (default true). When false, runPlanMode records the lease fingerprint
+ *   without acquiring a filesystem lock; runApplyMode acquires the lock
+ *   briefly at apply time, verifies the fingerprint, mutates, releases.
+ *   Use for tools whose plan phase is pure read and whose lease targets
+ *   are shared write surfaces (multiple plans for distinct mods that all
+ *   land in the same profile's modlist.txt / plugins.txt). BUG-14 BUG-F
+ *   (issue #14): mo2_install opts in so parallel plans for distinct
+ *   mod_names don't block each other.
  */
 export interface PlanApplyHandler {
   toolName: string;
+  acquirePlanLock?: boolean;
   buildPlan(
     args: Record<string, unknown>,
     ctx: ToolContext,
@@ -168,33 +178,49 @@ export async function runPlanMode(
   const planId = randomUUID();
   const expiresAt = Date.now() + LEASE_LOCK_TTL_MS;
   const createdAt = new Date().toISOString();
-  const lock = await acquireLeasesForTargets(requireBoundContext(ctx).config.mo2Root, built.targets, {
-    plan_id: planId,
-    mcp_pid: process.pid,
-    mcp_session_id: ctx.sessionId,
-    lease_token: lease.token,
-    tool_name: handler.toolName,
-    created_at: createdAt,
-    expires_at: new Date(expiresAt).toISOString(),
-  });
-  if (!lock.acquired) {
-    const holders = lock.holders.map((holder) => ({
-      tool: holder.tool_name,
-      tool_name: holder.tool_name,
-      mcp_pid: holder.mcp_pid,
-      created_at: holder.created_at,
-    }));
-    const firstHolder = holders[0];
-    return {
-      ok: false,
-      error: {
-        code: "lease_held",
-        message: `Target is already locked by ${firstHolder.tool_name} in MCP process ${firstHolder.mcp_pid}`,
-        holder: firstHolder,
-        holders,
+
+  // BUG-14 BUG-F (issue #14): handlers may opt to defer lease lock
+  // acquisition to apply time so plan-only operations can run
+  // concurrently against shared write surfaces. When deferred, plan
+  // returns without acquiring any filesystem lock; runApplyMode picks
+  // it up at apply boundary.
+  const lockAtPlan = handler.acquirePlanLock !== false;
+  let leaseLockTargetHashes: string[] = [];
+  if (lockAtPlan) {
+    const lock = await acquireLeasesForTargets(
+      requireBoundContext(ctx).config.mo2Root,
+      built.targets,
+      {
+        plan_id: planId,
+        mcp_pid: process.pid,
+        mcp_session_id: ctx.sessionId,
+        lease_token: lease.token,
+        tool_name: handler.toolName,
+        created_at: createdAt,
+        expires_at: new Date(expiresAt).toISOString(),
       },
-    };
+    );
+    if (!lock.acquired) {
+      const holders = lock.holders.map((holder) => ({
+        tool: holder.tool_name,
+        tool_name: holder.tool_name,
+        mcp_pid: holder.mcp_pid,
+        created_at: holder.created_at,
+      }));
+      const firstHolder = holders[0];
+      return {
+        ok: false,
+        error: {
+          code: "lease_held",
+          message: `Target is already locked by ${firstHolder.tool_name} in MCP process ${firstHolder.mcp_pid}`,
+          holder: firstHolder,
+          holders,
+        },
+      };
+    }
+    leaseLockTargetHashes = lock.targetHashes;
   }
+
   let rec: PlanRecord;
   try {
     rec = cache.store({
@@ -205,10 +231,16 @@ export async function runPlanMode(
       diff: built.diff,
       affectedFiles: built.affectedFiles,
       lease,
-      leaseLockTargetHashes: lock.targetHashes,
+      leaseLockTargetHashes,
     });
   } catch (error) {
-    await releaseLeaseLocks(requireBoundContext(ctx).config.mo2Root, lock.targetHashes, planId);
+    if (lockAtPlan) {
+      await releaseLeaseLocks(
+        requireBoundContext(ctx).config.mo2Root,
+        leaseLockTargetHashes,
+        planId,
+      );
+    }
     throw error;
   }
   return {
@@ -262,6 +294,51 @@ export async function runApplyMode(
       },
     };
   }
+
+  // BUG-14 BUG-F (issue #14): when the handler opted out of plan-time
+  // locking, acquire the filesystem lock here at the apply boundary.
+  // Concurrent applies serialize naturally; the lease verification
+  // immediately below catches any drift that happened between this
+  // plan's generation and the moment the lock was acquired.
+  if (handler.acquirePlanLock === false) {
+    const lock = await acquireLeasesForTargets(
+      requireBoundContext(ctx).config.mo2Root,
+      rec.lease.components.map((component) => ({
+        path: component.path,
+        kind: component.kind,
+      })),
+      {
+        plan_id: rec.planId,
+        mcp_pid: process.pid,
+        mcp_session_id: ctx.sessionId,
+        lease_token: rec.lease.token,
+        tool_name: handler.toolName,
+        created_at: new Date().toISOString(),
+        expires_at: new Date(rec.expiresAt).toISOString(),
+      },
+    );
+    if (!lock.acquired) {
+      const holders = lock.holders.map((holder) => ({
+        tool: holder.tool_name,
+        tool_name: holder.tool_name,
+        mcp_pid: holder.mcp_pid,
+        created_at: holder.created_at,
+      }));
+      const firstHolder = holders[0];
+      return {
+        ok: false,
+        error: {
+          code: "lease_held",
+          message: `Target is already locked by ${firstHolder.tool_name} in MCP process ${firstHolder.mcp_pid}`,
+          // ApplyResult's error shape is generic; pass holder details in
+          // a side-channel-compatible field so callers can introspect.
+          drift: { holder: firstHolder, holders },
+        },
+      };
+    }
+    rec.leaseLockTargetHashes = lock.targetHashes;
+  }
+
   const v = await verifyLease(rec.lease);
   if (!v.valid) {
     await releasePlanLockBestEffort(ctx, rec);

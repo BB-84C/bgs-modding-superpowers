@@ -37,6 +37,24 @@ export declare class PipeClient {
      */
     call(method: string, payload: Record<string, unknown>, timeoutMs?: number): Promise<BrokerResponse>;
     /**
+     * Re-read endpoint.json and update the cached pipeName if it has changed.
+     *
+     * Used by `call()` to recover transparently when MO2 has been restarted
+     * since the original `discoverAndConnect`. We deliberately do NOT re-run
+     * the full discoverAndConnect cycle here:
+     *   - the broker publishes the new endpoint.json on every startup, so a
+     *     simple file read is enough to learn the new pipename;
+     *   - the full ping cycle would block every T3 dispatch in the steady-state
+     *     "pipe is still healthy" path, which is the overwhelming majority of
+     *     calls.
+     *
+     * If `endpoint.json` cannot be read (MO2 closed, plugin removed, IO
+     * race), this method silently returns; the subsequent `_rawCall` will
+     * fail normally and L1/L2 enrichment kicks in. This keeps the stale-pipe
+     * recovery best-effort and never adds a new failure mode.
+     */
+    _maybeRefreshStaleEndpoint(): Promise<void>;
+    /**
      * Raw broker call. Throws plain Error on timeout / empty / parse / socket
      * failure. Callers should prefer `call()` which adds L1+L2 enrichment;
      * `_rawCall` is exposed only for the in-class wrapping seam.
