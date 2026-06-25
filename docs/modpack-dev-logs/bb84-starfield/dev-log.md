@@ -844,3 +844,80 @@ line 199: +Va'ruun Technical Institute Ship Habs
 5. **6890 Starvival reactivation**: deferred to Lane 3 (papyrus-heavy v12.4.6, coordinated re-enable plan)
 6. **10380 Xeno Master TA Addon**: author obsolete decision (uninstall vs replace with 1.2-TA fid 58357)
 
+
+## 2026-06-25 -- Round-4 NEEDS-USER-DECISION batch (8 items, 9 mods touched)
+
+User picks (from BATCH B/C/D/E/F closeout):
+- #1 Left Align XP Bar 95 → Left variant
+- #2 More Immersive Landings 2835 → "16:9" [DEFERRED — FOMOD doesn't actually have aspect-ratio variants; see end of entry]
+- #3 More Visualized Docking 4679 → just-download (user installs)
+- #4 UCMO Complete Edition 12085 → just-download (user installs)
+- #5 Starvival 6890 → Lane 3 discussion
+- #6 Xeno Master TA Addon 10380 → follow latest behavior (= update main 1.2.77 + archive addon as obsolete)
+- 延后-1 Astrogate 9363 → Nexus v5.8 stable replaces BB84 dev-build
+- 延后-2 SE Craftable Quality 5721/8660 → reinstall fresh v4.1 cluster (treat prior as deprecated)
+
+### Operations
+
+**Updated** (3 mods via bash extract-on-top — preserves modlist position + meta.ini):
+- ✅ Xeno Master 10380: 1.1.5.0 → 1.2.77.0 [MAJOR] (157MB; G231_XenoMaster.esm 4.3MB) — required for TA addon obsolete semantics to apply
+- ✅ Left Align XP Bar 95: f1.05 → 1.06 [MINOR] (Left variant per user pick, file 62116)
+- ✅ Astrogate 9363 dev-build → v5.8 stable (NEW folder 'Astrogate', old 'Astrogate 4.0 Beta' kept in 版本已过期 for rollback; 2 ESMs: Astrogate.esm + AstrogateGravJumpMod.esm, registered in plugins.txt as DISABLED matching BB84 prior policy)
+
+**Archived to 版本已过期** (3 mods via mo2-mcp + bash where T3 bugs blocked):
+- ✅ Xeno Master Addon Trade Authority can sell XM Items: enabled → disabled, priority 69 → 374, comment marker [OBSOLETE 2026-06-25] (XM 1.2.76+ injects Trade Authority/Smuggler vendor sales natively; addon redundant)
+- ✅ Astrogate 4.0 Beta + Astrogate 4.0 Beta - SC: comment markers [ARCHIVED 2026-06-25] (BB84 dev-build d2025.7.11.0 superseded by Nexus stable v5.8)
+
+**Fresh install — SECQ v4.1 cluster** (6 NEW mod folders, all DISABLED, pending Lane 3 reactivation review):
+- ✅ Starfield Extended - Craftable Quality v4.1 (parent, modid 5721)
+- ✅ Starfield Extended - Craftable Quality - SS Patch v4.1 (Shattered Space patch)
+- ✅ Starfield Extended - Craftable Quality - TA Patch v4.1 (Terran Armada patch, BB84 has both DLCs)
+- ✅ Starfield Extended - Craftable Quality - SC v4.1 (Chinese parent, modid 8660)
+- ✅ Starfield Extended - Craftable Quality - SS Patch - SC v4.1
+- ✅ Starfield Extended - Craftable Quality - TA Patch - SC v4.1
+- Old cluster (4 folders at modlist priorities 381-384 inside 版本已过期 group) kept as before — user opted to treat previous as deprecated, not delete
+
+**Just-downloaded for user manual install** (2 mods, in D:\Starfield MO2\downloads\):
+- 📥 More Visualized Docking-4679-1-3-2-1777320685.zip (0.95 MB)
+- 📥 UCMO - Complete Edition - FOMOD-12085-1-3-1776039836.7z (1.3 GB)
+
+### mo2-mcp T3 bugs encountered → filed as issue #14 (BB-84C/bgs-modding-superpowers)
+6 bugs bundled into one consolidated report:
+- BUG-A: stale broker pipe PID cache after MO2 restart (pipeConnected:true lies; needed unbind+rebind)
+- BUG-B: send_mod_to above_separator priority off-by-one (plan returns 392, apply rejects [0..375])
+- BUG-C: mo2_install rejects .rar with "Bad7zFile" (blocked 3 of 6 SECQ files)
+- BUG-D: mo2_install doesn't flatten Data/ prefix (silent VFS corruption on Astrogate)
+- BUG-E: mo2_install doesn't auto-register ESMs in plugins.txt (Astrogate needed manual fix)
+- BUG-F: mo2_install plan-phase lease blocks parallel plans for different mod_name targets
+
+Workarounds used: bash extract-on-top for updates, bash install for .rar + Data/ flatten + meta.ini write, mo2-mcp send_mod_to with explicit priority instead of above_separator.
+
+### DEFERRED — Need user clarification
+
+**More Immersive Landings And Takeoffs (#2835 → v1.4.1)**: User answered "16:9" but the actual FOMOD options are NOT aspect ratios. The real choices per author description:
+
+| View mode | Description |
+|---|---|
+| Vanilla Enhanced | 70% exterior camera / 30% cockpit |
+| Semi-Immersive | 30% exterior / 70% cockpit |
+| Immersive | 100% cockpit view |
+
+| Speed | Description |
+|---|---|
+| Default Speed | Same duration as vanilla |
+| 30% Slower | Longer cinematic |
+| Instant Docking | Skip cutscene entirely (for "Instant Docking" sub-mod) |
+
+Mod left at installed v1.4.0 (not updated to 1.4.1) pending user re-pick. Archive downloaded and ready at \D:\Starfield MO2\downloads\More Immersive Landings And Takeoffs-2835-1-4-1-1772883619.zip\.
+
+### State changes
+- modlist.txt: +6 new SECQ entries (lines 2-7 disabled), +1 new Astrogate (line 8 disabled), Xeno Master Addon TA moved priority 69→374, Starvival - Immersive Survival Addon (old dup) already in 版本已过期 from prior batch
+- plugins.txt: +1 entry AstrogateGravJumpMod.esm (disabled, line 120 after astrogate.esm line 119)
+- 版本已过期 separator group: BB84-accepted convention of "above separator" (priority > 391) preserved; one new mod (Xeno Master Addon TA at priority 374) placed BELOW separator due to BUG-B workaround using explicit priority
+- New ESMs in mod folders, NOT YET in plugins.txt for fresh installs: Starfield Extended - Craftable Quality.esm + Starfield Extended - Craftable Quality - Shattered Space Patch.esm + Starfield Extended - Craftable Quality - Terran Armada Patch.esm (BUG-E workaround pending; all SECQ stay disabled so no functional impact)
+
+### Backups
+- D:\Starfield MO2\.backups\modlist-decision-batch-20260625-174028.txt
+- D:\Starfield MO2\.backups\plugins-decision-batch-20260625-174028.txt
+- D:\Starfield MO2\.backups\plugins-astrogate-fix-<ts>.txt
+- Per-mod backups: \mods\Xeno Master\.backup-20260625-174028\\\ (old 1.1.5 content), \mods\Left Align XP Bar\.backup-<ts>\\\ (old f1.05 content)
