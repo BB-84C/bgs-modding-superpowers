@@ -3000,6 +3000,33 @@ class Mo2AgentControlPlugin(mobase.IPluginTool):
     def tooltip(self):
         return self.description()
 
+    def icon(self):
+        # IPluginTool::icon, setParentWidget, and display are all pure virtuals
+        # in MO2's C++ ABI. MO2 calls icon() while building the Tools menu,
+        # setParentWidget() when wiring the menu action's parent dialog, and
+        # display() when the user clicks the tools-menu entry. Missing ANY of
+        # them crashes the dispatch with:
+        #   Tried to call pure virtual function "IPluginTool::<method>"
+        # and that exception kills the whole Tools menu construction, not just
+        # this plugin's own entry. We are a headless control-plane bridge and
+        # intentionally do not surface a tools-menu entry, but MO2 doesn't
+        # care about our intent — it enumerates every IPluginTool subclass
+        # through the full vtable. Provide safe no-op stubs for all three.
+        # Lazy import keeps unit tests (which stub mobase without a real
+        # PyQt6) loadable.
+        from PyQt6.QtGui import QIcon
+        return QIcon()
+
+    def setParentWidget(self, widget):
+        # IPluginTool::setParentWidget pure virtual. We don't render any UI
+        # so we just retain the reference for completeness.
+        self._parent_widget = widget
+
+    def display(self):
+        # IPluginTool::display pure virtual. Called when the user activates
+        # this plugin's tools-menu entry. We're headless; no-op.
+        return None
+
 
 def createPlugin() -> Mo2AgentControlPlugin:
     return Mo2AgentControlPlugin()
