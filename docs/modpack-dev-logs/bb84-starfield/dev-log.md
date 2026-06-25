@@ -683,3 +683,72 @@ Lane C fixer 发现：**11706 Smart Aiming** 名字下 BB84 分裂成 2 个 MO2 
 - HEALTHY UPDATE-MINOR batch (9 mods)
 - Starvival cluster investigation (5 mods, do not reactivate, save for Lane 3)
 
+
+---
+
+### 2026-06-25 cont. — VaruunTI cluster install (Batch A)
+
+**Scope**: 
+1. Archive VaruunTI Habs #12083 main + SC (already AT-RISK, status=removed)
+2. Install Va'ruun Technical Institute Ship Habs #14947 main (same author GreenRecon)
+3. Install VaruunTI 14947 x Immersive Cargo Hall patch (BB84 has DWN_ImmersiveCargoHolds enabled)
+4. Install VaruunTI 14947 x Useful Infirmary patch (BB84 has 'useful infirmaries' CC, currently disabled but kept for future)
+
+**Conflict / dependency check**:
+- VaruunTI 14947 main = same author successor to #12083, no other dependents
+- Out-of-box compat: Useful Brigs ✓, Roverhaul ✓ (-cc), Real Fuel ✓ (-cc), Remote Ship Services (n/a)
+- Patches needed: Place Doors Yourself (✗ not installed, skip), Immersive Cargo Hall (✓ install), Useful Morgues (✗ skip), Useful Infirmary (✓ install)
+
+**SC companion sweep**: 
+- #12083 has "VaruunTI Habs - SC" — archive together with #12083
+- #14947 — BB84 will batch-translate later (xtl workflow); no SC install this round
+
+**Rollback path**: `.backups/modlist-varuun-install-<ts>.txt` + `.backups/plugins-varuun-install-<ts>.txt`
+
+
+### VaruunTI cluster install — DONE
+
+**Files installed**:
+- Main: `VTI Ship Habs-14947-5-4-12-1778776371.zip` (25.3 MB, file_id 65949, v5.4.12) → mod folder `Va'ruun Technical Institute Ship Habs/` (ESM: `VaruunTechnicalInstituteShipHabs.esm`)
+- ICH patch: `VTI ICH Patch-14947-1-0-1-1759348657.zip` (3.9 KB, file_id 57123, v1.0.1) → mod folder `Va'ruun Technical Institute Ship Habs - Immersive Cargo Hall Patch/` (ESM: `VTIICHPatch.esm`)
+- UMI patch: `VTI UMI Patch-14947-1-0-1-1777737073.zip` (7.1 KB, file_id 64988, v1.0.1) → mod folder `Va'ruun Technical Institute Ship Habs - Useful Infirmary Patch/` (ESM: `VTIUMIPatch.esm`)
+
+**Author**: The Green Recon (member_id 188657943) — same author as archived #12083
+
+**modlist priority slots** (197-199 in current modlist; high-priority load-late position for patches to override main):
+```
+line 197: +Va'ruun Technical Institute Ship Habs - Immersive Cargo Hall Patch
+line 198: +Va'ruun Technical Institute Ship Habs - Useful Infirmary Patch
+line 199: +Va'ruun Technical Institute Ship Habs
+```
+
+**plugins.txt**: all 3 ESMs active (`*VTIICHPatch.esm`, `*VTIUMIPatch.esm`, `*VaruunTechnicalInstituteShipHabs.esm`); old ESM `Varuun Technical Institute Ship Habs.esm` kept as inactive entry for tracking
+
+**Archived in same transaction** (now 11 mods in 版本已过期 separator):
+- `VaruunTI Habs` (#12083, status=removed; superseded by #14947 same author)
+- `VaruunTI Habs - SC` (SC companion archived with parent; BB84 will batch-translate #14947 via xtl later)
+
+**meta.ini comments**:
+- New VTI main: `[INSTALLED 2026-06-25] supersedes VaruunTI Habs #12083 ...`
+- New ICH patch: `[INSTALLED 2026-06-25] patch for VaruunTI Habs #14947 x Immersive Cargo Hall ...`
+- New UMI patch: `[INSTALLED 2026-06-25] patch for VaruunTI Habs #14947 x Useful Infirmary ...`
+- Old VaruunTI Habs main: `[ARCHIVED 2026-06-25] superseded by Va'ruun Technical Institute Ship Habs #14947 ...`
+
+**SC sweep**: VaruunTI Habs - SC was correctly archived with parent. New 14947 has no SC variant on Nexus yet; xtl batch translation will address later.
+
+**Conflict check**: zero conflicts found
+- Useful Brigs: out-of-box compat per author description (no patch needed)
+- Roverhaul: out-of-box compat
+- Real Fuel: out-of-box compat
+- Place Doors Yourself patch: SKIPPED (BB84 not installed)
+- Useful Morgues patch: SKIPPED (BB84 not installed)
+
+**Workflow gap caught**: First modlist write used wrong folder name `Varuun Technical Institute Ship Habs` (plugin name) instead of real folder name `VaruunTI Habs`. Created phantom entry. Caught by post-edit verification (occurrence counts = 0 for the inserted mods). Fixed in second pass by re-querying disk folder names. This is the same discipline #2 violation as the earlier Denser Vegetation case — codified rule fires again in practice. The KB record now has a concrete second illustration.
+
+**Backups**: `.backups/modlist-varuun-install-20260625-145236.txt` + `.backups/plugins-varuun-install-20260625-145236.txt`
+
+**Verification**:
+- Mo2Mo2ModInfo confirms 3 new mods with correct meta.ini + ESM file_count
+- modlist occurrence counts: 1 each for all 5 expected entries, 0 for phantom
+- plugins.txt: 3 active new ESMs + old ESM inactive
+
