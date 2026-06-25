@@ -624,6 +624,66 @@ synthesizes 1-2 sentence per-mod summaries from `nexusDescription` therefore
 writes to `comments=` by default; putting those summaries in `notes=` makes the
 list look empty even though the information exists.
 
+## Post-patch loose-extract hygiene (game-install Data\ stale CK extracts)
+
+After every BGS game patch, a standard maintenance pass should sweep the
+game-install `Data\` tree for stale Creation Kit loose extracts. The full
+methodology lives in KB record
+`archive-precedence.stale-ck-extract-loose-files.v1`; the operational shape
+for a maintenance pass is short:
+
+The trap. When the curator installs the Creation Kit alongside the game, the
+CK auto-extracts authoring-time loose files from `Tools\ContentResources.zip`
+into `Data\` — `Data\Materials\` (`.mat`), `Data\Particles\` (`.psfx`),
+`Data\Scripts\Source\` (`.psc`), plus editor metadata. Archive invalidation,
+which any modded curator has enabled, makes those loose files override the
+compiled BA2 databases at runtime. While the game version matches the CK
+extract version this is invisible; the moment the game patches its compiled
+material database, particle archive, or compiled scripts, the loose files
+become stale references against the new BA2 and the runtime breaks silently
+(purple/iridescent terrain, missing meshes, wrong VFX, subtle Papyrus drift).
+
+The cheap diagnostic test. Before bisecting mods on any post-patch visual or
+behavioral regression:
+
+```powershell
+# Inspect the game-install Data\ for stale CK extracts.
+$gd = "<game-install>\Data"
+Get-ChildItem -LiteralPath $gd -Directory |
+  Where-Object { $_.Name -in @('Materials','Particles','Scripts','Source','Textures','EditorFiles','DataViews') } |
+  ForEach-Object {
+    $files = Get-ChildItem -LiteralPath $_.FullName -Recurse -File -ErrorAction SilentlyContinue
+    $oldest = ($files | Sort-Object LastWriteTime | Select-Object -First 1).LastWriteTime
+    "{0,-14}  files: {1,5}  oldest: {2}" -f $_.Name, $files.Count, $oldest
+  }
+```
+
+Compare oldest mtime to the current patch's BA2 mtime. If older, the extract
+is stale. If `Tools\ContentResources.zip` modification time matches the
+current patch, the recovery path is intact — deletion is fully reversible.
+
+The fix. Delete the stale extract trees from `Data\`. Runtime falls back to
+BA2. For Starfield specifically the priority order is `Data\Materials\` →
+`Data\Particles\` → `Data\Textures\` → `Data\Scripts\` (runtime impact),
+then `Data\Source\`, `Data\DataViews\`, `Data\EditorFiles\` (CK-editor-only,
+harmless to keep, harmless to delete).
+
+[WARNING]
+This writes to the real game install, for example
+`D:\SteamLibrary\steamapps\common\<game>\Data\`. It requires explicit
+per-session user confirmation. The action is reversible by re-extracting
+`Tools\ContentResources.zip` into `Data\`, but the deletion itself is
+destructive against the loose extracts that are currently there.
+
+A cleaner long-term pattern: extract `ContentResources.zip` into a dedicated
+Mod Organizer 2 mod folder (e.g. `mods/CK Resources Vanilla/`) so the CK
+loose files can be toggled per-profile and never touch the real game install.
+
+Cross-link: KB record `archive-precedence.stale-ck-extract-loose-files.v1`
+for the full mechanism. KB record
+`debugging.asymmetric-evidence-self-falsify.v1` for the diagnostic
+discipline that prevents the trap from misleading bisection planning.
+
 ## See also
 
 - `setting-up-bgs-modding-environment` — first-run MO2 / xEdit / KB acquisition orchestrator.
