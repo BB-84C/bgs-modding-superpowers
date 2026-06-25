@@ -1,4 +1,6 @@
 import type { ToolContext } from "./types.js";
+/** @internal test-only reset for the dedup'd warning state. */
+export declare function _resetStaleBrokerWarnedForTests(): void;
 /**
  * Structured error thrown when assertActiveProfile detects MO2 is alive on a
  * different profile than the requested mutation target.

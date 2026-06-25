@@ -50,9 +50,20 @@ const handler = {
                 name: args.name,
                 updates,
             });
-            if (!resp.ok)
+            if (resp.ok) {
+                return resp.result;
+            }
+            // BUG-23 (issue #12) fix (2026-06-25): stale-broker deploys lack the
+            // mods.meta_write handler that exists in source. Gracefully fall
+            // through to the offline atomic INI rewrite below instead of bombing
+            // the whole apply. Real broker errors (lock contention, missing mod,
+            // etc.) still surface — only method_not_found triggers the fallback.
+            // The offline path's only semantic gap vs. broker is the
+            // modDataChanged signal MO2 picks up on its next refresh anyway.
+            if (resp.error?.code !== "method_not_found") {
                 throw new Error(resp.error?.message ?? "broker error");
-            return resp.result;
+            }
+            warnStaleMetaWriteBroker();
         }
         let text = "";
         try {
@@ -67,9 +78,26 @@ const handler = {
             }
         }
         await atomicWriteText(metaPath, text);
-        return { name: args.name, sections_updated: Object.keys(updates), source: "offline" };
+        return {
+            name: args.name,
+            sections_updated: Object.keys(updates),
+            source: pipeClient ? "offline_fallback_stale_broker" : "offline",
+        };
     },
 };
+let META_WRITE_STALE_WARNED = false;
+function warnStaleMetaWriteBroker() {
+    if (META_WRITE_STALE_WARNED)
+        return;
+    META_WRITE_STALE_WARNED = true;
+    process.stderr.write("[mo2-mcp] broker lacks 'mods.meta_write' handler; falling through to offline INI rewrite. " +
+        "Consider redeploying via tools/mo2-control-plane/install-mo2-control-plane.ps1 " +
+        "and restarting MO2.\n");
+}
+/** @internal test-only reset for the dedup'd warning state. */
+export function _resetMetaWriteStaleWarnedForTests() {
+    META_WRITE_STALE_WARNED = false;
+}
 registerTool({
     name: "mo2_edit_meta",
     tier: "T2",
