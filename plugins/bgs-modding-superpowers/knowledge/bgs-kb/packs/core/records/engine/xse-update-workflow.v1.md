@@ -73,31 +73,31 @@ The standard update workflow is: detect the current extender by the `<xse>_*.dll
 
 ## Cascade pattern: xSE → Address Library → SFSE/SKSE/F4SE plugin mods
 
-A game runtime update does NOT stop at xSE. It cascades:
+The cascade is the principle: a game runtime bump propagates through every component that binds to runtime-specific addresses. Updating the script extender seals only the first containment door. Anything downstream that resolves addresses against the old runtime can still fail.
 
-1. **xSE binary** (`sfse_loader.exe` + `sfse_<runtime>.dll`) — drops into the
-   game root next to `<game>.exe`. Only this layer touches the actual game
-   install. Covered earlier in this record.
-2. **Address Library** — a normal MO2 mod containing `Data\SFSE\Plugins\versionlib-<runtime>.bin` files.
-   When the game runtime bumps, the bundled `versionlib-<old-runtime>.bin` becomes irrelevant; the new
-   `versionlib-<new-runtime>.bin` must be present. Update via standard Nexus
-   workflow (#3256 for Starfield), DOES NOT touch game root — the .bin
-   files live under the mod's `SFSE\Plugins\` directory and MO2's VFS
-   projects them into `Data\SFSE\Plugins\`.
-3. **Every SFSE/SKSE/F4SE plugin mod** — each one ships its own
-   `Data\SFSE\Plugins\<plugin>.dll`. Two failure classes:
-   - `<plugin>.dll vN.N.N: disabled, address library needs to be updated` —
-     mod itself is fine, just needs the new Address Library .bin (Step 2
-     above fixes it).
-   - `<plugin>.dll vN.N.N: disabled, incompatible with current version of
-     the game` — mod needs its own version bump from the author. Check
-     Nexus for a newer version; if `status=not_published` or `status=hidden`
-     the author has pulled the mod and the user must decide (disable / find
-     replacement / accept loss).
+The dependency chain is:
 
-The `SFSE Plugin Loader` dialog at game launch (after SFSE itself succeeds)
-lists every mod that failed for each of these reasons. That dialog is the
-canonical user-facing diagnostic for the cascade state.
+1. **xSE binary** (`sfse_loader.exe` + `sfse_<runtime>.dll`) — drops into the game root next to `<game>.exe`. Only this layer touches the actual game install. Covered earlier in this record.
+2. **Address Library** — a normal MO2 mod containing `Data\SFSE\Plugins\versionlib-<runtime>.bin` files. When the game runtime bumps, the old `versionlib-<old-runtime>.bin` no longer satisfies plugins looking for the new runtime. Update via the standard Nexus workflow (#3256 for Starfield); it does not touch game root because MO2 projects the mod's `SFSE\Plugins\` files into `Data\SFSE\Plugins\`.
+3. **Every SFSE/SKSE/F4SE plugin mod** — each ships its own `Data\SFSE\Plugins\<plugin>.dll` and may need an author-side rebuild for the current runtime.
+
+The `SFSE Plugin Loader` dialog at game launch is the user-facing diagnostic for the cascade state. It usually separates failures into two classes:
+
+- **Address-library-missing class** — `<plugin>.dll ... address library needs to be updated`. The plugin may already be compatible; it cannot find the new versionlib file. Updating Address Library is the intended response.
+- **Author-side-incompatible class** — `<plugin>.dll ... incompatible with current version of the game`. The plugin DLL itself was built for an older runtime. The intended response is to investigate whether the author has published a compatible build or whether the mod must be parked until they do.
+
+### When a mod's latest published version still lags the current runtime
+
+Author lag is normal after runtime bumps. Nexus' latest file is only the latest file the author has published, not proof that the author has caught up to the local Steam runtime. A mod can show a fresh `meta.ini version=` and still fail the same `incompatible with current version of the game` loader check.
+
+Diagnose by comparing two facts:
+
+- the current local runtime from `Get-Item <gameRoot>\<game>.exe | Select VersionInfo`;
+- the author's most recent support claim in the Nexus changelog or `/v1/games/{game}/mods/{modid}/files.json` `description` field, typically "Added support for Game Version X.Y.Z".
+
+If the support ceiling is behind the current runtime, the update did not satisfy the compatibility intent. Treat that as a normal waiting state, not as a mysterious failed install: keep the closest candidate if useful, encode the support ceiling in the folder name or comments, move the mod into the curator's waiting-for-author separator, disable it if it cannot load, and annotate `meta.ini comments=` with a current-runtime waiting tag.
+
+Concrete instance: CharGenMenu v1.1.0.22 was the latest published file, but its changelog only claimed support through Game Version 1.16.242 while the local Starfield runtime was 1.16.244. The correct state after update was still waiting/disabled, not "fixed".
 
 For a full cascade workflow:
 
