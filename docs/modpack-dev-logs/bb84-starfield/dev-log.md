@@ -582,3 +582,104 @@ Lane C fixer 发现：**11706 Smart Aiming** 名字下 BB84 分裂成 2 个 MO2 
 - Lane 3: 待开 — multi-perspective consultation 设计 audit framework (有了 audit-workflow-rigor.v1 作为基线)
 - Lane 4: 汉化批量重译 (最后)
 
+
+---
+
+## 2026-06-25 (深夜 cont. 2) — 主线恢复 + bash workaround discipline
+
+### 这一轮的方法论纠正
+
+用户在我用 raw bash 制造 phantom modlist entry 之后，明确：
+1. **mo2-mcp 工具优先** (KB record `install-planning.mod-mutation-cleanliness-discipline.v1` 已 codify)
+2. mo2-mcp T3 (mutation) 全部 broken (issue #12 已提交)
+3. 在 parallel session 修 mo2-mcp 期间，允许 bash workaround
+4. 但每次 mutation 必须严格走 7-discipline checklist
+
+### 7-discipline 模板（每个 mutation 都走一遍）
+
+1. Tool choice: bash (mo2-mcp T3 broken, see issue #12)
+2. Folder name vs plugin name: 先 `Get-ChildItem mods/` disk-verify
+3. SC companion sweep: 查找 `<name> - SC` / `<name> 汉化` 变体
+4. Pre-mutation dev-log entry (本节就是)
+5. Meta.ini comment 写 status marker
+6. Dependency check: xEdit references / patch sibling mods
+7. Conflict check: xEdit conflict-audit / asset overlay
+
+### 本轮 install/update 队列
+
+按优先级:
+1. **VBE 16176** (这一节): replace Denser Vegetation + Just Random Vegetation Rock 双重职能 (本回合)
+2. VaruunTI 14947 main + 2 patch: replace VaruunTI Habs 12083 (下回合)
+3. Stroud Premium 2.5.3 + 2 patch: version update (下回合)
+4. Take Your Time - SS TA patch fid 65395 (下回合)
+5. HEALTHY UPDATE-MAJOR (10 mods batch) (下下回合)
+6. HEALTHY UPDATE-MINOR (9 mods batch) (下下回合)
+7. NEEDS-USER-DECISION 6 mods - 等用户 pick variant
+8. Starvival cluster (5 mods) update/merge/drop investigation - 不激活，留 Lane 3
+
+### 本节 mutation: Install VBE 16176 (Vanilla Biomes Enhanced - A GRiNDTerra Mod)
+
+**Intent**: replace 已 archive 的 Denser Vegetation - GRiNDTerra (#9710) + Just Random Vegetation Rock and Exotic Sizes - GRiNDTerra (#11334)。VBE rollup 了两者全部职能 (per author homepage #12307)。
+
+**Source**: Nexus #16176, latest Main file (待 API 查询)
+
+**Target folder**: `D:\Starfield MO2\mods\Vanilla Biomes Enhanced - A GRiNDTerra Mod\`
+
+**modlist 位置**: GRiNDTerra cluster 内 (priority ~336-338，Less Rocks 旁)
+
+**plugins.txt 位置**: 替代 DenserVegetationGterra.esm 原位置 (line 75 area，但 ESM filename 待下载后确认)
+
+**SC companion**: VBE 还没有官方 SC（也许将来有）；本轮先不装 SC，meta.ini comment 标注待留意
+
+**Dependency check**: 
+- DOWN: 自己 standalone，无依赖
+- UP: 没有别的 mod 把 #9710 / #11334 作为 master（已 disable，无 phantom dependents）
+
+**Conflict check**: 
+- 跟 Less Rocks - GRiNDTerra (13094) 互斥 per author description (NOT COMPATIBLE: Vanilla Biomes Enhanced or Fantastical Frontiers Rocks). 用户 modlist 里 Less Rocks 还启用 — 装 VBE 之前需要 disable Less Rocks
+- 跟 Fantastical Frontiers 互斥 (用户没装，OK)
+
+**Rollback path**: backup files `.backups/{modlist,plugins}-vbe-install-<ts>.txt`；如装坏，删 mod folder + revert backups
+
+
+### VBE 16176 install — DONE
+
+**File installed**: GRiNDTerraVBO-16176-3-5-1778633197.zip (737 KB, file_id 65825, version 3.5)
+**Download mirror**: Chicago Premium CDN, 0.5s
+**Archive structure**: `GRiNDTerraVBO/Data/GRiNDTerraVBO.esm` → flattened to mod folder root
+**Mod folder**: `D:\Starfield MO2\mods\Vanilla Biomes Enhanced - A GRiNDTerra Mod\` (1 file, 3.6 MB)
+**ESM**: `GRiNDTerraVBO.esm`
+**modlist priority**: ~336 (after "Other Mods" separator, before Trees Rescaled)
+**plugins.txt**: `*GRiNDTerraVBO.esm` inserted after the archived GRiNDTerra plugins
+**meta.ini comments**: `[INSTALLED 2026-06-25] supersedes Denser Vegetation - GRiNDTerra (#9710) + Just Random Vegetation Rock - GRiNDTerra (#11334); also incompatible with Less Rocks - GRiNDTerra (#13094, archived)`
+
+**Conflict resolution executed in same atomic edit**:
+- Less Rocks - GRiNDTerra (#13094) was the only conflicting installed mod (per VBE author description: "NOT COMPATIBLE: Vanilla Biomes Enhanced or Fantastical Frontiers Rocks")
+- Less Rocks disabled in modlist + moved to 版本已过期 separator (now 9 mods archived above separator)
+- Less Rocks ESM (`rocksgverseppg.esm`) deactivated in plugins.txt
+- Less Rocks meta.ini comment: `[ARCHIVED 2026-06-25] superseded by Vanilla Biomes Enhanced - A GRiNDTerra Mod #16176 (author marks Less Rocks as NOT COMPATIBLE with VBE)`
+
+**SC companion sweep**: VBE has no SC variant yet on Nexus (per files endpoint enumeration); BB84 SC translation workflow can address later when xtl batch runs.
+
+**Backups**: 
+- `.backups/modlist-vbe-install-20260625-144616.txt`
+- `.backups/plugins-vbe-install-20260625-144616.txt`
+
+**Verification**:
+- Mo2Mo2ModInfo read confirms VBE mod folder + meta.ini + ESM file
+- Less Rocks meta.ini cross-confirmed archived comment via MCP read
+- modlist + plugins.txt occurrence counts validated (1 each, no duplicates, no phantoms)
+
+**Replacement chain (VBE 16176 covers)**:
+- ✓ Denser Vegetation - GRiNDTerra (#9710, archived earlier this session)
+- ✓ Just Random Vegetation Rock and Exotic Sizes - GRiNDTerra (#11334, archived earlier this session)
+- ✓ Less Rocks - GRiNDTerra (#13094, archived in same VBE install transaction)
+
+**Pending for next round**:
+- VaruunTI Habs 14947 main + Immersive Cargo Hall patch + Useful Infirmary patch
+- Stroud Premium 2.5.3 main + TerranArmada AddOn + Useful Infirmaries patch
+- Take Your Time - SS TA patch (fid 65395)
+- HEALTHY UPDATE-MAJOR batch (8 remaining mods after Less Rocks retirement)
+- HEALTHY UPDATE-MINOR batch (9 mods)
+- Starvival cluster investigation (5 mods, do not reactivate, save for Lane 3)
+
