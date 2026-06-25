@@ -752,3 +752,95 @@ line 199: +Va'ruun Technical Institute Ship Habs
 - modlist occurrence counts: 1 each for all 5 expected entries, 0 for phantom
 - plugins.txt: 3 active new ESMs + old ESM inactive
 
+
+---
+
+### 2026-06-25 cont. — BATCH B/C/D/E/F 一气完成: 17 updates + 3 Stroud cluster + 1 TA patch + Starvival cluster
+
+**Scope summary (~25 mods touched)**:
+- HEALTHY UPDATE-MAJOR (9 mods, excluding Less Rocks already archived + Astrogate dev-build question deferred + SE-Craftable-Quality 4-file cluster handled separately)
+- HEALTHY UPDATE-MINOR (9 mods)
+- Stroud Premium 2.5.3 main update + AddOn TerranArmada + Patch Useful Infirmaries (3 mods)
+- Take Your Time - Shattered Space TA patch (1 new install, fid 65395)
+- Starvival cluster investigation (~5 mods, update if newer, no activation)
+
+**Methodology**:
+- UPDATE workflow: download new archive → backup current mod folder contents to `<modfolder>/.backup-<ts>/` → extract new → update meta.ini version + newestVersion + [UPDATED] comment
+- NEW INSTALL workflow: same as VBE/VaruunTI cluster
+- modlist.txt + plugins.txt only touched for new installs (UPDATEs leave them alone)
+- Single dev-log entry covering whole batch (not per-mod, too verbose)
+
+**Caution flags**:
+- Useful Brigs 5.0.1 → 6.1: author warns modded habs may need v6 compat patches. BB84 has VaruunTI Habs (just installed v5.4.12 with out-of-box brig compat per author description). Update Useful Brigs but flag for in-game verification.
+- Smart Aiming and HD Overhaul part 02 had VERSION-TAG-UNSYNC verdicts; no update action.
+- The Gang's All Here 4.2 changelog: "Removed localization" — SC translation `The Gang's All Here - SC` may break against 4.2; flag for Lane 4 batch translation refresh.
+
+**Backups**: `.backups/{modlist,plugins}-bulk-update-<ts>.txt` + per-mod `.backup-<ts>/` inside each updated folder
+
+
+### BATCH B/C/D/E/F — DONE summary
+
+**Total mods touched this batch**: 23
+
+**UPDATE-MAJOR (8 successful, 1 deferred)**:
+- ✅ 11045 Dark Universe - Takeover: 1.1.0.0 → 2.1.0 (96 MB)
+- ✅ 11530 Places Of Intrigue - GRiNDTerra: 3.5 → 5 (same author ItsmePaulieB as VBE; SC refresh later)
+- ✅ 13306 Real Fuel - BETA: 1.1.2.0 → 1.3.1
+- ✅ 10418 Revelation - Main Quest Temple Overhaul: 1.0.0.0 → 1.5.0
+- ✅ 10057 Ship Vendor Framework: 1.5.4.0 → 1.10.0
+- ✅ 8139 Useful Brigs: 5.0.1.0 → 6.1 (file 68523, with VaruunTI/Stroud brig compat caution flagged)
+- (deferred) 9363 Astrogate 4.0 Beta: BB84 dev-build vs Nexus question
+- (deferred) 5721/8660 Starfield Extended - Craftable Quality cluster (4-file in 版本已过期 separator, needs separate reactivation plan)
+- ✅ (archived) 13094 Less Rocks - GRiNDTerra: already archived in VBE conflict-cascade earlier
+
+**UPDATE-MINOR (9 successful)**:
+- ✅ 8093 Immersive Landing Ramps: 3.0.0.0 → 3.1.0
+- ✅ 14158 NAT Station Lake Windows: 2.0.0.0 → 2.1.0
+- ✅ 7812 Non-Lethal Framework: 3.0.2.0 → 3.2
+- ✅ 10874 RRLNA - Rabbit's Real Lights New Atlantis: 1.3.0.0 → 1.4
+- ✅ 10131 Starshake - Vizualized Recoil: 2.0.0.0 → 2.1.0
+- ✅ 7469 The Gang's All Here: 4.1.0.0 → 4.2 (4.2 removed localization — SC translation may break, flag for Lane 4)
+- ✅ 11350 UC Military Overhaul - All-In-One: 2.1.0.0 → 2.2
+- ✅ 7205 UC Surplus Expanded - Immersive: 1.2.0.0 → 1.3
+- ✅ 11819 UCMO - Spec Ops Skin Pack: 1.1.0.0 → 1.2
+
+**Stroud Premium cluster (3 mods)**:
+- ✅ 12330 Stroud Premium Edition main: 2.3.3 → 2.5.3 (33 MB; LEAVE NEW ATLANTIS BEFORE LAUNCHING; ships native Chinese)
+- ✅ 12330 NEW: Stroud Premium Edition - TerranArmada AddOn v1.1.0 (Patch-SPE-TerranArmada.esm; BB84 has Terran Armada DLC)
+- ✅ 12330 NEW: Stroud Premium Edition - Useful Infirmaries Patch v1.2.0 (Patch-SPE-UI.esm; for future CC re-enable)
+
+**Take Your Time - Shattered Space TA patch**:
+- ✅ 10419 NEW: Take Your Time - Terran Armada v1.0.2 (Take Your Time - Terran Armada.esm)
+
+**Starvival cluster** (do NOT activate; Lane 3 territory):
+- ✅ UPDATED: Starvival - Immersive Survival Addon - New v11 → v12.4.6 (200 MB, papyrus-heavy)
+- ✅ ARCHIVED: Starvival - Immersive Survival Addon (older 10.8 duplicate, moved to 版本已过期)
+- 📋 FLAGGED: Starvival - Immersive Survival Addon - SC (Nexus side hasn't refreshed beyond 10.8; Lane 4 territory)
+- 📋 FLAGGED: Starvival - patch (local BB84 patch; review at reactivation)
+- All 4 stay DISABLED; reactivation framework decision deferred to Lane 3 multi-perspective consultation
+
+**modlist/plugins surfaces touched**:
+- 3 new mod folders inserted to modlist (Stroud patches above Stroud main, TYT-TA above TYT main)
+- 3 new ESMs activated in plugins.txt
+- 1 older Starvival folder moved to 版本已过期 separator (now **13 mods** archived above separator)
+
+**Caution flags surfaced for in-game verification**:
+1. **Useful Brigs 6.1**: author warns modded habs may need v6 compat. VaruunTI 14947 just installed has out-of-box brig compat per author. Verify in-game with brig hab.
+2. **Stroud Premium 2.5.3**: author says "LEAVE NEW ATLANTIS BEFORE LAUNCHING" after update.
+3. **The Gang's All Here 4.2**: "Removed localization" per changelog. SC translation needs Lane 4 refresh.
+4. **Real Fuel BETA 1.3.1**: "safe from 1.2+" per author; BB84 was on 1.1.2 (beta line jump may need clean save per fixer note).
+5. **Ship Vendor Framework 1.10.0**: BB84 was on 1.5.4, crossing v1.6+ migration boundary; FOMOD/patch rebuild may be needed (deferred to NEEDS-USER-DECISION queue if FOMOD prompt requires choices).
+
+**File backups**: each updated mod folder has .backup-20260625-150825/ subdir with previous content; total ~25 individual mod backups + modlist/plugins root backups.
+
+**Total Nexus Premium API calls this batch**: ~60 (mod info + files endpoints + download_link + downloads × 20 mods).
+
+### Remaining: 6 NEEDS-USER-DECISION mods (waiting for your variant picks)
+
+1. **95 Left Align XP Bar**: 4 variants (Left/Center/Right/Color)
+2. **2835 More Immersive Landings And Takeoffs**: camera-ratio variants (16:9/21:9/4:3)
+3. **4679 More Visualized Docking**: FOMOD camera variant
+4. **12085 UC Military Overhaul - Complete Edition**: FOMOD re-run (deselect textures, select Tweaks + Visors)
+5. **6890 Starvival reactivation**: deferred to Lane 3 (papyrus-heavy v12.4.6, coordinated re-enable plan)
+6. **10380 Xeno Master TA Addon**: author obsolete decision (uninstall vs replace with 1.2-TA fid 58357)
+
