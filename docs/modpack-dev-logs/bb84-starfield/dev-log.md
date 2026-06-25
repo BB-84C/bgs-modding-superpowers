@@ -460,3 +460,125 @@ Nexus #6850 changelog：
 - Lane 3: pending — 真正的 mod 集合 priority audit + plugins.txt 排序优化。用本轮的 Section 1 (10 个真决策项) 作为切入点。需 multi-perspective consultation 设计 audit framework。Lane 5 已并入 Lane 3。
 - Lane 4: pending — 汉化批量重译（最后）
 
+
+---
+
+## 2026-06-25 (深夜 cont.) — Lane 2 用户纠正回合 + 三轮 codification + 2 个 mutation 落地
+
+### 用户的工作流方法论纠正（核心 lesson）
+
+四回合下来你都在用很少的时间发现我（和 subagent）的报告漏洞。我反思总结了你的方法论：
+
+1. **Never quit on first failure** — Nexus user API 404 不是终止信号，3+ fallback 路径（Exa 搜 / 关键词 / 系列命名）才能宣告 "not found"
+2. **Re-validate upstream signals** — Orchestrator 不能直接接受 fixer 的 Green 标签；版本归一化必须 自己重判
+3. **Read descriptions fully, not keyword scan** — "Abandoned Farm" 是游戏 POI 名不是 mod 弃坑信号
+4. **Cross-reference every recommendation** — Stroud x Useful MessHalls 推荐前必须 grep BB84 modlist，不能默认装
+5. **Question anomalies, don't paper over** — installed > latest 不是"特殊情况"，是 Nexus author 忘了 bump page version 的常见模式
+6. **Surface complete decision space** — 只输出 verdict 关上用户决策门；surface essence + 候选 + alternatives 才是 audit-grade
+
+### 沉到 KB / Skill 的 3 record + 1 skill section
+
+- `engine.mo2-process-locking-semantics.v1` — MO2 锁 plugins/modlist/INI 但不锁 mods/，装 mod 不需要关 MO2
+- `mod-evaluation.author-version-tag-unsync.v1` — page-version 跟 file-version 是独立编辑面，desync 是常态；audit 必须比 file-level 不是 page-level
+- `install-planning.audit-workflow-rigor.v1` — 6 条 binding disciplines（never quit / re-validate / read fully / cross-ref / enumerate all files / surface complete）
+- `interpreting-mod-author-instructions/SKILL.md` 新增 `Comprehensive file enumeration and cross-reference` section — Stroud x BB84 4-patch + Shader Injector ASI/SFSE multi-variant 作为 illustration
+
+KB 总数 151 → 154。push: `df85c49` / vendor parity ✓
+
+### 两轮 fan-out 调查结果汇总
+
+**轮 1 (4 lane × modulo) - 表层 staleness**: 172 mod → 51 Red + 57 Yellow + 67 Green
+**轮 2 (4 lane × 12 mod) - 深度命运调查**: 用户纠正后改用 KB record `install-planning.audit-grade-mod-fate-investigation.v1` 的 4+ outcome framework
+**轮 3 (4 lane × ~30 mod) - HEALTHY 假阴性复查**: 我 orchestrator 信了 fixer Green 标签的 bug → 32 个假阴性发现，全部有真实版本落后
+
+### 你的 7 个决策的逐项验证 + 调查补完
+
+1. **Denser Vegetation - GRiNDTerra → Vanilla Biomes Enhanced (16176)** ✓ same author ItsmePaulieB；VBE 覆盖随机植被尺寸 + 岩石 + denser forests + 新 Fauna 系统
+2. **Just Random Vegetation Rock - GRiNDTerra → 同样是 VBE (16176)** — 漏报修正：作者 GRiNDTerra Mods Homepage (12307) 写明 VBE rollup 了 11334 全部功能；不是没找到，是 fixer 没读 author homepage
+3. **Weapon Swap Stuttering Fix** → 保持 等待作者更新
+4. **Space Ship Landing Reloaded → DROP** ✓ 你找对了。Vanilla Starfield 1.16.236 (2026-04-07) 加了原生 Accessibility Options Landing Animation。证据：APLA mod (15742) description 显式说 "Starfield natively supports a Landing Animation camera... disable/uninstall APLA after updating"
+5. **VaruunTI Habs → Va'ruun Technical Institute Ship Habs (14947)** ✓ 同作者 GreenRecon (188657943)，作者主页只有这一个 mod。Patches available: Place Doors Yourself / Immersive Cargo Hall / Useful Morgues / Useful Infirmary。BB84 cross-ref: 装 Immersive Cargo Hall patch (DWN_ImmersiveCargoHolds.esm enabled) + Useful Infirmaries patch (CC mod 目前 disabled，重启用时配套)
+6. **OwlTech Pathfinder → DROP** ✓ Owl Tech 系列后续作品列入兴趣清单：
+   - **15129 OwlTech Perditus Fleet** (Star Trek 全舰队，最可能是你说的"新的类似 pathfinder"的后继)
+   - 12088 Owl Tech Lets Work Habs (289 endorsements)
+   - 12431 Owl Tech Ship Living (255 endorsements)
+   - 13010 OwlTech Nautilus (120 endorsements)
+   - 13248 OwlTech Obsession (UC-themed Pequod + Beluga)
+   - 12973 OwlTech Echoes Of The Past (submarine-themed habs)
+7. **Stroud Premium Edition → 2.5.3 + 2 个 optional**:
+   - Main 2.5.3 (file_id 65432) — update
+   - AddOn SPE x TerranArmada 1.1.0 (file_id 67188) — install (BB84 has Terran Armada DLC)
+   - Patch SPE x Useful Infirmaries 1.2.0 (file_id 64635) — install (BB84 has 'useful infirmaries' CC mod)
+   - Patch SPE x Useful MessHalls — SKIP (没装 MessHalls)
+   - AddOn SPE x Deimog — SKIP (没装 Deimog)
+   - **作者警告**：LEAVE NEW ATLANTIS BEFORE INSTALLING/UPDATING SPE 2.0+
+
+### 2 个 mutation 已落地（本轮）
+
+- **Disable Denser Vegetation - GRiNDTerra**：modlist.txt + → -，移到 版本已过期 separator 紧上方
+- **Drop OwlTech Pathfinder**：modlist.txt + → -，同样移到 版本已过期 separator
+- plugins.txt: DenserVegetationGterra.esm + owltech_pathfinder.esm 的 `*` 已 strip
+- Backups: `.backups/modlist-pre-archive-20260625-141156.txt` + `.backups/plugins-pre-archive-20260625-141204.txt`
+
+### HEALTHY false negatives 调查总结（4 lane recheck，30 mod）
+
+| Bucket | Lane A | Lane B | Lane C | Lane D | Total |
+|---|---|---|---|---|---|
+| UPDATE-MAJOR | 3 | 4 | 2 | 1 | **10** |
+| UPDATE-MINOR | 2 | 2 | 1 | 4 | **9** |
+| NEEDS-USER-DECISION (variants/FOMOD) | 3 | 0 | 1 | 2 | **6** |
+| VERSION-TAG-UNSYNC (page stale) | 0 | 1 | 2 | 0 | **3** |
+| NO-ACTION | 0 | 1 | 1 | 0 | **2** |
+
+**关键 NEEDS-USER-DECISION 项**：
+- **95 Left Align XP Bar**: 4 个变体（Left Align / Center Align / Right Align / Color 选择），需 BB84 pick
+- **2835 More Immersive Landings And Takeoffs**: camera-ratio 变体（16:9 vs 21:9 vs 4:3）
+- **4679 More Visualized Docking**: FOMOD camera variant
+- **12085 UC Military Overhaul - Complete Edition**: FOMOD 需 re-run（deselect texture options because AIO 11350 覆盖，opt-in Tweaks + Visors 匹配现有 UCMO_CE_Tweaks_Visors.esm）
+- **6890 Starvival - Immersive Survival Addon - New**: papyrus-heavy v11 → v12.4.6 有 script state-machine 变化，4 个子文件夹 + SVF-Starvival-Patch.esm 都 DISABLED，整体重激活需协调决策
+- **10380 Xeno Master Addon Trade Authority**: 作者宣布 obsolete (1.2.76 起 Xeno Master 自带 TA injection)，需决定 uninstall vs replace-in-place with 1.2-TA fid 58357
+
+**关键 VERSION-TAG-UNSYNC 项**（page-version stale，无需操作）：
+- **14274 Immersive Star Colours**: page 1.0 / file 1.1 / installed 1.1.0.0 — installed 等于真 latest
+- **5562 Starfield Shader Injector**: page 1.9 / file 1.10 / installed 1.10.0.0 — installed 等于真 latest
+- **5971 SKKFastStartNewGame**: page 15 / file 017 / installed 14 → 实际是 installed 落后 file 017
+- **5124 Starfield HD Overhaul part 02**: page 3.14 反映的是最后上传的 part (18)，per-part 版本不一样；part 02 真实 latest 是 3.10
+- **10419 Take Your Time - Shattered Space**: page 1.5.0 是 MAIN parent 版本；SS-specific OPTIONAL patch 是 1.0.1。BB84 缺 Terran Armada 配套 patch (fid 65395 v1.0.2)
+
+### 重大 collateral 发现 (audit classifier bug surface)
+
+Lane C fixer 发现：**11706 Smart Aiming** 名字下 BB84 分裂成 2 个 MO2 folder：
+- "Smart Aiming - Third to First Person (Updated) ini" - 是 OPTIONAL config 文件 (file_id 45133)，v1.0 没变化
+- "Smart Aiming - Third to First Person (Updated)" 是 SFSE binary，需要 v5.0.0 更新
+
+我之前 inventory 只见了 ini folder，没扫到 binary folder。**audit inventory 漏掉了同 mod 多 folder 的情况**。
+
+### 待执行项（下回合 — 需 BB84 决策一些 variant）
+
+**HIGH PRIORITY - 立刻可下载的**:
+- **VBE 16176**: replace Denser Vegetation + Just Random Vegetation Rock 双重职能
+- **VaruunTI 14947**: replace VaruunTI Habs 12083
+- **Stroud Premium 2.5.3** + 2 optional patches (TerranArmada AddOn + Useful Infirmaries Patch)
+
+**HEALTHY UPDATE-MAJOR**（10 mods - 大版本跳，应该更新）:
+- 9363 Astrogate (file 67339 v5.8)
+- 11045 Dark Universe Takeover (file 63726 v2.1.0)
+- 13094 Less Rocks (file 65986 v2.0) — 但 VBE 覆盖了它，可以同时退役
+- 11530 Places Of Intrigue - GRiNDTerra (v5)
+- 13306 Real Fuel BETA (v1.3.1)
+- 10418 Revelation Temple Overhaul (v1.5.0)
+- 10057 Ship Vendor Framework (v1.10.0)
+- 8660 Starfield Extended Craftable Quality - SC + 5721 Shattered (4-file batch)
+- 8139 Useful Brigs (v6.1 — author warning: leave 等待 if modded habs 需 v6 compat patch)
+
+**NEEDS-USER-DECISION** (6 mods - variant/FOMOD choices 上方已列)
+
+**UPDATE-MINOR** (9 mods - 可批量执行)
+
+### Lane 编排回顾
+- Lane 0: ✓ MO2 2.5.3 beta12
+- Lane 1: ✓ 跳过 (Materials delete 修复了视觉)
+- Lane 2: ✓ 本轮完成
+- Lane 3: 待开 — multi-perspective consultation 设计 audit framework (有了 audit-workflow-rigor.v1 作为基线)
+- Lane 4: 汉化批量重译 (最后)
+
