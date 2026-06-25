@@ -190,6 +190,68 @@ After finding the answer:
 
 Cross-link: KB record `mod-evaluation.investigating-pulled-mods.v1` for the full pattern with example cases.
 
+## Comprehensive file enumeration and cross-reference (rigor discipline)
+
+Authors organize files into categories to communicate intent. Reading only the
+Main file's description is the most common shallow-investigation pattern, and
+it skips the half of the curator's work that actually matters.
+
+For every mod install or update, enumerate the FULL file listing under all
+visible Nexus file categories:
+
+- **Main** — current canonical builds. Often more than one. The variants encode
+  game-runtime support (SFSE vs GamePass ASI), feature flags (with/without
+  module X), color/size choices, fork lineages, and required-vs-optional
+  prerequisites. Surface every variant to the curator with the differentiator
+  named.
+- **Optional** — compatibility patches and add-ons. Each carries a description
+  identifying which other mod it patches and what game systems it touches.
+  Walk this list one file at a time.
+- **Update** — incremental patches against an earlier Main file. Usually
+  require the Main file as prerequisite; do not install Update files standalone
+  without verifying.
+- **Archived / Old** — superseded versions. Do not install from this category
+  by default; it exists for historical fallback, not as the recommended target.
+
+For each Optional file the author lists:
+
+1. Read the file description fully — what mod does it patch? What feature does
+   it enable? Are there prerequisites listed?
+2. Cross-reference the patched-mod claim against the curator's installed
+   environment:
+   - `<MO2Root>/profiles/<profile>/modlist.txt` — enabled (`+`) AND disabled
+     (`-`) mods both count; the curator may re-enable a disabled CC mod and
+     then need the patch installed.
+   - `<MO2Root>/profiles/<profile>/plugins.txt` — active (`*`) plugins.
+   - The actual `<MO2Root>/mods/<modname>/` folder list — sometimes a mod is
+     present but not yet active.
+3. Classify the patch as `install` (curator has the patched mod), `skip`
+   (curator does not have the patched mod and is unlikely to install it), or
+   `surface-to-curator` (ambiguous case where curator should decide).
+
+When variants exist within a single category (e.g. Main has a 1k texture build
+and a 2k texture build), do not auto-pick. Surface the variant set to the
+curator with the differentiator named, the trade-off summarized, and the
+recommended default highlighted. The curator decides.
+
+Concrete illustrations:
+
+- Stroud Premium Edition (Nexus #12330) main 2.5.3 file ships with four
+  Optional files: `AddOn - SPE x TerranArmada`, `Patch SPE x Useful MessHalls`,
+  `Patch SPE x Useful Infirmaries`, `AddOn - SPE x Deimog`. For a curator who
+  has Terran Armada DLC and Useful Infirmaries CC mod, the first two of those
+  four are install-relevant. The other two are skips because the curator does
+  not have MessHalls or Deimog. Recommending all four wastes the curator's
+  time; recommending only the main without enumerating the four wastes
+  compatibility benefit.
+- Starfield Shader Injector (Nexus #5562) main category lists two
+  simultaneously-uploaded files: `SSI-1_10 (GamePassASI-1_16_236)` and
+  `SSI-1_10 (SFSE-1_16_236)`. Same version, different runtime. Curator-pick on
+  Steam vs Game Pass; never auto-install both.
+
+The corresponding KB record `install-planning.audit-workflow-rigor.v1` defines
+this as one of six audit-grade rigor disciplines.
+
 ## See also
 
 - `evaluating-bgs-mods` — upstream judgment: decides whether the mod belongs in the pack before this skill interprets installation.
