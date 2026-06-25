@@ -649,6 +649,104 @@ describe("mo2_install", () => {
     });
   });
 
+  // BUG-14 BUG-F regression (issue #14): plan-only operations must be
+  // reentrant for distinct mod_name targets even though they share the
+  // same profile's modlist.txt / plugins.txt lease surface. Before the
+  // fix, two parallel plans for different mods triggered:
+  //   {ok:false, error:{code:"lease_held", message:"Target is already
+  //    locked by mo2_install in MCP process N"}}
+  // for the second+ plan. Now plan is reentrant; apply serializes.
+  describe("BUG-14 BUG-F: parallel plans for distinct mod_names are reentrant", () => {
+    it("two parallel plans for different mod_names both succeed", async () => {
+      const { ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(dest, { recursive: true });
+            await writeFile(join(dest, "x.esp"), "fake", "utf8");
+            return { files: ["x.esp"], file_count: 1, dest, format: "zip" };
+          }
+          if (method === "world.invalidate") return { invalidated: true };
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+
+      const tool = getTool("mo2_install")!;
+      const [plan1, plan2, plan3] = (await Promise.all([
+        tool.handler(
+          { mode: "plan", archive_path: "/tmp/a.zip", mod_name: "ParallelA" },
+          ctx,
+        ),
+        tool.handler(
+          { mode: "plan", archive_path: "/tmp/b.zip", mod_name: "ParallelB" },
+          ctx,
+        ),
+        tool.handler(
+          { mode: "plan", archive_path: "/tmp/c.zip", mod_name: "ParallelC" },
+          ctx,
+        ),
+      ])) as Array<{ ok: boolean; result?: unknown; error?: { code: string } }>;
+
+      // Pre-fix: plan2 and plan3 would have returned ok:false / lease_held.
+      expect(plan1.ok, `plan1 failed: ${JSON.stringify(plan1.error)}`).toBe(true);
+      expect(plan2.ok, `plan2 failed: ${JSON.stringify(plan2.error)}`).toBe(true);
+      expect(plan3.ok, `plan3 failed: ${JSON.stringify(plan3.error)}`).toBe(true);
+    });
+
+    it("apply still serializes via apply-time lock acquisition", async () => {
+      const { ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(dest, { recursive: true });
+            await writeFile(join(dest, "ser.esp"), "fake", "utf8");
+            return { files: ["ser.esp"], file_count: 1, dest, format: "zip" };
+          }
+          if (method === "world.invalidate") return { invalidated: true };
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+
+      const tool = getTool("mo2_install")!;
+      const plan1 = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/s1.zip", mod_name: "SerialA" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+      const plan2 = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/s2.zip", mod_name: "SerialB" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+      expect(plan1.ok).toBe(true);
+      expect(plan2.ok).toBe(true);
+
+      // First apply succeeds + mutates modlist.txt + plugins.txt.
+      const apply1 = (await tool.handler(
+        { mode: "apply", plan_id: plan1.result.planId, lease_token: plan1.result.lease_token },
+        ctx,
+      )) as { ok: boolean };
+      expect(apply1.ok).toBe(true);
+
+      // Second apply: plugins.txt + modlist.txt have drifted since plan2
+      // was generated. The apply-time lock acquires successfully (no other
+      // lock holder), but verifyLease detects the drift and returns
+      // lease_violation. Caller re-plans.
+      const apply2 = (await tool.handler(
+        { mode: "apply", plan_id: plan2.result.planId, lease_token: plan2.result.lease_token },
+        ctx,
+      )) as { ok: boolean; error?: { code: string } };
+      expect(apply2.ok).toBe(false);
+      expect(apply2.error?.code).toBe("lease_violation");
+    });
+  });
+
   it("apply offline path preserves the destPath clobber guard", async () => {
     const { root, ctx } = await _fixture((rootDir) => ({
       call: async (method, params) => {

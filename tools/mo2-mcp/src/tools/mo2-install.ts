@@ -225,6 +225,12 @@ async function _registerPluginsInPluginsTxt(
 
 const handler: PlanApplyHandler = {
   toolName: "mo2_install",
+  // BUG-14 BUG-F (issue #14): defer lease lock to apply time so parallel
+  // plans for distinct mod_names don't contend on shared modlist.txt /
+  // plugins.txt lease targets. The fingerprint stored at plan time still
+  // catches inter-plan drift; apply-time lock acquisition serializes the
+  // actual mutations.
+  acquirePlanLock: false,
   async buildPlan(args, ctx) {
     const bound = requireBoundContext(ctx);
     if (!bound.sidecar) {
