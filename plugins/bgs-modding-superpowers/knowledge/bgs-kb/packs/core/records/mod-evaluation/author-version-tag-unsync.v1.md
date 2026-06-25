@@ -7,7 +7,8 @@ appliesTo:
   games: [SkyrimLE, SkyrimSE, SkyrimAE, SkyrimVR, Fallout4, Fallout4VR, Fallout3, FalloutNV, Starfield]
   engineFamilies: [gamebryo, creation-engine, creation-engine-2]
 canonical:
-  answer: A Nexus mod listing carries TWO independent version fields — the mod-page "Version" displayed at the top of the page, and the per-file `version` recorded against each uploaded archive. The two are independently maintained by the author. When an author uploads a newer file without bumping the page header, the page-version becomes stale while the file-version is the real latest. Agents auditing staleness must compare against the latest Main file's `version`, NOT the page header. Investigation signal: when MO2's installed version is greater than the Nexus page-version, this is almost always a page-version desync rather than a fork or downgrade.
+  answer: |
+    A Nexus mod listing carries TWO independent version fields — the mod-page "Version" displayed at the top of the page, and the per-file `version` recorded against each uploaded archive. The two are independently maintained by the author. When an author uploads a newer file without bumping the page header, the page-version becomes stale while the file-version is the real latest. Agents auditing staleness must compare against the latest Main file's `version`, NOT the page header. Investigation signal — when MO2's installed version is greater than the Nexus page-version, this is almost always a page-version desync rather than a fork or downgrade.
   confidence: high
 queryKeys:
   - Nexus page version vs file version
