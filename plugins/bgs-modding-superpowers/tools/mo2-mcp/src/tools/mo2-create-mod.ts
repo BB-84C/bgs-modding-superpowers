@@ -13,47 +13,34 @@ import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir, resolveModsDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { invalidateWorld } from "./state-sync.js";
-import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { requireBoundContext } from "../binding.js";
 
-// BUG-10 fix (2026-06-17): mod name + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
     mode: z.literal("plan"),
     name: z.string().min(1),
-    above: z.string().optional(),
+    wins_over: z.string().min(1).optional(),
     profile: z.string().default("Default"),
-  }),
-  z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
+  }).strict(),
+  z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }).strict(),
 ]);
 
-/**
- * Normalize the `above` arg: treat non-strings and empty strings as absent.
- *
- * BUG-20 fix (2026-06-17): OpenCode's tool-call surface can pass `above: ""`
- * when the user omits the field (some tool wrappers require an explicit string
- * for "optional"). The handler used to interpret that as a real mod-name
- * lookup, which always failed with `above_mod_not_found: ` (trailing space).
- * Per Lane 2B's `.min(1)` audit, `above` stays permissive at the Zod layer to
- * keep the wire schema agent-friendly; we normalize empty -> undefined here
- * inside the handler instead, so the tools/list inputSchema is unaffected and
- * the Anthropic-compat normalize path stays untouched.
- */
-function _normalizeAbove(above: unknown): string | undefined {
-  if (typeof above !== "string") return undefined;
-  if (above === "") return undefined;
-  return above;
-}
+const RESPONSE_META = {
+  priority_convention: "mobase_full_space_higher_wins",
+  modlist_file_order: "reverse_of_gui",
+  gui_direction_hint: "priority_0_at_gui_top_loses; priority_(N-1)_at_gui_bottom_wins",
+};
 
 async function _targetPriority(
   mo2Root: string,
   profile: string,
-  above: string | undefined,
+  winsOver: string | undefined,
 ): Promise<number | undefined> {
-  if (above === undefined) return undefined;
+  if (winsOver === undefined) return undefined;
   const p = await readProfile(join(mo2Root, "profiles", profile));
-  const abovePri = p.mods.find((mod) => mod.name === above)?.priority;
-  if (abovePri == null) throw new Error(`above_mod_not_found: ${above}`);
-  return abovePri + 1;
+  const winsOverPri = p.mods.find((mod) => mod.name === winsOver)?.priority;
+  if (winsOverPri == null) throw new Error(`wins_over_mod_not_found: ${winsOver}`);
+  return winsOverPri + 1;
 }
 
 const handler: PlanApplyHandler = {
@@ -67,14 +54,14 @@ const handler: PlanApplyHandler = {
     // already enforces this; pushing it up to buildPlan prevents misleading
     // plan envelopes that look mintable but would never apply.
     await assertActiveProfile(ctx, profile);
-    const above = _normalizeAbove(args.above);
-    const targetPri = await _targetPriority(bound.config.mo2Root, profile, above);
+    const winsOver = args.wins_over as string | undefined;
+    const targetPri = await _targetPriority(bound.config.mo2Root, profile, winsOver);
     const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
-    const aboveText = above !== undefined
-      ? ` above ${above} (pri=${String(targetPri)})`
+    const winsOverText = winsOver !== undefined
+      ? ` (wins_over ${winsOver}, pri=${String(targetPri)})`
       : "";
     return {
-      diff: `Create empty mod ${String(args.name)}${aboveText}`,
+      diff: `Create empty mod ${String(args.name)}${winsOverText}`,
       affectedFiles: [modlistPath],
       targets: [{ path: modlistPath, kind: "text-file" }],
     };
@@ -84,8 +71,8 @@ const handler: PlanApplyHandler = {
     if (!bound.pipeClient) throw new Error("live_mo2_required_for_create_mod");
     const profile = (plan.args.profile as string | undefined) ?? "Default";
     await assertActiveProfile(ctx, profile);
-    const above = _normalizeAbove(plan.args.above);
-    const targetPri = await _targetPriority(bound.config.mo2Root, profile, above);
+    const winsOver = plan.args.wins_over as string | undefined;
+    const targetPri = await _targetPriority(bound.config.mo2Root, profile, winsOver);
     const payload: { name: string; priority?: number } = { name: plan.args.name as string };
     if (targetPri !== undefined) payload.priority = targetPri;
 
@@ -103,7 +90,7 @@ const handler: PlanApplyHandler = {
       : join(modsDir, plan.args.name as string);
     await mkdir(absPath, { recursive: true });
     await invalidateWorld(ctx, [profile]);
-    return result;
+    return { ...result, _meta: RESPONSE_META };
   },
 };
 
@@ -111,7 +98,7 @@ registerTool({
   name: "mo2_create_mod",
   tier: "T3",
   description:
-    "Create empty mod via broker mods.create. Optional 'above' positions it above a named mod.",
+    "Create empty mod via broker mods.create. Optional 'wins_over' positions it just above a named mod in precedence (= just below visually in MO2 GUI).",
   inputSchema,
   handler: (args, ctx) =>
     routeToPlanApply(handler, args, ctx, ctx.plans, ctx.snapshots) as Promise<unknown>,

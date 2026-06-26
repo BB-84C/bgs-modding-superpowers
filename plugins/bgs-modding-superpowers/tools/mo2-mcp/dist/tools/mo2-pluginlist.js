@@ -14,6 +14,26 @@ const inputSchema = z.object({
     profile: z.string().default("Default"),
     enrich: z.boolean().default(false),
 });
+function enrichGuiFields(plugins) {
+    const realPluginCount = plugins.filter((pl) => !pl.isComment).length;
+    let offlineRank = 0;
+    return plugins.map((pl) => {
+        if (pl.isComment)
+            return pl;
+        offlineRank += 1;
+        const guiRank = typeof pl.priority === "number" ? pl.priority + 1 : offlineRank;
+        const loadOrderRole = guiRank === 1
+            ? "loads_first_lowest_precedence"
+            : guiRank === realPluginCount
+                ? "loads_last_highest_precedence"
+                : "intermediate";
+        return {
+            ...pl,
+            gui_rank: guiRank,
+            load_order_role: loadOrderRole,
+        };
+    });
+}
 registerTool({
     name: "mo2_pluginlist",
     tier: "T1",
@@ -40,9 +60,20 @@ registerTool({
                 // Silent fail
             }
         }
+        plugins = enrichGuiFields(plugins);
         return {
             ok: true,
-            result: { profile, plugins, plugin_count: plugins.length },
+            result: {
+                profile,
+                plugins,
+                plugin_count: plugins.length,
+                _meta: {
+                    array_order: "plugins_txt_forward_order_matches_gui",
+                    array_order_note: "First entry is at TOP of MO2 GUI plugins panel (loaded first = lowest precedence). Last entry is at BOTTOM of GUI (loaded last = WINS all plugin conflicts).",
+                    priority_vs_load_order: "When enriched, 'priority' = position in plugins.txt; 'load_order' = effective post-sort load index (these differ when ESL/light/master plugins interleave). Agents reasoning about precedence should use 'load_order'.",
+                    enabled_marker: "Asterisk (*) prefix in plugins.txt means enabled. plugin_count includes the comment header entry as a synthetic isComment:true row.",
+                },
+            },
             error: null,
         };
     },

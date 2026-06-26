@@ -15,19 +15,24 @@ import { readMoIni } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { invalidateWorld } from "./state-sync.js";
-import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { requireBoundContext } from "../binding.js";
 
-// BUG-10 fix (2026-06-17): separator name + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
     mode: z.literal("plan"),
     name: z.string().min(1),
-    above: z.string().optional(),
+    wins_over: z.string().min(1).optional(),
     color: z.string().optional(),
     profile: z.string().default("Default"),
-  }),
-  z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
+  }).strict(),
+  z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }).strict(),
 ]);
+
+const RESPONSE_META = {
+  priority_convention: "mobase_full_space_higher_wins",
+  modlist_file_order: "reverse_of_gui",
+  gui_direction_hint: "priority_0_at_gui_top_loses; priority_(N-1)_at_gui_bottom_wins",
+};
 
 function _separatorName(name: unknown): string {
   return `${String(name)}_separator`;
@@ -36,13 +41,13 @@ function _separatorName(name: unknown): string {
 async function _targetPriority(
   mo2Root: string,
   profile: string,
-  above: unknown,
+  winsOver: string | undefined,
 ): Promise<number | undefined> {
-  if (typeof above !== "string") return undefined;
+  if (winsOver === undefined) return undefined;
   const p = await readProfile(join(mo2Root, "profiles", profile));
-  const abovePri = p.mods.find((mod) => mod.name === above)?.priority;
-  if (abovePri == null) throw new Error(`above_mod_not_found: ${above}`);
-  return abovePri + 1;
+  const winsOverPri = p.mods.find((mod) => mod.name === winsOver)?.priority;
+  if (winsOverPri == null) throw new Error(`wins_over_mod_not_found: ${winsOver}`);
+  return winsOverPri + 1;
 }
 
 const handler: PlanApplyHandler = {
@@ -55,13 +60,14 @@ const handler: PlanApplyHandler = {
     // profile is not the live MO2's active profile; mirrors the
     // applyMutation guard.
     await assertActiveProfile(ctx, profile);
-    const targetPri = await _targetPriority(bound.config.mo2Root, profile, args.above);
+    const winsOver = args.wins_over as string | undefined;
+    const targetPri = await _targetPriority(bound.config.mo2Root, profile, winsOver);
     const sepName = _separatorName(args.name);
     const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
-    const priText = targetPri === undefined ? "" : ` (pri=${targetPri})`;
+    const winsOverText = winsOver === undefined ? "" : ` (wins_over ${winsOver}, pri=${targetPri})`;
     const colorText = typeof args.color === "string" ? ` color=${args.color}` : "";
     return {
-      diff: `Create separator "${String(args.name)}" → ${sepName}${priText}${colorText}`,
+      diff: `Create separator "${String(args.name)}" → ${sepName}${winsOverText}${colorText}`,
       affectedFiles: [modlistPath],
       targets: [{ path: modlistPath, kind: "text-file" }],
     };
@@ -72,7 +78,8 @@ const handler: PlanApplyHandler = {
     const profile = (plan.args.profile as string | undefined) ?? "Default";
     await assertActiveProfile(ctx, profile);
     const sepName = _separatorName(plan.args.name);
-    const targetPri = await _targetPriority(bound.config.mo2Root, profile, plan.args.above);
+    const winsOver = plan.args.wins_over as string | undefined;
+    const targetPri = await _targetPriority(bound.config.mo2Root, profile, winsOver);
     const payload: { name: string; priority?: number } = { name: sepName };
     if (targetPri !== undefined) payload.priority = targetPri;
 
@@ -94,7 +101,7 @@ const handler: PlanApplyHandler = {
 
     await invalidateWorld(ctx, [profile]);
 
-    return { separator_name: sepName, color_set: typeof plan.args.color === "string" };
+    return { separator_name: sepName, color_set: typeof plan.args.color === "string", _meta: RESPONSE_META };
   },
 };
 
@@ -102,7 +109,7 @@ registerTool({
   name: "mo2_create_separator",
   tier: "T3",
   description:
-    "Create a separator (_separator suffix triggers FLAG_SEPARATOR). Optional color written to meta.ini.",
+    "Create a separator (_separator suffix triggers FLAG_SEPARATOR). Optional 'wins_over' positions it just above a named mod in precedence (= just below visually in MO2 GUI). Optional color written to meta.ini.",
   inputSchema,
   handler: (args, ctx) =>
     routeToPlanApply(handler, args, ctx, ctx.plans, ctx.snapshots) as Promise<unknown>,
