@@ -55,6 +55,7 @@ import { detectFomod, hasFomodChoices } from "../fomod-helpers.js";
 import { FomodChoicesRequiredError, type FomodTreeShape } from "../fomod-required-error.js";
 import { gatherMo2FomodState } from "../mo2-state-for-fomod.js";
 import { pollPluginWarnings } from "../plugin-warnings.js";
+import { registerPluginsInPluginsTxt } from "../plugin-registration.js";
 
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + mod name + plan_id
 // + lease_token all gain .min(1) so empty strings fail Zod safeParse instead
@@ -172,6 +173,25 @@ async function _replaceModContent(modPath: string, stagingDir: string, newInstal
   }
 }
 
+async function _registerReinstalledPlugins(
+  ctx: ToolContext,
+  modPath: string,
+): Promise<string[]> {
+  const bound = requireBoundContext(ctx);
+  const profile = bound.config.allowedProfiles[0] ?? "Default";
+  const pluginsTxtPath = path.join(bound.config.mo2Root, "profiles", profile, "plugins.txt");
+  const pluginsRegistered = await registerPluginsInPluginsTxt(modPath, pluginsTxtPath);
+  if (pluginsRegistered.length > 0 && bound.pipeClient) {
+    try {
+      await bound.pipeClient.call("organizer.refresh", { save_changes: false });
+    } catch {
+      // Best effort: plugins.txt was already written and MO2 will pick it up
+      // on the next user-driven refresh even if this broker call fails.
+    }
+  }
+  return pluginsRegistered;
+}
+
 const handler: PlanApplyHandler = {
   toolName: "mo2_reinstall_mod",
   async buildPlan(args, ctx) {
@@ -258,11 +278,13 @@ const handler: PlanApplyHandler = {
         // failure does not mask the underlying apply error.
         await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
       }
+      const pluginsRegistered = await _registerReinstalledPlugins(ctx, modPath);
       await invalidateWorld(ctx, ["Default"]);
       return {
         reinstalled: name,
         archive: installFile,
         fomod_used: true,
+        plugins_registered: pluginsRegistered,
         pluginWarnings: await pollPluginWarnings(pipeClient),
       };
     }
@@ -275,12 +297,14 @@ const handler: PlanApplyHandler = {
     }) as { ok: boolean; result?: Record<string, unknown>; error?: { message?: string } | null };
     if (!resp.ok) throw new Error(resp.error?.message ?? "installation.install_local_archive failed");
 
+    const pluginsRegistered = await _registerReinstalledPlugins(ctx, modPath);
     await invalidateWorld(ctx, ["Default"]);
 
     return {
       reinstalled: name,
       archive: installFile,
       fomod_used: false,
+      plugins_registered: pluginsRegistered,
       pluginWarnings: await pollPluginWarnings(pipeClient),
     };
   },
