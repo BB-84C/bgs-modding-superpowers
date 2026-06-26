@@ -33,6 +33,7 @@ import { requireBoundContext, bindingSnapshot } from "../binding.js";
 import { detectFomod, hasFomodChoices } from "../fomod-helpers.js";
 import { FomodChoicesRequiredError, type FomodTreeShape } from "../fomod-required-error.js";
 import { gatherMo2FomodState } from "../mo2-state-for-fomod.js";
+import { pollPluginWarnings } from "../plugin-warnings.js";
 
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + archive_path +
 // mod_name + plan_id + lease_token all gain .min(1). Empty strings in any of
@@ -425,6 +426,7 @@ const handler: PlanApplyHandler = {
       fomod_used: useFomodChoices,
       installation_file: basename(archivePath),
       plugins_registered: pluginsRegistered,
+      pluginWarnings: bound.pipeClient ? await pollPluginWarnings(bound.pipeClient) : undefined,
     };
   },
 };

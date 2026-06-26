@@ -54,6 +54,7 @@ import { requireBoundContext, bindingSnapshot } from "../binding.js";
 import { detectFomod, hasFomodChoices } from "../fomod-helpers.js";
 import { FomodChoicesRequiredError, type FomodTreeShape } from "../fomod-required-error.js";
 import { gatherMo2FomodState } from "../mo2-state-for-fomod.js";
+import { pollPluginWarnings } from "../plugin-warnings.js";
 
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + mod name + plan_id
 // + lease_token all gain .min(1) so empty strings fail Zod safeParse instead
@@ -258,7 +259,12 @@ const handler: PlanApplyHandler = {
         await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
       }
       await invalidateWorld(ctx, ["Default"]);
-      return { reinstalled: name, archive: installFile, fomod_used: true };
+      return {
+        reinstalled: name,
+        archive: installFile,
+        fomod_used: true,
+        pluginWarnings: await pollPluginWarnings(pipeClient),
+      };
     }
 
     // Non-FOMOD: existing broker path. installation.install_local_archive is
@@ -271,7 +277,12 @@ const handler: PlanApplyHandler = {
 
     await invalidateWorld(ctx, ["Default"]);
 
-    return { reinstalled: name, archive: installFile, fomod_used: false };
+    return {
+      reinstalled: name,
+      archive: installFile,
+      fomod_used: false,
+      pluginWarnings: await pollPluginWarnings(pipeClient),
+    };
   },
 };
 
