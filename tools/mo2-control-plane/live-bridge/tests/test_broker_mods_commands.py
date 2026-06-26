@@ -100,6 +100,8 @@ def test_mods_set_active_single_with_readback(monkeypatch):
     assert readback["applied"] == ["ModA"]
     assert readback["failed"] == []
     assert readback["readback"] == [{"name": "ModA", "active": True}]
+    assert readback["gui_refreshed"] is True
+    organizer.refresh.assert_called_once_with()
 
 
 def test_mods_set_active_partial_failure(monkeypatch):
@@ -129,6 +131,8 @@ def test_mods_set_active_partial_failure(monkeypatch):
     assert readback["readback"][0]["active"] is True
     assert readback["readback"][1]["name"] == "ModB"
     assert readback["readback"][1]["active"] is False
+    assert readback["gui_refreshed"] is True
+    organizer.refresh.assert_called_once_with()
 
 
 def test_mods_set_active_invalid_params_returns_error(monkeypatch):
@@ -185,6 +189,8 @@ def test_mods_set_priority_success(monkeypatch):
     assert readback["requested_priority"] == 1
     assert readback["actual_priority"] == 1
     assert readback["noop"] is False
+    assert readback["gui_refreshed"] is True
+    organizer.refresh.assert_called_once_with()
 
 
 def test_mods_set_priority_silent_noop_detected(monkeypatch):
@@ -208,6 +214,8 @@ def test_mods_set_priority_silent_noop_detected(monkeypatch):
     readback = result["result"]
     assert readback["actual_priority"] == 0
     assert readback["noop"] is True
+    assert readback["gui_refreshed"] is True
+    organizer.refresh.assert_called_once_with()
 
 
 def test_mods_set_priority_mod_not_found(monkeypatch):
@@ -224,6 +232,7 @@ def test_mods_set_priority_mod_not_found(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "mod_not_found"
+    organizer.refresh.assert_not_called()
 
 
 def test_mods_set_priority_out_of_range(monkeypatch):
@@ -296,6 +305,8 @@ def test_mods_set_priority_separators_count_in_validator(monkeypatch):
     assert result["ok"] is True, f"separator slot rejected: {result.get('error')}"
     assert result["result"]["requested_priority"] == 3
     assert result["result"]["actual_priority"] == 3
+    assert result["result"]["gui_refreshed"] is True
+    organizer.refresh.assert_called_once_with()
 
 
 def test_mods_rename_success(monkeypatch):
@@ -319,6 +330,8 @@ def test_mods_rename_success(monkeypatch):
     assert readback["old_name"] == "OldName"
     assert readback["new_name"] == "NewName"
     assert readback["name_was_sanitized"] is False
+    assert readback["gui_refreshed"] is True
+    organizer.refresh.assert_called_once_with()
 
 
 def test_mods_rename_sanitizes_illegal_chars(monkeypatch):
@@ -349,7 +362,9 @@ def test_mods_rename_sanitizes_illegal_chars(monkeypatch):
     assert result["ok"] is True
     assert result["result"]["new_name"] == "BadName"
     assert result["result"]["name_was_sanitized"] is True
+    assert result["result"]["gui_refreshed"] is True
     mod_list.renameMod.assert_called_once_with(old_mod, "BadName")
+    organizer.refresh.assert_called_once_with()
 
 
 def test_mods_rename_not_found_returns_error(monkeypatch):
@@ -366,6 +381,7 @@ def test_mods_rename_not_found_returns_error(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "mod_not_found"
+    organizer.refresh.assert_not_called()
 
 
 def test_mods_rename_collision_returns_error(monkeypatch):
@@ -415,7 +431,9 @@ def test_mods_remove_success(monkeypatch):
     assert result["ok"] is True
     assert result["result"]["name"] == "ModA"
     assert result["result"]["removed"] is True
+    assert result["result"]["gui_refreshed"] is True
     mod_list.removeMod.assert_called_once_with(mod)
+    organizer.refresh.assert_called_once_with()
 
 
 def test_mods_remove_not_found(monkeypatch):
@@ -433,6 +451,7 @@ def test_mods_remove_not_found(monkeypatch):
     assert result["ok"] is False
     assert result["error"]["code"] == "mod_not_found"
     mod_list.removeMod.assert_not_called()
+    organizer.refresh.assert_not_called()
 
 
 def test_mods_remove_failure_from_modlist(monkeypatch):
@@ -451,6 +470,7 @@ def test_mods_remove_failure_from_modlist(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "internal_error"
+    organizer.refresh.assert_not_called()
 
 
 def test_mods_create_basic(monkeypatch, tmp_path):
@@ -668,7 +688,9 @@ def test_mods_meta_write_creates_meta_ini(monkeypatch, tmp_path):
     assert result["ok"] is True
     assert result["result"]["name"] == "ModA"
     assert "General" in result["result"]["updated_sections"]
+    assert result["result"]["gui_refreshed"] is True
     organizer.modDataChanged.assert_called_once_with(mod)
+    organizer.refresh.assert_called_once_with()
 
     parser = configparser.ConfigParser(interpolation=None)
     parser.read(mod_dir / "meta.ini", encoding="utf-8")
@@ -702,6 +724,8 @@ def test_mods_meta_write_merges_existing(monkeypatch, tmp_path):
     )
 
     assert result["ok"] is True
+    assert result["result"]["gui_refreshed"] is True
+    organizer.refresh.assert_called_once_with()
     parser = configparser.ConfigParser(interpolation=None)
     parser.read(mod_dir / "meta.ini", encoding="utf-8")
     assert parser["General"]["version"] == "2.0"
@@ -739,6 +763,7 @@ def test_mods_meta_write_mod_not_found(monkeypatch):
     )
     assert result["ok"] is False
     assert result["error"]["code"] == "mod_not_found"
+    organizer.refresh.assert_not_called()
 
 
 def test_mods_meta_write_atomic_no_leftover_tmp(monkeypatch, tmp_path):
@@ -764,5 +789,7 @@ def test_mods_meta_write_atomic_no_leftover_tmp(monkeypatch, tmp_path):
     )
 
     assert result["ok"] is True
+    assert result["result"]["gui_refreshed"] is True
+    organizer.refresh.assert_called_once_with()
     leftovers = list(mod_dir.glob(".tmp-*"))
     assert leftovers == []
