@@ -141,6 +141,8 @@ def test_plugins_set_state_success(monkeypatch):
     assert readback["name"] == "ModA.esp"
     assert readback["requested_state"] == 2
     assert readback["actual_state"] == 2
+    assert readback["gui_refreshed"] is True
+    organizer.refresh.assert_called_once_with()
 
 
 def test_plugins_set_state_plugin_not_found(monkeypatch):
@@ -157,6 +159,7 @@ def test_plugins_set_state_plugin_not_found(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "plugin_not_found"
+    organizer.refresh.assert_not_called()
 
 
 def test_plugins_set_state_invalid_params(monkeypatch):
@@ -197,6 +200,8 @@ def test_plugins_set_priority_success(monkeypatch):
     assert readback["name"] == "B.esp"
     assert readback["actual_priority"] == 1
     assert readback["noop"] is False
+    assert readback["gui_refreshed"] is True
+    organizer.refresh.assert_called_once_with()
 
 
 def test_plugins_set_priority_silent_noop_detected(monkeypatch):
@@ -218,6 +223,8 @@ def test_plugins_set_priority_silent_noop_detected(monkeypatch):
 
     assert result["ok"] is True
     assert result["result"]["noop"] is True
+    assert result["result"]["gui_refreshed"] is True
+    organizer.refresh.assert_called_once_with()
 
 
 def test_plugins_set_priority_plugin_not_found(monkeypatch):
@@ -238,6 +245,7 @@ def test_plugins_set_priority_plugin_not_found(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "plugin_not_found"
+    organizer.refresh.assert_not_called()
 
 
 def test_plugins_set_load_order_success(monkeypatch):
@@ -267,6 +275,8 @@ def test_plugins_set_load_order_success(monkeypatch):
     assert readback["requested_explicit"] == ["B.esp", "A.esp"]
     assert readback["effective_order"][:2] == ["B.esp", "A.esp"]
     assert readback["implicitly_appended_count"] == 1
+    assert readback["gui_refreshed"] is True
+    organizer.refresh.assert_called_once_with()
 
 
 def test_plugins_set_load_order_unknown_plugin_rejected(monkeypatch):
@@ -287,6 +297,7 @@ def test_plugins_set_load_order_unknown_plugin_rejected(monkeypatch):
 
     assert result["ok"] is False
     assert result["error"]["code"] == "plugin_not_found"
+    organizer.refresh.assert_not_called()
 
 
 def test_plugins_set_load_order_invalid_params(monkeypatch):

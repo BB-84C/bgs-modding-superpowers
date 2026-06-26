@@ -941,11 +941,18 @@ def _handle_mods_set_active(organizer, pump, payload):
                 readback.append({"name": name, "active": None})
                 failed.append(name)
 
+        try:
+            organizer.refresh()
+            refreshed = True
+        except Exception:
+            refreshed = False
+
         return {
             "requested": list(names),
             "applied": applied,
             "failed": failed,
             "readback": readback,
+            "gui_refreshed": refreshed,
         }
 
     try:
@@ -1007,6 +1014,11 @@ def _handle_mods_set_priority(organizer, pump, payload):
         before = mod_list.priority(name)
         mod_list.setPriority(name, priority)
         actual = mod_list.priority(name)
+        try:
+            organizer.refresh()
+            refreshed = True
+        except Exception:
+            refreshed = False
         return (
             "ok",
             {
@@ -1014,6 +1026,7 @@ def _handle_mods_set_priority(organizer, pump, payload):
                 "requested_priority": priority,
                 "actual_priority": actual,
                 "noop": (actual == before) and (before != priority),
+                "gui_refreshed": refreshed,
             },
         )
 
@@ -1080,12 +1093,18 @@ def _handle_mods_rename(organizer, pump, payload):
             return ("error", ErrorCode.INVALID_PARAMS, f"name '{sanitized_name}' already exists")
 
         refreshed = mod_list.renameMod(mod, sanitized_name)
+        try:
+            organizer.refresh()
+            gui_refreshed = True
+        except Exception:
+            gui_refreshed = False
         return (
             "ok",
             {
                 "old_name": old_name,
                 "new_name": refreshed.name() if refreshed is not None else sanitized_name,
                 "name_was_sanitized": sanitized_name != new_name,
+                "gui_refreshed": gui_refreshed,
             },
         )
 
@@ -1133,7 +1152,13 @@ def _handle_mods_remove(organizer, pump, payload):
         if not removed:
             return ("error", ErrorCode.INTERNAL_ERROR, "removeMod returned False")
 
-        return ("ok", {"name": name, "removed": True})
+        try:
+            organizer.refresh()
+            refreshed = True
+        except Exception:
+            refreshed = False
+
+        return ("ok", {"name": name, "removed": True, "gui_refreshed": refreshed})
 
     try:
         outcome = pump.invoke_blocking(_on_main_thread, timeout_s=30)
@@ -1378,7 +1403,16 @@ def _handle_mods_meta_write(organizer, pump, payload):
 
     updated_sections = list(updates.keys())
     try:
-        pump.invoke_blocking(lambda: organizer.modDataChanged(mod), timeout_s=5)
+        def _notify_and_refresh():
+            organizer.modDataChanged(mod)
+            try:
+                organizer.refresh()
+                refreshed = True
+            except Exception:
+                refreshed = False
+            return refreshed
+
+        gui_refreshed = pump.invoke_blocking(_notify_and_refresh, timeout_s=5)
     except Exception as exc:
         return {
             "ok": True,
@@ -1386,13 +1420,14 @@ def _handle_mods_meta_write(organizer, pump, payload):
                 "name": name,
                 "updated_sections": updated_sections,
                 "notification_skipped": str(exc),
+                "gui_refreshed": False,
             },
             "error": None,
         }
 
     return {
         "ok": True,
-        "result": {"name": name, "updated_sections": updated_sections},
+        "result": {"name": name, "updated_sections": updated_sections, "gui_refreshed": gui_refreshed},
         "error": None,
     }
 
@@ -1446,12 +1481,18 @@ def _handle_plugins_set_state(organizer, pump, payload):
         if name not in plugin_list.pluginNames():
             return ("error", ErrorCode.PLUGIN_NOT_FOUND, name)
         plugin_list.setState(name, state)
+        try:
+            organizer.refresh()
+            refreshed = True
+        except Exception:
+            refreshed = False
         return (
             "ok",
             {
                 "name": name,
                 "requested_state": state,
                 "actual_state": int(plugin_list.state(name)),
+                "gui_refreshed": refreshed,
             },
         )
 
@@ -1498,6 +1539,11 @@ def _handle_plugins_set_priority(organizer, pump, payload):
         before = plugin_list.priority(name)
         plugin_list.setPriority(name, priority)
         after = plugin_list.priority(name)
+        try:
+            organizer.refresh()
+            refreshed = True
+        except Exception:
+            refreshed = False
         return (
             "ok",
             {
@@ -1505,6 +1551,7 @@ def _handle_plugins_set_priority(organizer, pump, payload):
                 "requested_priority": priority,
                 "actual_priority": after,
                 "noop": after == before and before != priority,
+                "gui_refreshed": refreshed,
             },
         )
 
@@ -1546,12 +1593,18 @@ def _handle_plugins_set_load_order(organizer, pump, payload):
 
         plugin_list.setLoadOrder(order)
         effective = sorted(plugin_list.pluginNames(), key=lambda name: plugin_list.priority(name))
+        try:
+            organizer.refresh()
+            refreshed = True
+        except Exception:
+            refreshed = False
         return (
             "ok",
             {
                 "requested_explicit": list(order),
                 "effective_order": effective,
                 "implicitly_appended_count": len(effective) - len(order),
+                "gui_refreshed": refreshed,
             },
         )
 
