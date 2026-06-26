@@ -987,9 +987,16 @@ def _handle_mods_set_priority(organizer, pump, payload):
         if mod_list.getMod(name) is None:
             return ("error", ErrorCode.MOD_NOT_FOUND, f"mod '{name}' not found")
 
+        # docs/issues/BUG-mo2-mcp-send_mod_to-semantics-2026-06-27.md:
+        # mobase.IModList.setPriority operates in FULL priority space —
+        # separators occupy slots like regular mods. The previous validator
+        # excluded separators from the cap, which rejected valid cross-section
+        # placements near high-priority separators. MO2's real clamp is
+        # [0, m_NumRegularMods - 1], where m_NumRegularMods includes regular,
+        # foreign, and separator mods, excluding only overwrite/backups.
+        # allMods() already excludes overwrite/backups and includes separators.
         all_mods = list(mod_list.allMods())
-        non_separator_mods = [mod_name for mod_name in all_mods if not mod_name.endswith("_separator")]
-        max_priority = max(0, len(non_separator_mods))
+        max_priority = max(0, len(all_mods) - 1)
         if priority < 0 or priority > max_priority:
             return (
                 "error",

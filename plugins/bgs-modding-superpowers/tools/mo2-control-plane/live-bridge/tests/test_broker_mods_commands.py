@@ -243,6 +243,61 @@ def test_mods_set_priority_out_of_range(monkeypatch):
     assert result["error"]["code"] == "priority_out_of_range"
 
 
+def test_mods_set_priority_out_of_range_high(monkeypatch):
+    """New validator (BUG-mo2-mcp-send_mod_to-semantics-2026-06-27): full
+    priority space, max = len(all_mods) - 1. Mods [A,B] -> max=1, priority 2 rejected."""
+    bridge = _load_bridge(monkeypatch)
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = MagicMock()
+    mod_list.allMods.return_value = ["ModA", "ModB"]
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=10: fn()
+    result = bridge._handle_mods_set_priority(organizer, pump, {"name": "ModA", "priority": 2})
+    assert result["ok"] is False
+    assert result["error"]["code"] == "priority_out_of_range"
+    assert "[0..1]" in result["error"]["message"]
+
+
+def test_mods_set_priority_separators_count_in_validator(monkeypatch):
+    """Regression for docs/issues/BUG-mo2-mcp-send_mod_to-semantics-2026-06-27.md.
+
+    Prior (buggy) validator excluded separators from max_priority, capping at
+    len(non_separator_mods). With this profile (3 separators + 2 mods = 5 total),
+    the OLD validator would cap at 2; the NEW validator caps at 4 (= len - 1).
+    setPriority(name, 3) must be ACCEPTED to land the mod above a separator.
+    """
+    bridge = _load_bridge(monkeypatch)
+    actual = {"current": 0}
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = MagicMock()
+    # 3 separators in upper slots + 2 mods. Real-world BB84 pattern.
+    mod_list.allMods.return_value = [
+        "Top_separator",
+        "Mid_separator",
+        "Low_separator",
+        "ModA",
+        "ModB",
+    ]
+
+    def _set(_name, priority):
+        actual["current"] = priority
+
+    mod_list.setPriority.side_effect = _set
+    mod_list.priority.side_effect = lambda _name: actual["current"]
+
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=10: fn()
+
+    result = bridge._handle_mods_set_priority(organizer, pump, {"name": "ModA", "priority": 3})
+    assert result["ok"] is True, f"separator slot rejected: {result.get('error')}"
+    assert result["result"]["requested_priority"] == 3
+    assert result["result"]["actual_priority"] == 3
+
+
 def test_mods_rename_success(monkeypatch):
     bridge = _load_bridge(monkeypatch)
 

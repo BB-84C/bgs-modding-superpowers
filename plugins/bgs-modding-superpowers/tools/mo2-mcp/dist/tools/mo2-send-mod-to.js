@@ -5,7 +5,7 @@
  *   - top: highest priority (numerically priority-count-1)
  *   - bottom: lowest priority (priority 0)
  *   - priority: explicit integer
- *   - above_separator: place above named separator (separator priority + 1)
+ *   - above_separator: place above named separator (separator priority + 1 in FULL priority space)
  *   - above_first_conflict: place above highest-priority mod that shares files (sidecar)
  *   - below_last_conflict: place below lowest-priority mod that shares files (sidecar)
  */
@@ -43,39 +43,31 @@ const inputSchema = z.discriminatedUnion("mode", [
 async function _computeTargetPriority(args, ctx, profile) {
     const bound = requireBoundContext(ctx);
     const p = await readProfile(join(bound.config.mo2Root, "profiles", profile));
-    const nonSep = p.mods.filter((m) => !m.isSeparator);
+    // FULL priority space (separators occupy slots). mobase IModList.setPriority
+    // accepts priorities in this space — valid range [0, mods.length - 1]. The
+    // 2026-06-17 BUG-B fix (issue #14) introduced nonSepRank conversion based on
+    // a wrong conclusion about broker semantics; that fix is reverted here.
+    // See docs/issues/BUG-mo2-mcp-send_mod_to-semantics-2026-06-27.md.
+    const maxPri = Math.max(0, p.mods.length - 1);
+    const clamp = (v) => Math.max(0, Math.min(v, maxPri));
     const mode = args.target_mode;
-    // BUG-14 BUG-B fix (issue #14): the broker's `mods.set_priority`
-    // validates `priority <= len(non_separator_mods)` and then calls
-    // mobase.IModList.setPriority in non-separator priority space.
-    // `profile-reader.ts` assigns priorities from the FULL modlist.txt
-    // line count (which includes separators). So a value computed in
-    // full-priority space (e.g. `sep.priority + 1`) overshoots the
-    // broker validator whenever separators occupy upper slots — the
-    // real-world BB84 case: separator at full priority 391 with 30
-    // separators above produced plan→392, broker rejected with
-    // "priority 392 out of [0..375]".
-    //
-    // Convert via `nonSepRank(fullPrio)` = count of non-separator mods
-    // strictly below `fullPrio` in full-priority space. That count is
-    // exactly the non-separator slot just above the given full-prio
-    // position. Clamp to [0, nonSep.length - 1] to stay within broker
-    // bounds.
-    const nonSepRank = (fullPrio) => nonSep.filter((m) => m.priority < fullPrio).length;
-    const maxNonSepPri = Math.max(0, nonSep.length - 1);
-    const clamp = (v) => Math.max(0, Math.min(v, maxNonSepPri));
     switch (mode) {
         case "top":
-            return maxNonSepPri;
+            // Highest priority = bottom of MO2 GUI = top of modlist.txt = wins
+            return maxPri;
         case "bottom":
+            // Priority 0 = top of MO2 GUI = bottom of modlist.txt = loses
             return 0;
         case "priority":
-            return args.target_priority ?? 0;
+            return clamp(args.target_priority ?? 0);
         case "above_separator": {
             const sep = p.mods.find((m) => m.isSeparator && m.name === args.target_separator);
             if (!sep)
                 throw new Error(`separator_not_found: ${args.target_separator}`);
-            return clamp(nonSepRank(sep.priority));
+            // "Above" the separator visually = higher priority numerically (closer to
+            // bottom of MO2 GUI). Place mod at sep.priority + 1; clamp guards against
+            // separators at the very top.
+            return clamp(sep.priority + 1);
         }
         case "above_first_conflict":
         case "below_last_conflict": {
@@ -93,16 +85,17 @@ async function _computeTargetPriority(args, ctx, profile) {
             if (conflictMods.length === 0) {
                 throw new Error("no_conflicts_found");
             }
-            const conflictRanks = conflictMods
+            // Use FULL priorities directly, no nonSepRank conversion.
+            const conflictPris = conflictMods
                 .map((n) => p.mods.find((m) => m.name === n))
                 .filter((m) => m !== undefined && !m.isSeparator)
-                .map((m) => nonSepRank(m.priority));
-            if (conflictRanks.length === 0) {
+                .map((m) => m.priority);
+            if (conflictPris.length === 0) {
                 throw new Error("no_conflicts_found");
             }
             if (mode === "above_first_conflict")
-                return clamp(Math.max(...conflictRanks) + 1);
-            return clamp(Math.min(...conflictRanks) - 1);
+                return clamp(Math.max(...conflictPris) + 1);
+            return clamp(Math.min(...conflictPris) - 1);
         }
         default:
             throw new Error(`unknown_mode: ${mode}`);
