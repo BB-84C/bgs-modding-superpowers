@@ -1200,3 +1200,51 @@ Community Spaceship Expansion, Dark Universe - Takeover, Dark Universe Overtime,
 ### Lesson
 
 I was sloppy and didn't run the 3-case unit-test fixture before fan-out dispatch. The fixer-alpha catching the bug in DRY-RUN was the only thing that prevented Batch A's 17 mods from also being destroyed. Net incident: 49 mods needed recovery, none lost (all had nexusDescription as a backup data source), workflow ~30 minutes lost. Codification above should prevent recurrence.
+
+## 2026-06-26 -- Recovery 完成 + Qt INI quoting fix
+
+### State A (5 critical mods) + State B (44 non-SC mods) — fan-out fixer recovery
+
+Yesterday orchestrator buggy migrate-comment-to-note.ps1 destroyed comment data on 49 mods + recovery was incomplete. Today processed via 4 fan-out fixer dispatches:
+
+**State A (5 critical mods, BOTH comments + notes empty)** — fixer-alpha:
+- Fast Spacesuit Toggle, More Immersive Landings And Takeoffs, Starfield Community Patch, Stroud Premium Edition - Useful Infirmaries Patch, Va'ruun Technical Institute Ship Habs - Useful Infirmary Patch
+- Each recovered with both fields populated (Chinese description + install marker)
+
+**State B (44 non-SC mods, comments empty / notes has marker)** — fixer-beta/gamma/delta in 3 batches:
+- All 44 backfilled with 1-2 Chinese sentences derived from each meta.ini nexusDescription field
+- notes field PRESERVED untouched (already had correct [UPDATED]/[ARCHIVED]/[UPDATE→] markers from yesterday recovery)
+- 1 anomaly: Astrogate has no nexusDescription field AND no comments line structure — left for BB84 manual fix
+
+### Qt QSettings INI quoting silent display-empty bug
+
+BB84 found: Xeno Master meta.ini notes value with [UPDATED 2026-06-25] (268 chars) is in the file (confirmed via raw text preview) but MO2 GUI Notes tab is BLANK (placeholder only).
+
+Root cause: MO2 backend uses Qt QSettings to parse INI. When a value starts with [, Qt INI parser conflates it with [Section] header start and SILENTLY returns empty for that key. MO2 GUI gets empty string and shows blank.
+
+Fix: wrap value in double quotes. Qt strips outer quotes and returns bracketed content correctly. Verified by BB84 on Xeno Master (one quick MO2 refresh, no restart needed).
+
+**Sweep across BB84 Starfield modpack**: 220 meta.ini files affected. Both pre-existing comments=[CC] description patterns AND this-session notes=[UPDATED/ARCHIVED/OBSOLETE/...] markers. All wrapped in double quotes. Backup at D:\Starfield MO2\.backups\meta-qt-quote-fix-20260626-003856\.
+
+UCMO-CE had same display-empty issue before BB84 manually re-added notes via MO2 GUI (which auto-quoted on serialize, side-stepping the bug).
+
+CC mod comments verified by BB84 sample (adwryos-cc, aseveil-cc, kinggathcreations_spaceship-cc) — Qt transparently strips outer quotes, GUI displays [CC] description correctly without literal quote characters.
+
+### Codification
+
+1. .opencode/memory/45-mo2-mcp-internals.md rule 18 + Red Flags updated with Qt quoting requirement
+2. skills/maintaining-modding-environments/SKILL.md "meta.ini comment vs note field hygiene" extended with "Qt QSettings INI quoting (silent display-empty trap)" section with WRITE/READ/idempotence/special-case rules + broken-vs-correct example
+3. TBD: KB record engine.qt-ini-bracket-quote-requirement.v1 for external users (not this round)
+
+### Totals
+
+| Item | Count |
+|---|---|
+| State A critical mods (both comments+notes recovered) | 5 |
+| State B non-SC mods (comments backfilled) | 44 |
+| Qt quote-wrap sweep | 220 meta.ini |
+| Backup snapshot | 220 files in .backups\meta-qt-quote-fix-20260626-003856\ |
+| Astrogate anomaly (deferred) | 1 |
+| Total mods touched today | 269 |
+
+Outstanding tech debt: Astrogate meta.ini description, KB record for Qt quoting.
