@@ -303,6 +303,11 @@ describe("mo2_install", () => {
           return { ok: true, result: { name: "LiveMod", absolute_path: absolutePath }, error: null };
         }
         if (method === "organizer.refresh") return { ok: true, result: { refreshed: true }, error: null };
+        if (method === "plugins.missing_masters") return {
+          ok: true,
+          result: { warnings: [], scanned_count: 1, enabled_count: 1 },
+          error: null,
+        };
         throw new Error(`unmocked broker: ${method}`);
       },
       close: () => {},
@@ -319,7 +324,7 @@ describe("mo2_install", () => {
     const apply = (await tool.handler(
       { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
       ctx,
-    )) as { ok: boolean; result: { dest_path: string; snapshot_id?: string } };
+    )) as { ok: boolean; result: { dest_path: string; snapshot_id?: string; pluginWarnings?: unknown } };
 
     expect(apply.ok).toBe(true);
     expect(apply.result.dest_path).toBe(join(root, "mods", "LiveMod"));
@@ -334,12 +339,16 @@ describe("mo2_install", () => {
     // BUG-14 BUG-E fix (issue #14): apply now calls organizer.refresh
     // after writing plugins.txt so MO2's in-memory plugin list re-reads
     // the freshly-registered plugin.
+    // Plugin-warning auto-poll now follows the refresh so agents see any
+    // missing-master containment breach caused by the newly-enabled plugin.
     expect(brokerCalls.map((call) => call.method)).toEqual([
       "profile.active", // buildPlan guard
       "profile.active", // applyMutation guard
       "installation.create_mod_from_directory",
       "organizer.refresh", // post-plugins.txt refresh (BUG-14 BUG-E)
+      "plugins.missing_masters",
     ]);
+    expect(apply.result.pluginWarnings).toMatchObject({ warnings: [], scannedCount: 1, enabledCount: 1 });
   });
 
   // BUG-9 fix (2026-06-17): cross-profile request is rejected at plan time.
