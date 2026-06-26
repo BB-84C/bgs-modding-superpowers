@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { dispatchToolCall } from "../../src/dispatch.js";
 import { getTool, _clearToolsForTests } from "../../src/tool-registry.js";
 import { PlanCache } from "../../src/plan-apply.js";
 import { SnapshotManager } from "../../src/snapshot.js";
@@ -238,7 +239,7 @@ describe("mo2_install", () => {
 
     const tool = getTool("mo2_install")!;
     const plan = (await tool.handler(
-      { mode: "plan", archive_path: "/tmp/test.7z", mod_name: "NewSimple", target_priority: "bottom" },
+      { mode: "plan", archive_path: "/tmp/test.7z", mod_name: "NewSimple", target_priority: "gui_bottom" },
       ctx,
     )) as { ok: boolean; result: { planId: string; lease_token: string } };
     expect(plan.ok).toBe(true);
@@ -246,7 +247,7 @@ describe("mo2_install", () => {
     const apply = (await tool.handler(
       { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
       ctx,
-    )) as { ok: boolean; result: { dest_path: string } };
+    )) as { ok: boolean; result: { dest_path: string; final_priority: number; _meta: Record<string, string>; snapshot_id?: string } };
     expect(apply.ok).toBe(true);
     expect(existsSync(join(root, "mods", "NewSimple", "test.esp"))).toBe(true);
     expect(existsSync(join(root, "mods", "NewSimple", "meta.ini"))).toBe(true);
@@ -265,6 +266,9 @@ describe("mo2_install", () => {
 
     const modlist = await readFile(join(root, "profiles", "Default", "modlist.txt"), "utf8");
     expect(modlist).toContain("+NewSimple");
+    expect(modlist.split(/\r?\n/)[0]).toBe("+NewSimple");
+    expect(apply.result.final_priority).toBe(1);
+    expect(apply.result._meta.priority_convention).toBe("mobase_full_space_higher_wins");
 
     expect(apply.result.snapshot_id).toMatch(/^[0-9a-f-]+$/);
     const rollback = await ctx.snapshots.restore(apply.result.snapshot_id!);
@@ -303,6 +307,7 @@ describe("mo2_install", () => {
           return { ok: true, result: { name: "LiveMod", absolute_path: absolutePath }, error: null };
         }
         if (method === "organizer.refresh") return { ok: true, result: { refreshed: true }, error: null };
+        if (method === "mods.list") return { ok: true, result: { mods: [{ name: "LiveMod", priority: 1 }] }, error: null };
         if (method === "plugins.missing_masters") return {
           ok: true,
           result: { warnings: [], scanned_count: 1, enabled_count: 1 },
@@ -317,7 +322,7 @@ describe("mo2_install", () => {
 
     const tool = getTool("mo2_install")!;
     const plan = (await tool.handler(
-      { mode: "plan", archive_path: "/tmp/live.7z", mod_name: "LiveMod", target_priority: "bottom" },
+      { mode: "plan", archive_path: "/tmp/live.7z", mod_name: "LiveMod", target_priority: "gui_bottom" },
       ctx,
     )) as { ok: boolean; result: { planId: string; lease_token: string } };
 
@@ -346,9 +351,160 @@ describe("mo2_install", () => {
       "profile.active", // applyMutation guard
       "installation.create_mod_from_directory",
       "organizer.refresh", // post-plugins.txt refresh (BUG-14 BUG-E)
+      "mods.list", // final_priority readback
       "plugins.missing_masters",
     ]);
     expect(apply.result.pluginWarnings).toMatchObject({ warnings: [], scannedCount: 1, enabledCount: 1 });
+  });
+
+  it("Phase 3: target_priority gui_top places installed mod at GUI top / priority 0", async () => {
+    const { root, ctx } = await _fixture((_root) => ({
+      call: async (method, params) => {
+        if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+        if (method === "archive.extract_all") {
+          const dest = (params as { dest: string }).dest;
+          await mkdir(dest, { recursive: true });
+          await writeFile(join(dest, "GuiTop.esp"), "fake", "utf8");
+          return { files: ["GuiTop.esp"], file_count: 1, dest, format: "zip" };
+        }
+        if (method === "world.invalidate") return { invalidated: true };
+        throw new Error(`unmocked: ${method}`);
+      },
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    }));
+    const tool = getTool("mo2_install")!;
+    const plan = (await tool.handler(
+      { mode: "plan", archive_path: "/tmp/gui-top.zip", mod_name: "GuiTop", target_priority: "gui_top" },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+    const apply = (await tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )) as { ok: boolean; result: { final_priority: number } };
+
+    expect(apply.ok).toBe(true);
+    expect(apply.result.final_priority).toBe(0);
+    const modlist = await readFile(join(root, "profiles", "Default", "modlist.txt"), "utf8");
+    expect(modlist.trim().split(/\r?\n/)).toEqual(["+ExistingMod", "+GuiTop"]);
+  });
+
+  it("Phase 3: integer target_priority is not silently ignored and lands at requested priority", async () => {
+    const { root, ctx } = await _fixture((_root) => ({
+      call: async (method, params) => {
+        if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+        if (method === "archive.extract_all") {
+          const dest = (params as { dest: string }).dest;
+          await mkdir(dest, { recursive: true });
+          await writeFile(join(dest, "IntegerPriority.esp"), "fake", "utf8");
+          return { files: ["IntegerPriority.esp"], file_count: 1, dest, format: "zip" };
+        }
+        if (method === "world.invalidate") return { invalidated: true };
+        throw new Error(`unmocked: ${method}`);
+      },
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    }));
+    await writeFile(join(root, "profiles", "Default", "modlist.txt"), "+High\n+Mid\n+Low\n", "utf8");
+    const tool = getTool("mo2_install")!;
+    const plan = (await tool.handler(
+      { mode: "plan", archive_path: "/tmp/int.zip", mod_name: "IntegerPriority", target_priority: 1 },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+    const apply = (await tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )) as { ok: boolean; result: { final_priority: number } };
+
+    expect(apply.ok).toBe(true);
+    expect(apply.result.final_priority).toBe(1);
+    const modlist = await readFile(join(root, "profiles", "Default", "modlist.txt"), "utf8");
+    expect(modlist.trim().split(/\r?\n/)).toEqual(["+High", "+Mid", "+IntegerPriority", "+Low"]);
+  });
+
+  it("Phase 3: old target_priority literals are a hard-break invalid_arguments", async () => {
+    const { ctx } = await _fixture((_root) => ({
+      call: async (method) => {
+        if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+        throw new Error(`unmocked: ${method}`);
+      },
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    }));
+
+    for (const oldLiteral of ["top", "bottom"]) {
+      const result = await dispatchToolCall({
+        toolName: "mo2_install",
+        rawArgs: { mode: "plan", archive_path: "/tmp/old.zip", mod_name: "OldLiteral", target_priority: oldLiteral },
+        ctx,
+        rules: [],
+      });
+      const env = JSON.parse(result.content[0].text) as { ok: boolean; error: { code: string; field_errors: Record<string, string[]> } };
+      expect(result.isError).toBe(true);
+      expect(env.ok).toBe(false);
+      expect(env.error.code).toBe("invalid_arguments");
+      expect(env.error.field_errors.target_priority.join("\n")).toContain("Invalid input");
+    }
+  });
+
+  it("Phase 3: live integer target_priority calls broker mods.set_priority and reports readback final_priority", async () => {
+    const { root, ctx } = await _fixture((_root) => ({
+      call: async (method, params) => {
+        if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+        if (method === "archive.extract_all") {
+          const dest = (params as { dest: string }).dest;
+          await mkdir(dest, { recursive: true });
+          await writeFile(join(dest, "LiveInteger.esp"), "fake", "utf8");
+          return { files: ["LiveInteger.esp"], file_count: 1, dest, format: "zip" };
+        }
+        if (method === "world.invalidate") return { invalidated: true };
+        throw new Error(`unmocked sidecar: ${method}`);
+      },
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    }));
+    await writeFile(join(root, "profiles", "Default", "modlist.txt"), "+High\n+Mid\n+Low\n", "utf8");
+    const brokerCalls: Array<{ method: string; params: unknown }> = [];
+    ctx.pipeClient = {
+      call: async (method: string, params: unknown) => {
+        brokerCalls.push({ method, params });
+        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+        if (method === "installation.create_mod_from_directory") {
+          const absolutePath = join(root, "mods", "LiveInteger");
+          await mkdir(absolutePath, { recursive: true });
+          return { ok: true, result: { name: "LiveInteger", absolute_path: absolutePath }, error: null };
+        }
+        if (method === "mods.set_priority") return { ok: true, result: { name: "LiveInteger", actual_priority: (params as { priority: number }).priority }, error: null };
+        if (method === "mods.list") return { ok: true, result: { mods: [{ name: "LiveInteger", priority: 1 }] }, error: null };
+        if (method === "organizer.refresh") return { ok: true, result: { refreshed: true }, error: null };
+        if (method === "plugins.missing_masters") return { ok: true, result: { warnings: [], scanned_count: 1, enabled_count: 1 }, error: null };
+        throw new Error(`unmocked broker: ${method}`);
+      },
+      close: () => {},
+      discoverAndConnect: async () => {},
+      isConnected: () => true,
+    } as unknown as ToolContext["pipeClient"];
+    const tool = getTool("mo2_install")!;
+    const plan = (await tool.handler(
+      { mode: "plan", archive_path: "/tmp/live-int.zip", mod_name: "LiveInteger", target_priority: 1 },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+    const apply = (await tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )) as { ok: boolean; result: { final_priority: number } };
+
+    expect(apply.ok).toBe(true);
+    expect(brokerCalls.find((c) => c.method === "mods.set_priority")?.params).toMatchObject({ name: "LiveInteger", priority: 1 });
+    expect(brokerCalls.some((c) => c.method === "mods.list")).toBe(true);
+    expect(apply.result.final_priority).toBe(1);
   });
 
   // BUG-9 fix (2026-06-17): cross-profile request is rejected at plan time.

@@ -1,13 +1,18 @@
 /**
- * mo2_send_mod_to — T3 reposition a mod by named mode.
+ * mo2_send_mod_to — T3 reposition a mod by GUI-aligned target mode.
  *
- * Modes (per oracle §A3):
- *   - top: highest priority (numerically priority-count-1)
- *   - bottom: lowest priority (priority 0)
- *   - priority: explicit integer
- *   - above_separator: place above named separator (separator priority + 1 in FULL priority space)
- *   - above_first_conflict: place above highest-priority mod that shares files (sidecar)
- *   - below_last_conflict: place below lowest-priority mod that shares files (sidecar)
+ * Vocabulary contract (mirrors MO2 GUI mods panel — BOTTOM wins):
+ *   - gui_top              → priority 0 (top of GUI, loaded first, loses all)
+ *   - gui_bottom           → priority N-1 (bottom of GUI, loaded last, wins all)
+ *   - wins_over <anchor>   → anchor.priority + 1 (one slot ABOVE anchor in
+ *                            precedence; one slot BELOW anchor visually in GUI;
+ *                            if anchor is a separator, this is "into the section
+ *                            labeled by that separator, at the section's top
+ *                            visual position")
+ *   - loses_to <anchor>    → anchor.priority - 1
+ *   - wins_over_conflicts  → max(file-sharing mods' priorities) + 1
+ *   - loses_to_conflicts   → min(file-sharing mods' priorities) - 1
+ *   - raw_priority         → explicit mobase priority, clamped [0, mod_count-1]
  */
 import { z } from "zod";
 import { readFile } from "node:fs/promises";
@@ -20,57 +25,61 @@ import { resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { requireBoundContext } from "../binding.js";
 const ModeSchema = z.enum([
-    "top",
-    "bottom",
-    "priority",
-    "above_separator",
-    "above_first_conflict",
-    "below_last_conflict",
+    "gui_top",
+    "gui_bottom",
+    "wins_over",
+    "loses_to",
+    "wins_over_conflicts",
+    "loses_to_conflicts",
+    "raw_priority",
 ]);
-// BUG-10 fix (2026-06-17): mod name + plan_id + lease_token gain .min(1).
-// target_separator stays optional (only used in above_separator mode).
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("plan"),
         name: z.string().min(1),
         target_mode: ModeSchema,
+        anchor: z.string().min(1).optional(),
         target_priority: z.number().int().optional(),
-        target_separator: z.string().optional(),
         profile: z.string().default("Default"),
-    }),
-    z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
+    }).strict(),
+    z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }).strict(),
 ]);
+const RESPONSE_META = {
+    priority_convention: "mobase_full_space_higher_wins",
+    modlist_file_order: "reverse_of_gui",
+    gui_direction_hint: "priority_0_at_gui_top_loses; priority_(N-1)_at_gui_bottom_wins",
+};
 async function _computeTargetPriority(args, ctx, profile) {
     const bound = requireBoundContext(ctx);
     const p = await readProfile(join(bound.config.mo2Root, "profiles", profile));
-    // FULL priority space (separators occupy slots). mobase IModList.setPriority
-    // accepts priorities in this space — valid range [0, mods.length - 1]. The
-    // 2026-06-17 BUG-B fix (issue #14) introduced nonSepRank conversion based on
-    // a wrong conclusion about broker semantics; that fix is reverted here.
-    // See docs/issues/BUG-mo2-mcp-send_mod_to-semantics-2026-06-27.md.
     const maxPri = Math.max(0, p.mods.length - 1);
     const clamp = (v) => Math.max(0, Math.min(v, maxPri));
     const mode = args.target_mode;
     switch (mode) {
-        case "top":
-            // Highest priority = bottom of MO2 GUI = top of modlist.txt = wins
-            return maxPri;
-        case "bottom":
-            // Priority 0 = top of MO2 GUI = bottom of modlist.txt = loses
+        case "gui_top":
             return 0;
-        case "priority":
-            return clamp(args.target_priority ?? 0);
-        case "above_separator": {
-            const sep = p.mods.find((m) => m.isSeparator && m.name === args.target_separator);
-            if (!sep)
-                throw new Error(`separator_not_found: ${args.target_separator}`);
-            // "Above" the separator visually = higher priority numerically (closer to
-            // bottom of MO2 GUI). Place mod at sep.priority + 1; clamp guards against
-            // separators at the very top.
-            return clamp(sep.priority + 1);
+        case "gui_bottom":
+            return maxPri;
+        case "raw_priority": {
+            const tp = args.target_priority;
+            if (typeof tp !== "number" || !Number.isInteger(tp)) {
+                throw new Error("raw_priority_requires_target_priority_int");
+            }
+            return clamp(tp);
         }
-        case "above_first_conflict":
-        case "below_last_conflict": {
+        case "wins_over":
+        case "loses_to": {
+            const anchorName = args.anchor;
+            if (typeof anchorName !== "string" || anchorName.length === 0) {
+                throw new Error(`${mode}_requires_anchor`);
+            }
+            const anchor = p.mods.find((m) => m.name === anchorName);
+            if (!anchor)
+                throw new Error(`anchor_not_found: ${anchorName}`);
+            return clamp(mode === "wins_over" ? anchor.priority + 1 : anchor.priority - 1);
+        }
+        case "wins_over_conflicts":
+        case "loses_to_conflicts": {
             const sidecar = bound.sidecar;
             if (!sidecar) {
                 throw new Error("sidecar_required_for_conflict_mode");
@@ -85,7 +94,6 @@ async function _computeTargetPriority(args, ctx, profile) {
             if (conflictMods.length === 0) {
                 throw new Error("no_conflicts_found");
             }
-            // Use FULL priorities directly, no nonSepRank conversion.
             const conflictPris = conflictMods
                 .map((n) => p.mods.find((m) => m.name === n))
                 .filter((m) => m !== undefined && !m.isSeparator)
@@ -93,7 +101,7 @@ async function _computeTargetPriority(args, ctx, profile) {
             if (conflictPris.length === 0) {
                 throw new Error("no_conflicts_found");
             }
-            if (mode === "above_first_conflict")
+            if (mode === "wins_over_conflicts")
                 return clamp(Math.max(...conflictPris) + 1);
             return clamp(Math.min(...conflictPris) - 1);
         }
@@ -113,8 +121,23 @@ const handler = {
         await assertActiveProfile(ctx, profile);
         const targetPri = await _computeTargetPriority(args, ctx, profile);
         const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
+        const bound = requireBoundContext(ctx);
+        const p = await readProfile(join(bound.config.mo2Root, "profiles", profile));
+        const maxPri = Math.max(0, p.mods.length - 1);
+        const diffMeta = (() => {
+            switch (args.target_mode) {
+                case "gui_top": return "gui_top (priority 0 = loses all)";
+                case "gui_bottom": return `gui_bottom (priority ${maxPri} = wins all)`;
+                case "wins_over": return `wins_over ${args.anchor}`;
+                case "loses_to": return `loses_to ${args.anchor}`;
+                case "wins_over_conflicts": return "wins_over_conflicts (top of conflict set)";
+                case "loses_to_conflicts": return "loses_to_conflicts (bottom of conflict set)";
+                case "raw_priority": return `raw_priority ${args.target_priority}`;
+                default: return String(args.target_mode);
+            }
+        })();
         return {
-            diff: `${args.name}: → priority ${targetPri} (mode=${args.target_mode})`,
+            diff: `${args.name}: → priority ${targetPri} (${diffMeta})`,
             affectedFiles: [modlistPath],
             targets: [{ path: modlistPath, kind: "text-file" }],
         };
@@ -135,6 +158,7 @@ const handler = {
             return {
                 ...resp.result,
                 target_mode: args.target_mode,
+                _meta: RESPONSE_META,
             };
         }
         // Offline: rewrite modlist.txt line order
@@ -155,13 +179,14 @@ const handler = {
             new_priority: targetPri,
             target_mode: args.target_mode,
             source: "offline_modlist_reorder",
+            _meta: RESPONSE_META,
         };
     },
 };
 registerTool({
     name: "mo2_send_mod_to",
     tier: "T3",
-    description: "Reposition a mod by mode: top/bottom/priority/above_separator/above_first_conflict/below_last_conflict.",
+    description: "Reposition a mod by GUI-aligned mode: gui_top/gui_bottom/wins_over/loses_to/wins_over_conflicts/loses_to_conflicts/raw_priority.",
     inputSchema,
     handler: (args, ctx) => routeToPlanApply(handler, args, ctx, ctx.plans, ctx.snapshots),
 });

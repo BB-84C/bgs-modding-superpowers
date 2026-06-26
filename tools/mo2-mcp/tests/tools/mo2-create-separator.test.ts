@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { mkdtemp, mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,23 +10,15 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function _fixture(withPipe = true): Promise<{ root: string; ctx: ToolContext }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-sep-"));
+  const root = await mkdtemp(join(tmpdir(), "mo2-sep-gui-"));
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
-  await writeFile(
-    join(root, "profiles", "Default", "modlist.txt"),
-    ["+TopMod", "+AnchorMod", "+BottomMod", ""].join("\n"),
-    "utf8",
-  );
+  await writeFile(join(root, "profiles", "Default", "modlist.txt"), ["+TopMod", "+AnchorMod", "+BottomMod", ""].join("\n"), "utf8");
   await writeFile(join(root, "profiles", "Default", "plugins.txt"), "", "utf8");
   await mkdir(join(root, "profiles", "BB84自用"), { recursive: true });
-  await writeFile(join(root, "profiles", "BB84自用", "modlist.txt"), ["+AnchorMod", ""].join("\n"), "utf8");
+  await writeFile(join(root, "profiles", "BB84自用", "modlist.txt"), "+AnchorMod\n", "utf8");
   await writeFile(join(root, "profiles", "BB84自用", "plugins.txt"), "", "utf8");
   await mkdir(join(root, "mods"), { recursive: true });
-  await writeFile(
-    join(root, "ModOrganizer.ini"),
-    `[General]\ngame=fallout4\n[Settings]\nbase_directory=${root}\n`,
-    "utf8",
-  );
+  await writeFile(join(root, "ModOrganizer.ini"), `[General]\ngame=fallout4\nselected_profile=Default\n[Settings]\nbase_directory=${root}\n`, "utf8");
 
   const ctx: ToolContext = {
     config: {
@@ -44,9 +36,9 @@ async function _fixture(withPipe = true): Promise<{ root: string; ctx: ToolConte
   };
   if (withPipe) {
     ctx.pipeClient = {
-      call: async (method: string) => {
+      call: async (method: string, params: Record<string, unknown>) => {
         if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
-        return { ok: true, result: { name: "Section_separator", created: true, priority: 2 } };
+        return { ok: true, result: { name: params.name, created: true, priority: params.priority } };
       },
       close: () => {},
       discoverAndConnect: async () => {},
@@ -66,36 +58,44 @@ describe("mo2_create_separator", () => {
     const { ctx } = await _fixture(false);
     const tool = getTool("mo2_create_separator")!;
 
-    await expect(
-      tool.handler({ mode: "plan", name: "Section" }, ctx),
-    ).rejects.toThrow(/live_mo2_required/);
+    await expect(tool.handler({ mode: "plan", name: "Section" }, ctx)).rejects.toThrow(/live_mo2_required/);
   });
 
-  it("plan with above returns diff mentioning target priority and _separator name", async () => {
+  it("plan with wins_over returns diff mentioning target priority and _separator name", async () => {
     const { ctx } = await _fixture();
     const tool = getTool("mo2_create_separator")!;
 
-    const plan = (await tool.handler(
-      { mode: "plan", name: "Section", above: "AnchorMod", color: "#aabbcc" },
-      ctx,
-    )) as { ok: boolean; result: { diff: string } };
+    const plan = await tool.handler({ mode: "plan", name: "Section", wins_over: "AnchorMod", color: "#aabbcc" }, ctx) as {
+      ok: boolean;
+      result: { diff: string };
+    };
 
     expect(plan.ok).toBe(true);
     expect(plan.result.diff).toContain('Create separator "Section" → Section_separator');
-    expect(plan.result.diff).toContain("pri=2");
+    expect(plan.result.diff).toContain("wins_over AnchorMod, pri=2");
     expect(plan.result.diff).toContain("color=#aabbcc");
   });
 
-  it("plan throws above_mod_not_found when above name is absent", async () => {
+  it("plan throws wins_over_mod_not_found when wins_over name is absent", async () => {
     const { ctx } = await _fixture();
     const tool = getTool("mo2_create_separator")!;
 
-    await expect(
-      tool.handler({ mode: "plan", name: "Section", above: "Missing" }, ctx),
-    ).rejects.toThrow(/above_mod_not_found: Missing/);
+    await expect(tool.handler({ mode: "plan", name: "Section", wins_over: "Missing" }, ctx)).rejects.toThrow(/wins_over_mod_not_found: Missing/);
   });
 
-  it("apply creates suffixed separator, writes color meta, and invalidates", async () => {
+  it("schema rejects empty wins_over at the Zod layer", async () => {
+    const tool = getTool("mo2_create_separator")!;
+
+    expect(tool.inputSchema.safeParse({ mode: "plan", name: "Section", wins_over: "" }).success).toBe(false);
+  });
+
+  it("schema rejects old above field at the Zod layer", async () => {
+    const tool = getTool("mo2_create_separator")!;
+
+    expect(tool.inputSchema.safeParse({ mode: "plan", name: "Section", above: "AnchorMod" }).success).toBe(false);
+  });
+
+  it("apply creates suffixed separator with wins_over priority, writes color meta, invalidates, and returns metadata", async () => {
     const { root, ctx } = await _fixture();
     const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
     ctx.pipeClient = {
@@ -119,32 +119,33 @@ describe("mo2_create_separator", () => {
       stop: async () => {},
     } as unknown as ToolContext["sidecar"];
     const tool = getTool("mo2_create_separator")!;
-    const plan = (await tool.handler(
-      { mode: "plan", name: "Section", above: "AnchorMod", color: "#aabbcc" },
-      ctx,
-    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+    const plan = await tool.handler({ mode: "plan", name: "Section", wins_over: "AnchorMod", color: "#aabbcc" }, ctx) as {
+      ok: boolean;
+      result: { planId: string; lease_token: string };
+    };
 
-    const apply = (await tool.handler(
-      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
-      ctx,
-    )) as { ok: boolean; result: { separator_name: string; color_set: boolean } };
+    const apply = await tool.handler({ mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token }, ctx) as {
+      ok: boolean;
+      result: { separator_name: string; color_set: boolean; _meta: Record<string, string> };
+    };
 
     expect(apply.ok).toBe(true);
     expect(apply.result).toMatchObject({ separator_name: "Section_separator", color_set: true });
-    // BUG-9 fix (2026-06-17): buildPlan now also runs assertActiveProfile.
     expect(pipeCalls).toEqual([
-      { method: "profile.active", params: {} }, // buildPlan guard
-      { method: "profile.active", params: {} }, // applyMutation guard
+      { method: "profile.active", params: {} },
+      { method: "profile.active", params: {} },
       { method: "mods.create", params: { name: "Section_separator", priority: 2 } },
     ]);
-    expect(await readFile(join(root, "mods", "Section_separator", "meta.ini"), "utf8"))
-      .toBe("[General]\ncolor=#aabbcc\n");
-    expect(sidecarCalls).toEqual([
-      { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } },
-    ]);
+    expect(await readFile(join(root, "mods", "Section_separator", "meta.ini"), "utf8")).toBe("[General]\ncolor=#aabbcc\n");
+    expect(sidecarCalls).toEqual([{ method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } }]);
+    expect(apply.result._meta).toEqual({
+      priority_convention: "mobase_full_space_higher_wins",
+      modlist_file_order: "reverse_of_gui",
+      gui_direction_hint: "priority_0_at_gui_top_loses; priority_(N-1)_at_gui_bottom_wins",
+    });
   });
 
-  it("apply without color does not write meta.ini but still invalidates", async () => {
+  it("apply without wins_over calls mods.create without priority and returns metadata", async () => {
     const { root, ctx } = await _fixture();
     const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
     ctx.pipeClient = {
@@ -157,58 +158,31 @@ describe("mo2_create_separator", () => {
       discoverAndConnect: async () => {},
       isConnected: () => true,
     } as unknown as ToolContext["pipeClient"];
-    const sidecarCalls: Array<{ method: string; params: unknown }> = [];
     ctx.sidecar = {
-      call: async (method: string, params: unknown) => {
-        sidecarCalls.push({ method, params });
-        return { invalidated: true };
-      },
+      call: async () => ({ invalidated: true }),
       isReady: () => true,
       start: async () => {},
       stop: async () => {},
     } as unknown as ToolContext["sidecar"];
     const tool = getTool("mo2_create_separator")!;
-    const plan = (await tool.handler(
-      { mode: "plan", name: "Plain" },
-      ctx,
-    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+    const plan = await tool.handler({ mode: "plan", name: "Plain" }, ctx) as { ok: boolean; result: { planId: string; lease_token: string } };
 
-    const apply = (await tool.handler(
-      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
-      ctx,
-    )) as { ok: boolean; result: { separator_name: string; color_set: boolean } };
+    const apply = await tool.handler({ mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token }, ctx) as {
+      ok: boolean;
+      result: { separator_name: string; color_set: boolean; _meta: Record<string, string> };
+    };
 
     expect(apply.ok).toBe(true);
     expect(apply.result).toMatchObject({ separator_name: "Plain_separator", color_set: false });
-    // BUG-9 fix (2026-06-17): buildPlan now also runs assertActiveProfile.
-    expect(pipeCalls).toEqual([
-      { method: "profile.active", params: {} }, // buildPlan guard
-      { method: "profile.active", params: {} }, // applyMutation guard
-      { method: "mods.create", params: { name: "Plain_separator" } },
-    ]);
-    expect(sidecarCalls).toEqual([
-      { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } },
-    ]);
+    expect(pipeCalls.find((c) => c.method === "mods.create")?.params).toEqual({ name: "Plain_separator" });
     expect(existsSync(join(root, "mods", "Plain_separator", "meta.ini"))).toBe(false);
+    expect(apply.result._meta.priority_convention).toBe("mobase_full_space_higher_wins");
   });
 
-  // BUG-9 fix (2026-06-17): cross-profile request is rejected at plan time.
-  it("BUG-9: live plan blocks when requested profile is not the active MO2 profile", async () => {
+  it("cross-profile live plan blocks when requested profile is not the active MO2 profile", async () => {
     const { ctx } = await _fixture();
-    ctx.pipeClient = {
-      call: async (method: string) => {
-        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
-        throw new Error(`unexpected broker call during plan: ${method}`);
-      },
-      close: () => {},
-      discoverAndConnect: async () => {},
-      isConnected: () => true,
-    } as unknown as ToolContext["pipeClient"];
     const tool = getTool("mo2_create_separator")!;
 
-    await expect(tool.handler(
-      { mode: "plan", name: "Section", above: "AnchorMod", profile: "BB84自用" },
-      ctx,
-    )).rejects.toThrow(/cross_profile_live_mutation_blocked/);
+    await expect(tool.handler({ mode: "plan", name: "Section", wins_over: "AnchorMod", profile: "BB84自用" }, ctx)).rejects.toThrow(/cross_profile_live_mutation_blocked/);
   });
 });

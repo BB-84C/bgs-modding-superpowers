@@ -233,6 +233,57 @@ describe("mo2_reinstall_mod", () => {
     expect(sidecarCalls.some((call) => call.method === "install.stage_fomod")).toBe(false);
   });
 
+  it("Phase 3: reinstall registers newly introduced plugin files in plugins.txt", async () => {
+    const { root, ctx, pipeCalls } = await fixture({ withPipe: false, createArchive: true });
+    ctx.pipeClient = {
+      call: async (method: string, params: Record<string, unknown>) => {
+        pipeCalls.push({ method, params });
+        if (method === "mods.meta_read") {
+          return {
+            ok: true,
+            result: { name: params.name, meta: { General: { installationFile: "InstalledMod.7z" } }, exists: true },
+          };
+        }
+        if (method === "installation.install_local_archive") {
+          await writeFile(join(root, "mods", "InstalledMod", "NewMaster.esm"), "fake-esm", "utf8");
+          return { ok: true, result: { name: params.name_suggestion, installation_file: params.archive_path } };
+        }
+        if (method === "organizer.refresh") return { ok: true, result: { refreshed: true } };
+        if (method === "plugins.missing_masters") return { ok: true, result: { warnings: [], scanned_count: 1, enabled_count: 1 } };
+        throw new Error(`unmocked: ${method}`);
+      },
+      close: () => {},
+      discoverAndConnect: async () => {},
+      isConnected: () => true,
+    } as unknown as ToolContext["pipeClient"];
+    ctx.sidecar = {
+      call: async (method: string) => {
+        if (method === "fomod.parse_choices") throw new Error("not_a_fomod: no info.xml");
+        if (method === "world.invalidate") return { invalidated: true };
+        throw new Error(`unmocked: ${method}`);
+      },
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    } as unknown as ToolContext["sidecar"];
+    const tool = getTool("mo2_reinstall_mod")!;
+    const plan = (await tool.handler(
+      { mode: "plan", name: "InstalledMod" },
+      ctx,
+    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+    const apply = (await tool.handler(
+      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+      ctx,
+    )) as { ok: boolean; result: { plugins_registered: string[] } };
+
+    expect(apply.ok).toBe(true);
+    expect(apply.result.plugins_registered).toEqual(["NewMaster.esm"]);
+    const pluginsTxt = await readFile(join(root, "profiles", "Default", "plugins.txt"), "utf8");
+    expect(pluginsTxt).toContain("*NewMaster.esm");
+    expect(pipeCalls.some((call) => call.method === "organizer.refresh")).toBe(true);
+  });
+
   // BUG-24 fix: FOMOD detection + tree surfacing now happens at plan time
   // (was apply time before). Mirrors mo2_install's fomod_choices_required
   // shape. Includes the parsed FOMOD tree on the thrown error so the agent
