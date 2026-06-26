@@ -1140,3 +1140,63 @@ TYT-SS first attempt used wrong file_id (55056 doesn't exist). Correct file_id i
 Confirmed in the broader sweep that my first round only fixed mods I explicitly remembered touching. The proper fix requires a SYSTEMATIC re-audit of every flagged Nexus mod after any update batch, not just the ones the agent thinks it touched. Adding this as a workflow note for future update rounds.
 
 Post-batch state: 139 mods status=1 (MAIN, correct) + 16 flagged (all legitimate per above categorization).
+
+## 2026-06-25 -- Round-4 lateral disaster + full recovery: comment-vs-note buggy migration destroyed 49 mods' descriptions
+
+### What I broke
+
+Per BB84 directive 2026-06-25 to enforce strict meta.ini partition (comments = SHORT mod-content description; notes = TIME-SENSITIVE markers), I wrote `migrate-comment-to-note.ps1` and fanned it out to 4 fixer-* variants.
+
+**Two compounding bugs in the script destroyed comment data on 49 mods (Batches B+C+D):**
+
+1. **Regex \\s* crossed line boundaries**. `^notes\s*=\s*(.*)$` greedily consumed `\r\n` and captured content from the FOLLOWING `nexusDescription=` line, polluting the notes field with a duplicate of the nexus description body.
+2. **Marker chunk extraction consumed the description**. The script's "marker chunk = bracket + everything until next marker or end" logic meant BB84's pre-existing `[UPDATE→X.Y.Z] 中文描述` pattern got moved WHOLESALE (bracket + Chinese description) to notes, leaving comments empty. `[UPDATE→X.Y.Z]` is the marker (date-stamped style), Chinese text after it is the description that belongs in comments.
+
+Fixer-alpha (Batch A, 17 mods) ran in DRY-RUN only and aborted because the dry-run showed comments would be wiped — that fixer noticed the bug and refused to apply. Batches B/C/D's fixers applied the broken script before catching the issue. Net damage: 49 mods had their original `comments=` content (Chinese descriptions, some pre-existing from BB84 and some from my own session writes) merged into `notes=` with nexusDescription pollution suffix.
+
+### Recovery (executed via `recover-comment-from-notes.ps1`)
+
+Logic:
+1. For each affected mod, read `notes=` field
+2. Split on first literal `\\n` (Qt INI newline escape) — first chunk = original comments content; everything after = polluted nexusDescription duplicate (discard)
+3. Parse first chunk:
+   - If starts with `[UPDATE→X.Y.Z]` (BB84 arrow flag): marker = the bracket only, description = text after `]`
+   - If starts with `[XXX YYYY-MM-DD]` (session date-stamped marker): all-marker, description empty
+   - If starts with non-bracket text (description-first pattern, e.g. Starfield HD Overhaul): description = text before first `[`, marker = bracket onwards
+4. Write back: `comments=description`, `notes=marker` (preserving any pre-existing legitimate notes content e.g. UCMO-CE's `[INVESTIGATION]` analysis from earlier this round)
+5. Second cleanup pass to strip literal `\\nnexusDescription=...` pollution from any remaining note field (1 mod hit: Starfield HD Overhaul part 02, 8800 → 80 chars)
+
+Results: 67/67 mods recovered. Counts:
+- 17 mods with valid Chinese description preserved in comments (mostly BB84's pre-existing `[UPDATE→X.Y.Z] 中文描述` style)
+- 50 mods with empty comments (description was originally pure marker OR my session's bash extract-on-top destroyed BB84's original description by overwriting comments)
+- All 67 mods have correctly placed markers in notes
+
+### What BB84 needs to backfill
+
+50 mods have empty `comments=` field. BB84 will populate with short Chinese descriptions over time. The 50 list (alphabetical):
+
+Community Spaceship Expansion, Dark Universe - Takeover, Dark Universe Overtime, Denser Vegetation - GRiNDTerra, Denser Vegetation - SC, Immersive Cargo Halls, Immersive Landing Ramps, Just Random Vegetation Rock and Exotic Sizes - GRiNDTerra, Left Align XP Bar, Less Rocks - GRiNDTerra, More Visualized Docking, NAT Station Lake Windows, No More Tiers Plus 1.4, Non-Lethal Framework, OwlTech_Pathfinder, OwlTech_Pathfinder - SC, Permanent POIs - Evil Beyond, Permanent POIs - Rogue Science, Places Of Intrigue - GRiNDTerra, POI Cooldown, Real Fuel - BETA, Revelation - Main Quest Temple Overhaul, RRLNA - Rabbit's Real Lights New Atlantis, Seamless City Interiors, Ship Vendor Framework, Show XP on Loading Screens, SKK Fast Start New Game - SC, SKKFastStartNewGame, Starfield Extended - Craftable Quality v4.1 (+ 5 patches), Starshake - Vizualized Recoil, Starvival - Immersive Survival Addon, Starvival - Immersive Survival Addon - New, Starvival - Immersive Survival Addon - SC, Stroud Premium Edition, Take Your Time, Take Your Time - Shattered Space, The Gang's All Here, UC Military Overhaul - All-In-One, UC Military Overhaul - Complete Edition, UC Surplus Expanded - Immersive, UCMO - Spec Ops Skin Pack, Useful Brigs, VaruunTI Habs, VaruunTI Habs - SC, Xeno Master, Xeno Master Addon Trade Authority can sell XM Items.
+
+### Plus, status=1000 audit + RRLAC update + UCMO-CE notes (Phase 1 of this round, done before the disaster)
+
+**status=1000 audit**: 11 mods scanned. All 11 modids resolve to real Nexus mods. Several should be re-tagged status=1 (MAIN) after BB84 confirms — these are mostly mods where installed version matches current Nexus MAIN file but BB84 set 1000 manually because uncertain about the Option B refresh state. List preserved for follow-up.
+
+**RRLAC update**: v1.1.0.0 → v1.2 via Update-NexusMod-Complete helper. Archive moved to F:\Starfield Mods\Worldspace\.
+
+**UCMO-CE notes write**: `[INVESTIGATION 2026-06-25]` UCMO family load-order analysis written to UCMO-CE meta.ini notes field. After the recovery pass, notes correctly contains both `[USER-INSTALLED ...]` (recovered from comments) + `[INVESTIGATION ...]` (the analysis I wrote manually) joined with `\n`.
+
+### Bug class codified (so future sessions don't repeat)
+
+1. `.opencode/memory/45-mo2-mcp-internals.md` rule 18: rewrote with strict semantic partition (comments=content, notes=markers), explicit marker prefix list, anti-pattern example, and 3-case unit-test fixture requirement.
+2. `skills/maintaining-modding-environments/SKILL.md`: added `meta.ini comment vs note field hygiene (HARD RULE)` section with:
+   - Explicit purpose of each field
+   - Full list of marker prefixes that ALWAYS go in notes
+   - Correct vs incorrect PowerShell helper pattern
+   - Regex bug (\\s* crosses lines) with right pattern ([\\t ]*)
+   - 3-case unit-test fixture requirement before batch dispatch
+3. `D:\Starfield MO2\.opencode-scripts\migrate-comment-to-note.ps1` renamed to `...BROKEN-DO-NOT-USE` to prevent re-execution
+4. `D:\Starfield MO2\.opencode-scripts\recover-comment-from-notes.ps1` preserved for any future re-recovery needs
+
+### Lesson
+
+I was sloppy and didn't run the 3-case unit-test fixture before fan-out dispatch. The fixer-alpha catching the bug in DRY-RUN was the only thing that prevented Batch A's 17 mods from also being destroyed. Net incident: 49 mods needed recovery, none lost (all had nexusDescription as a backup data source), workflow ~30 minutes lost. Codification above should prevent recurrence.
