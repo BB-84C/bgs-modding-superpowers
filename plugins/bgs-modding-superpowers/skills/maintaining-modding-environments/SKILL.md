@@ -684,6 +684,143 @@ for the full mechanism. KB record
 `debugging.asymmetric-evidence-self-falsify.v1` for the diagnostic
 discipline that prevents the trap from misleading bisection planning.
 
+## meta.ini comment vs note field hygiene (HARD RULE)
+
+Every time an agent touches a mod folder's `meta.ini`, two text fields exist
+and they have STRICTLY DIFFERENT purposes. Putting content in the wrong field
+breaks the curator's mental model of their own modpack.
+
+**`comments=` = SHORT description of WHAT THE MOD DOES (the mod's CONTENT)**
+
+- 1-2 sentences max
+- Language: match the curator (Chinese for BB84-style packs, English otherwise)
+- Shown in MO2 GUI mod-list "Comments" column (visible at a glance without clicking)
+- Describes the mod's GAMEPLAY/VISUAL/SYSTEM effect, not its install metadata
+
+Example (good): `调整起降过场镜头比例,提供更沉浸的驾驶舱视角与速度选项。`
+
+**`notes=` = TIME-SENSITIVE markers + operational memory (the mod's STATUS)**
+
+- Update history with datestamp + version diff + file_id
+- Archive / obsolescence / version-tag-unsync / user-install / local-patch markers
+- FOMOD choice records, conflict resolution memos, investigation findings
+- Shown in Notes tab (hidden until clicked)
+- MOST text per mod ends up here
+
+Marker prefixes that ALWAYS belong in `notes=`, NEVER in `comments=`:
+
+```
+[UPDATED YYYY-MM-DD] x.y.z -> a.b.c | file_id N [MAJOR|MINOR|PATCH]
+[ARCHIVED YYYY-MM-DD] reason
+[OBSOLETE YYYY-MM-DD] reason
+[FIXED YYYY-MM-DD] reason
+[USER-INSTALLED YYYY-MM-DD] FOMOD picks / manual install footprint
+[NEW-INSTALL YYYY-MM-DD] reactivation cluster context
+[STALE YYYY-MM-DD] SC translation lags / lifecycle drift
+[LOCAL-PATCH] curator's local fixup
+[VERSION-TAG-UNSYNC] page-version-vs-file-version mismatch
+[INVESTIGATION YYYY-MM-DD] analysis findings + anti-stale-fact note
+[UPDATE→x.y.z] BB84's pre-existing update-pending arrow flag (marker is JUST the bracket; description after it belongs in `comments=`)
+```
+
+**bash extract-on-top update path MUST preserve existing `comments=`**:
+
+When updating a mod's content (e.g. v1.3.1 → v1.3.2 via extract-on-top),
+the helper MUST NOT overwrite `comments=`. Instead, APPEND the update marker
+to `notes=` (preserving any pre-existing notes with `\n` separator).
+
+Anti-pattern that destroyed BB84's curator descriptions on 2026-06-25:
+
+```powershell
+# WRONG — overwrites comments, destroys description
+$content = [Regex]::Replace($content, '(?m)^comments\s*=.*$', "comments=[UPDATED ...] $versionDiff")
+```
+
+Correct pattern:
+
+```powershell
+# RIGHT — preserve comments, append marker to notes (Qt INI literal \n)
+$newMarker = "[UPDATED $date] $oldVersion -> $newVersion | file_id $fileId"
+$content = [Regex]::Replace($content, '(?m)^notes[\t ]*=[\t ]*(.*)$', { param($m) 
+  $existing = $m.Groups[1].Value
+  if ([string]::IsNullOrWhiteSpace($existing)) { "notes=$newMarker" }
+  else { "notes=$newMarker\n$existing" }  # \n is literal backslash-n; Qt INI renders as newline
+})
+```
+
+**Regex bug to avoid**: do NOT use `\s*` in INI line anchoring — it consumes
+`\r\n` and captures content from the next line. Use `[\t ]*` for in-line
+whitespace only:
+
+```powershell
+# WRONG — \s* crosses lines, leaks neighbour key's value into your match
+$cmtM = [Regex]::Match($content, '(?m)^comments\s*=\s*(.*)$')
+
+# RIGHT — [\t ]* stays on one line
+$cmtM = [Regex]::Match($content, '(?m)^comments[\t ]*=[\t ]*(.*)$')
+```
+
+**Before any batch meta.ini migration**, write a 3-case unit-test fixture:
+
+1. Pure marker only (`[ARCHIVED 2026-06-25] reason`) → expect comments empty, marker stays in notes
+2. BB84 arrow style (`[UPDATE→2.0.0.0] 中文描述`) → expect comments has Chinese, notes has `[UPDATE→2.0.0.0]`
+3. Mixed (description text first, then marker) → expect comments has description, notes has marker
+
+Then dry-run on 3-5 sample mods spanning all three cases BEFORE batch dispatch.
+Skipping this check is what destroyed 49 mods' Chinese descriptions in the
+2026-06-25 buggy migration. See `.opencode/memory/45-mo2-mcp-internals.md`
+rule 18 for the full incident postmortem.
+
+### Qt QSettings INI quoting (silent display-empty trap)
+
+MO2's backend uses Qt QSettings to parse meta.ini. Qt's INI parser conflates
+a value that STARTS with `[` (e.g. `[UPDATED ...]`, `[CC]`, `[UPDATE→x.y.z]`)
+with a section-header start (`[Section]`) and silently returns empty for that
+key. MO2 GUI's Notes/Comments tab then shows blank, even though a raw text
+preview of the same meta.ini clearly displays the value populated.
+
+**Hard rule**: whenever a `comments=` or `notes=` value starts with `[`,
+wrap the value in double quotes:
+
+```
+# BROKEN — Qt parses as empty, MO2 GUI shows blank
+notes=[UPDATED 2026-06-25] 1.1.5.0 -> 1.2.77.0 [MAJOR] | file_id 61879
+comments=[CC] Watchtower: Orbital.Strike\Fleet.Command
+
+# CORRECT — Qt strips outer quotes, returns bracketed content; MO2 GUI displays correctly
+notes="[UPDATED 2026-06-25] 1.1.5.0 -> 1.2.77.0 [MAJOR] | file_id 61879"
+comments="[CC] Watchtower: Orbital.Strike\Fleet.Command"
+```
+
+Implementation rules:
+1. **WRITE path**: before serializing a `comments=` / `notes=` line, check if
+   the value's first non-whitespace char is `[`. If yes, emit double quotes
+   around the value. If the value contains internal `"`, escape them as `\"`.
+   Internal `\n` (literal backslash-n) IS preserved by Qt as a multi-line
+   escape inside quoted strings and renders as a newline in MO2 GUI.
+2. **READ path**: after reading a `comments=` / `notes=` line, strip a single
+   leading and trailing `"` pair (if present) BEFORE parsing the value
+   semantically. Unescape internal `\"` to `"`.
+3. **Idempotence**: re-running the quoting step on an already-quoted value
+   should be a no-op (`if ($val -match '^".*"$') { skip }`).
+4. **Special cases**: values already starting with `@ByteArray(...)`,
+   `<HTML>`, or other Qt-supported wrapper forms are left untouched — they
+   have their own parsing path.
+
+Reproduction: 2026-06-26 Xeno Master screenshot pair (BB84). 268-char notes
+value with `[UPDATED ...]` start displayed empty in MO2 GUI. Adding double
+quotes around the value fixed display immediately on MO2 refresh (no
+restart). Sweep across BB84 Starfield modpack found 220 affected meta.ini
+files; backups preserved at
+`D:\Starfield MO2\.backups\meta-qt-quote-fix-20260626-003856\`.
+
+Cross-link: KB record `engine.qt-ini-bracket-quote-requirement.v1` (TBD)
+should codify this for end-users authoring their own meta.ini writers.
+
+Cross-link: KB record `install-planning.mod-mutation-cleanliness-discipline.v1`
+covers the broader 7-discipline mutation hygiene checklist that this hygiene
+rule plugs into.
+
 ## See also
 
 - `setting-up-bgs-modding-environment` — first-run MO2 / xEdit / KB acquisition orchestrator.
