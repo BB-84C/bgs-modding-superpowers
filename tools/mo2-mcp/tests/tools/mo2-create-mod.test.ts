@@ -10,23 +10,15 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function _fixture(withPipe = true): Promise<{ root: string; ctx: ToolContext }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-create-"));
+  const root = await mkdtemp(join(tmpdir(), "mo2-create-gui-"));
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
-  await writeFile(
-    join(root, "profiles", "Default", "modlist.txt"),
-    ["+TopMod", "+AnchorMod", "+BottomMod", ""].join("\n"),
-    "utf8",
-  );
+  await writeFile(join(root, "profiles", "Default", "modlist.txt"), ["+TopMod", "+AnchorMod", "+BottomMod", ""].join("\n"), "utf8");
   await writeFile(join(root, "profiles", "Default", "plugins.txt"), "", "utf8");
   await mkdir(join(root, "profiles", "BB84自用"), { recursive: true });
-  await writeFile(join(root, "profiles", "BB84自用", "modlist.txt"), ["+AnchorMod", ""].join("\n"), "utf8");
+  await writeFile(join(root, "profiles", "BB84自用", "modlist.txt"), "+AnchorMod\n", "utf8");
   await writeFile(join(root, "profiles", "BB84自用", "plugins.txt"), "", "utf8");
   await mkdir(join(root, "mods"), { recursive: true });
-  await writeFile(
-    join(root, "ModOrganizer.ini"),
-    `[General]\ngame=fallout4\n[Settings]\nbase_directory=${root}\n`,
-    "utf8",
-  );
+  await writeFile(join(root, "ModOrganizer.ini"), `[General]\ngame=fallout4\nselected_profile=Default\n[Settings]\nbase_directory=${root}\n`, "utf8");
 
   const ctx: ToolContext = {
     config: {
@@ -44,9 +36,9 @@ async function _fixture(withPipe = true): Promise<{ root: string; ctx: ToolConte
   };
   if (withPipe) {
     ctx.pipeClient = {
-      call: async (method: string) => {
+      call: async (method: string, params: Record<string, unknown>) => {
         if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
-        return { ok: true, result: { name: "NewEmpty", created: true, priority: 2 } };
+        return { ok: true, result: { name: params.name, created: true, priority: params.priority } };
       },
       close: () => {},
       discoverAndConnect: async () => {},
@@ -66,107 +58,53 @@ describe("mo2_create_mod", () => {
     const { ctx } = await _fixture(false);
     const tool = getTool("mo2_create_mod")!;
 
-    await expect(
-      tool.handler({ mode: "plan", name: "NewEmpty" }, ctx),
-    ).rejects.toThrow(/live_mo2_required_for_create_mod/);
+    await expect(tool.handler({ mode: "plan", name: "NewEmpty" }, ctx)).rejects.toThrow(/live_mo2_required_for_create_mod/);
   });
 
-  it("plan with above returns diff mentioning target priority", async () => {
+  it("plan with wins_over returns diff mentioning target priority", async () => {
     const { ctx } = await _fixture();
     const tool = getTool("mo2_create_mod")!;
 
-    const plan = (await tool.handler(
-      { mode: "plan", name: "NewEmpty", above: "AnchorMod" },
-      ctx,
-    )) as { ok: boolean; result: { diff: string; affected_files: string[] } };
+    const plan = await tool.handler({ mode: "plan", name: "NewEmpty", wins_over: "AnchorMod" }, ctx) as {
+      ok: boolean;
+      result: { diff: string; affected_files: string[] };
+    };
 
     expect(plan.ok).toBe(true);
-    expect(plan.result.diff).toContain("above AnchorMod (pri=2)");
+    expect(plan.result.diff).toBe("Create empty mod NewEmpty (wins_over AnchorMod, pri=2)");
     expect(plan.result.affected_files[0]).toContain(join("profiles", "Default", "modlist.txt"));
   });
 
-  it("plan throws above_mod_not_found when above name is absent", async () => {
+  it("plan throws wins_over_mod_not_found when wins_over name is absent", async () => {
     const { ctx } = await _fixture();
     const tool = getTool("mo2_create_mod")!;
 
-    await expect(
-      tool.handler({ mode: "plan", name: "NewEmpty", above: "Missing" }, ctx),
-    ).rejects.toThrow(/above_mod_not_found: Missing/);
+    await expect(tool.handler({ mode: "plan", name: "NewEmpty", wins_over: "Missing" }, ctx)).rejects.toThrow(/wins_over_mod_not_found: Missing/);
   });
 
-  // BUG-20 fix (2026-06-17): some OpenCode tool-call surfaces emit `above: ""`
-  // for the semantically-optional field, which used to interpolate into the
-  // error message as `above_mod_not_found: ` (trailing space). The handler
-  // now treats empty-string the same as the field being absent: skip lookup
-  // and place the new mod at the bottom (no above-text in the diff).
-  it("BUG-20: plan with above:'' is treated as absent and places mod at bottom", async () => {
-    const { ctx } = await _fixture();
+  it("schema rejects empty wins_over at the Zod layer", async () => {
     const tool = getTool("mo2_create_mod")!;
 
-    const plan = (await tool.handler(
-      { mode: "plan", name: "NewEmpty", above: "" },
-      ctx,
-    )) as { ok: boolean; result: { diff: string; affected_files: string[] } };
-
-    expect(plan.ok).toBe(true);
-    expect(plan.result.diff).toBe("Create empty mod NewEmpty");
-    expect(plan.result.diff).not.toContain("above");
-    expect(plan.result.diff).not.toContain("pri=");
-    expect(plan.result.affected_files[0]).toContain(join("profiles", "Default", "modlist.txt"));
+    expect(tool.inputSchema.safeParse({ mode: "plan", name: "NewEmpty", wins_over: "" }).success).toBe(false);
   });
 
-  it("BUG-20: plan with above omitted is treated as absent and places mod at bottom", async () => {
+  it("schema rejects old above field at the Zod layer", async () => {
+    const tool = getTool("mo2_create_mod")!;
+
+    expect(tool.inputSchema.safeParse({ mode: "plan", name: "NewEmpty", above: "AnchorMod" }).success).toBe(false);
+  });
+
+  it("plan with wins_over omitted creates bottom-default diff", async () => {
     const { ctx } = await _fixture();
     const tool = getTool("mo2_create_mod")!;
 
-    const plan = (await tool.handler(
-      { mode: "plan", name: "NewEmpty" },
-      ctx,
-    )) as { ok: boolean; result: { diff: string } };
+    const plan = await tool.handler({ mode: "plan", name: "NewEmpty" }, ctx) as { ok: boolean; result: { diff: string } };
 
     expect(plan.ok).toBe(true);
     expect(plan.result.diff).toBe("Create empty mod NewEmpty");
   });
 
-  it("BUG-20: apply with above:'' is treated as absent (mods.create called without priority)", async () => {
-    const { root, ctx } = await _fixture();
-    const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
-    ctx.pipeClient = {
-      call: async (method: string, params: Record<string, unknown>) => {
-        pipeCalls.push({ method, params });
-        if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
-        return { ok: true, result: { name: params.name, created: true } };
-      },
-      close: () => {},
-      discoverAndConnect: async () => {},
-      isConnected: () => true,
-    } as unknown as ToolContext["pipeClient"];
-    ctx.sidecar = {
-      call: async () => ({ invalidated: true }),
-      isReady: () => true,
-      start: async () => {},
-      stop: async () => {},
-    } as unknown as ToolContext["sidecar"];
-    const tool = getTool("mo2_create_mod")!;
-    const plan = (await tool.handler(
-      { mode: "plan", name: "BottomMod2", above: "" },
-      ctx,
-    )) as { ok: boolean; result: { planId: string; lease_token: string } };
-
-    const apply = (await tool.handler(
-      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
-      ctx,
-    )) as { ok: boolean };
-
-    expect(apply.ok).toBe(true);
-    const createCall = pipeCalls.find((c) => c.method === "mods.create");
-    expect(createCall).toBeDefined();
-    // No `priority` key — falls to bottom on the MO2 side.
-    expect(createCall!.params).toEqual({ name: "BottomMod2" });
-    expect(existsSync(join(root, "mods", "BottomMod2"))).toBe(true);
-  });
-
-  it("apply calls mods.create with name and priority, ensures mod folder exists, then invalidates sidecar world", async () => {
+  it("apply calls mods.create with wins_over priority, ensures folder exists, invalidates, and returns metadata", async () => {
     const { root, ctx } = await _fixture();
     const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
     ctx.pipeClient = {
@@ -190,49 +128,65 @@ describe("mo2_create_mod", () => {
       stop: async () => {},
     } as unknown as ToolContext["sidecar"];
     const tool = getTool("mo2_create_mod")!;
-    const plan = (await tool.handler(
-      { mode: "plan", name: "NewEmpty", above: "AnchorMod" },
-      ctx,
-    )) as { ok: boolean; result: { planId: string; lease_token: string } };
+    const plan = await tool.handler({ mode: "plan", name: "NewEmpty", wins_over: "AnchorMod" }, ctx) as {
+      ok: boolean;
+      result: { planId: string; lease_token: string };
+    };
 
-    const apply = (await tool.handler(
-      { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
-      ctx,
-    )) as { ok: boolean; result: { name: string; created: boolean; priority: number } };
+    const apply = await tool.handler({ mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token }, ctx) as {
+      ok: boolean;
+      result: { name: string; created: boolean; priority: number; _meta: Record<string, string> };
+    };
 
     expect(apply.ok).toBe(true);
-    // BUG-9 fix (2026-06-17): buildPlan now also runs assertActiveProfile,
-    // which adds an extra profile.active call before the apply-time guard.
     expect(pipeCalls).toEqual([
-      { method: "profile.active", params: {} }, // buildPlan guard
-      { method: "profile.active", params: {} }, // applyMutation guard
+      { method: "profile.active", params: {} },
+      { method: "profile.active", params: {} },
       { method: "mods.create", params: { name: "NewEmpty", priority: 2 } },
     ]);
     expect(existsSync(join(root, "mods", "NewEmpty"))).toBe(true);
-    expect(sidecarCalls).toEqual([
-      { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } },
-    ]);
+    expect(sidecarCalls).toEqual([{ method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } }]);
+    expect(apply.result._meta).toEqual({
+      priority_convention: "mobase_full_space_higher_wins",
+      modlist_file_order: "reverse_of_gui",
+      gui_direction_hint: "priority_0_at_gui_top_loses; priority_(N-1)_at_gui_bottom_wins",
+    });
   });
 
-  // BUG-9 fix (2026-06-17): cross-profile request is rejected at plan time,
-  // not only at apply time. The plan envelope never lands in the agent's
-  // hand if MO2 is live on a different profile.
-  it("BUG-9: live plan blocks when requested profile is not the active MO2 profile", async () => {
-    const { ctx } = await _fixture();
+  it("apply without wins_over calls mods.create without priority and returns metadata", async () => {
+    const { root, ctx } = await _fixture();
+    const pipeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
     ctx.pipeClient = {
-      call: async (method: string) => {
+      call: async (method: string, params: Record<string, unknown>) => {
+        pipeCalls.push({ method, params });
         if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
-        throw new Error(`unexpected broker call during plan: ${method}`);
+        return { ok: true, result: { name: params.name, created: true } };
       },
       close: () => {},
       discoverAndConnect: async () => {},
       isConnected: () => true,
     } as unknown as ToolContext["pipeClient"];
+    ctx.sidecar = {
+      call: async () => ({ invalidated: true }),
+      isReady: () => true,
+      start: async () => {},
+      stop: async () => {},
+    } as unknown as ToolContext["sidecar"];
+    const tool = getTool("mo2_create_mod")!;
+    const plan = await tool.handler({ mode: "plan", name: "BottomMod2" }, ctx) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+    const apply = await tool.handler({ mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token }, ctx) as { ok: boolean; result: { _meta: Record<string, string> } };
+
+    expect(apply.ok).toBe(true);
+    expect(pipeCalls.find((c) => c.method === "mods.create")?.params).toEqual({ name: "BottomMod2" });
+    expect(existsSync(join(root, "mods", "BottomMod2"))).toBe(true);
+    expect(apply.result._meta.priority_convention).toBe("mobase_full_space_higher_wins");
+  });
+
+  it("cross-profile live plan blocks when requested profile is not the active MO2 profile", async () => {
+    const { ctx } = await _fixture();
     const tool = getTool("mo2_create_mod")!;
 
-    await expect(tool.handler(
-      { mode: "plan", name: "NewEmpty", above: "AnchorMod", profile: "BB84自用" },
-      ctx,
-    )).rejects.toThrow(/cross_profile_live_mutation_blocked/);
+    await expect(tool.handler({ mode: "plan", name: "NewEmpty", wins_over: "AnchorMod", profile: "BB84自用" }, ctx)).rejects.toThrow(/cross_profile_live_mutation_blocked/);
   });
 });
