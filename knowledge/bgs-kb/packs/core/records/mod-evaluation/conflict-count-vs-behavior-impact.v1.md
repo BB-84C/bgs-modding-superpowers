@@ -104,6 +104,47 @@ This rubric is for **Lane 3 pre-flight reconnaissance** — substrate-based beha
 - The rubric ranks where xEdit time is best spent. LOW-COUNT-HIGH-IMPACT mods are priority 1 because file inspection alone cannot verify their no-override claims.
 - Cosmetic-replacers and infrastructure with confirmed-narrow scope can be skipped at the xEdit stage entirely.
 
+## Operational pre-flight workflow (the substrate-selection corollary)
+
+The bidirectional rubric implies a workflow: BEFORE the heavy xEdit audit work, run a **pre-flight reasoning audit** on the modlist and plugin order, using description + KB heuristics, to PRE-ORDER the substrate. This dramatically reduces the work xEdit has to do, because mods already classified as cosmetic-replacer or confirmed-narrow infrastructure can be skipped at the FormID-level stage.
+
+### Substrate selection (do not cut at top-N file wins)
+
+When building the substrate for pre-flight reconnaissance, **do not** sort the mod list by file conflict count and take the top-N. That selection method systematically misses the LOW-COUNT-HIGH-IMPACT bucket — exactly the cluster the rubric warns against. The same rubric that classifies "8 wins, mainstream impact" mods as priority 1 is violated at the substrate stage if those mods are not included in the investigation list at all.
+
+The correct substrate selection rule:
+- Include **every enabled mod whose description names a mainstream-vanilla system** (quests, factions, combat, economy, ship systems, oxygen/fuel/survival systems, companion/crew systems), regardless of file count.
+- Include **every systemic mechanism mod** — frameworks adding survival mechanics, fuel mechanics, medical systems, economy layers, crew management — regardless of file count.
+- Include **the author's own listed compatibility patches and disabler ESMs** — if a mod ships a `Disabler.esm` for a specific subsystem, that ESM names the conflict surface explicitly.
+- Then add the top-N file-conflict winners as a SECONDARY input. The file-count signal still matters for asset-conflict resolution; it just must not be the only basis for inclusion.
+
+### Pre-flight reasoning audit on modlist and plugin order
+
+Two distinct audit substrates feed Lane 3 proper:
+
+1. **modlist.txt audit** (asset / left-pane order): each mod's priority should reflect file-conflict winners. Mods that override another mod's assets must load after (higher priority) the mod they override. Mods without file conflicts should default to alphabetic order within their category separator. Translation siblings (`- SC`, `- CHN`, `- DE`, etc.) must follow their parent mod immediately. Mis-categorized mods (wrong separator) should be flagged for relocation. The substrate produced here is a proposed modlist.txt reorganization with rationale per mod.
+
+2. **plugins.txt audit** (record / right-pane order): each ESM's load order should reflect record-override winners, inferred from KB heuristics PRE-xEdit. Use: (a) `papyrus.script-impact-scope-inference.v1` to infer per-ESM behavior scope from the origin mod's classification; (b) the bidirectional rubric here to assess if a small ESM hides mainstream-vanilla impact; (c) author-documented load-order rules from descriptions when available. The substrate produced here is a proposed plugins.txt order with rationale per ESM, plus a list of "ordering cannot resolve this — patch needed" cases flagged for Lane 3 xEdit work.
+
+### The phase-separation discipline
+
+The pre-flight reasoning audit is a phase of its own — distinct from xEdit FormID audit. Doing the modlist+plugins ordering inference first means:
+
+- xEdit work focuses on cases where ordering is genuinely insufficient (record-merge patches needed, conflict-resolution patches needed).
+- Mods classified as confirmed-narrow or cosmetic don't consume xEdit time.
+- The proposed ordering itself is an artifact: future curator updates can be compared against the rationale to detect regressions.
+- The phase separation makes it visible WHICH decisions need empirical FormID verification vs. which can be settled by reasoning.
+
+### Workflow shape (in practice)
+
+1. Audit the modlist: build the substrate selection list per the rule above.
+2. Classify each substrate mod with the bidirectional rubric (this record's five signals).
+3. Build modlist.txt audit substrate: per-mod proposed separator + priority + rationale.
+4. Build plugins.txt audit substrate: per-ESM proposed load order + rationale + "patch needed" flags.
+5. ONLY THEN start xEdit FormID work on the flagged cases.
+
+The substrate artifacts (audit reports) become the inputs to Lane 3 proper. They are also the artifacts a future curator can inspect when something in the pack regresses — the rationale chain is preserved, not just the final order.
+
 ## Anti-patterns
 
 - **Top-of-conflict-list = top audit priority**. False. VASCO-9000 at 2053 wins is priority 5 (skip). Take Your Time at 8 wins is priority 1.
