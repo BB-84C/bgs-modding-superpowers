@@ -1,10 +1,29 @@
 # BUG: mo2-mcp `send_mod_to` semantics on cross-separator moves don't match docs / curator expectations
 
+> ## [RESOLVED / SUPERSEDED 2026-06-27 — DO NOT USE THIS REPRODUCER AS-IS]
+>
+> This bug was filed by orchestrator-delta during BB84 Starfield Lane 3 Phase A on 2026-06-27 based on **inverted modlist readout semantics**. The reproducer "expectations" listed below assumed the wrong priority-direction convention (I thought higher priority = top of GUI = wins; actually higher priority = bottom of GUI = wins, which is mobase's standard convention).
+>
+> Resolved by three PRs that landed the same day:
+> - **PR #17** (`7ffa693`) — `send_mod_to uses full priority space, reverts nonSepRank`
+> - **PR #18** (`63c4f6c`) — `GUI-aligned vocabulary for send_mod_to + create_mod + create_separator` + read-side enrichment (now exposes `_meta.array_order=gui_top_first`, `priority_convention=mobase_full_space_higher_wins`, `section_rule`, plus per-mod `section` and `gui_rank` fields)
+> - **PR #19** (`2c3a068`) — `auto-call organizer.refresh() after all mutating handlers`
+>
+> Empirical verification (2026-06-27, post-fix):
+> - Modlist response now includes `_meta` block explicitly stating direction contract
+> - Each mod has explicit `section` field
+> - Each plugin has `gui_rank` + `load_order_role` (intermediate / loads_first_lowest_precedence / loads_last_highest_precedence)
+> - BB84's manual move of rbt_suitup_creations-cc verified correct: at priority 406 with `section: 版本已过期_separator` exactly as intended
+>
+> The orchestrator's reproducer steps below show what HAPPENED, but the "expected" annotations are wrong because they assumed inverted semantics. Keep this file as historical record of the inversion-misread incident. Future curator-side semantic confusion should reference the new `_meta` contract instead of relitigating this issue.
+
+---
+
 **Filed**: 2026-06-27
 **Reporter**: orchestrator-delta during BB84 Starfield Lane 3 Phase A
-**Severity**: Medium — blocks programmatic cross-separator mod relocation; curators must manually move in MO2 GUI
+**Severity**: ~~Medium~~ — **misread by reporter; closed via PRs #17/#18/#19**
 **Affected tool**: `Mo2Mo2SendModTo_tool` (`mo2_send_mod_to` broker call)
-**Workaround**: manually drag in MO2 GUI (verified working by BB84)
+**Workaround**: ~~manually drag in MO2 GUI~~ — **no longer needed post-PR-18**
 
 ## Summary
 
