@@ -771,6 +771,52 @@ Skipping this check is what destroyed 49 mods' Chinese descriptions in the
 2026-06-25 buggy migration. See `.opencode/memory/45-mo2-mcp-internals.md`
 rule 18 for the full incident postmortem.
 
+### Qt QSettings INI quoting (silent display-empty trap)
+
+MO2's backend uses Qt QSettings to parse meta.ini. Qt's INI parser conflates
+a value that STARTS with `[` (e.g. `[UPDATED ...]`, `[CC]`, `[UPDATE→x.y.z]`)
+with a section-header start (`[Section]`) and silently returns empty for that
+key. MO2 GUI's Notes/Comments tab then shows blank, even though a raw text
+preview of the same meta.ini clearly displays the value populated.
+
+**Hard rule**: whenever a `comments=` or `notes=` value starts with `[`,
+wrap the value in double quotes:
+
+```
+# BROKEN — Qt parses as empty, MO2 GUI shows blank
+notes=[UPDATED 2026-06-25] 1.1.5.0 -> 1.2.77.0 [MAJOR] | file_id 61879
+comments=[CC] Watchtower: Orbital.Strike\Fleet.Command
+
+# CORRECT — Qt strips outer quotes, returns bracketed content; MO2 GUI displays correctly
+notes="[UPDATED 2026-06-25] 1.1.5.0 -> 1.2.77.0 [MAJOR] | file_id 61879"
+comments="[CC] Watchtower: Orbital.Strike\Fleet.Command"
+```
+
+Implementation rules:
+1. **WRITE path**: before serializing a `comments=` / `notes=` line, check if
+   the value's first non-whitespace char is `[`. If yes, emit double quotes
+   around the value. If the value contains internal `"`, escape them as `\"`.
+   Internal `\n` (literal backslash-n) IS preserved by Qt as a multi-line
+   escape inside quoted strings and renders as a newline in MO2 GUI.
+2. **READ path**: after reading a `comments=` / `notes=` line, strip a single
+   leading and trailing `"` pair (if present) BEFORE parsing the value
+   semantically. Unescape internal `\"` to `"`.
+3. **Idempotence**: re-running the quoting step on an already-quoted value
+   should be a no-op (`if ($val -match '^".*"$') { skip }`).
+4. **Special cases**: values already starting with `@ByteArray(...)`,
+   `<HTML>`, or other Qt-supported wrapper forms are left untouched — they
+   have their own parsing path.
+
+Reproduction: 2026-06-26 Xeno Master screenshot pair (BB84). 268-char notes
+value with `[UPDATED ...]` start displayed empty in MO2 GUI. Adding double
+quotes around the value fixed display immediately on MO2 refresh (no
+restart). Sweep across BB84 Starfield modpack found 220 affected meta.ini
+files; backups preserved at
+`D:\Starfield MO2\.backups\meta-qt-quote-fix-20260626-003856\`.
+
+Cross-link: KB record `engine.qt-ini-bracket-quote-requirement.v1` (TBD)
+should codify this for end-users authoring their own meta.ini writers.
+
 Cross-link: KB record `install-planning.mod-mutation-cleanliness-discipline.v1`
 covers the broader 7-discipline mutation hygiene checklist that this hygiene
 rule plugs into.
