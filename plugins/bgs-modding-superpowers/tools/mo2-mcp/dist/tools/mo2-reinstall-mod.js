@@ -53,6 +53,7 @@ import { requireBoundContext } from "../binding.js";
 import { detectFomod, hasFomodChoices } from "../fomod-helpers.js";
 import { FomodChoicesRequiredError } from "../fomod-required-error.js";
 import { gatherMo2FomodState } from "../mo2-state-for-fomod.js";
+import { pollPluginWarnings } from "../plugin-warnings.js";
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + mod name + plan_id
 // + lease_token all gain .min(1) so empty strings fail Zod safeParse instead
 // of falling through to handler-level errors.
@@ -224,7 +225,12 @@ const handler = {
                 await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
             }
             await invalidateWorld(ctx, ["Default"]);
-            return { reinstalled: name, archive: installFile, fomod_used: true };
+            return {
+                reinstalled: name,
+                archive: installFile,
+                fomod_used: true,
+                pluginWarnings: await pollPluginWarnings(pipeClient),
+            };
         }
         // Non-FOMOD: existing broker path. installation.install_local_archive is
         // documented as FOMOD-blind, so safe for plain archives.
@@ -235,7 +241,12 @@ const handler = {
         if (!resp.ok)
             throw new Error(resp.error?.message ?? "installation.install_local_archive failed");
         await invalidateWorld(ctx, ["Default"]);
-        return { reinstalled: name, archive: installFile, fomod_used: false };
+        return {
+            reinstalled: name,
+            archive: installFile,
+            fomod_used: false,
+            pluginWarnings: await pollPluginWarnings(pipeClient),
+        };
     },
 };
 registerTool({

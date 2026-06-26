@@ -7,6 +7,7 @@ import "./tools/mo2-status.js";
 import "./tools/mo2-machine-contract.js";
 import "./tools/mo2-modlist.js";
 import "./tools/mo2-pluginlist.js";
+import "./tools/mo2-plugin-warnings.js";
 import "./tools/mo2-mod-info.js";
 import "./tools/mo2-profile-ini-get.js";
 import "./tools/mo2-assets-summary.js";

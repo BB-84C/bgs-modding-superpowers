@@ -16,6 +16,7 @@ import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { requireBoundContext } from "../binding.js";
+import { pollPluginWarnings } from "../plugin-warnings.js";
 // BUG-10 fix (2026-06-17): name+plan_id+lease_token gain .min(1) so empty
 // strings fail Zod safeParse and reach the caller as the stable
 // invalid_arguments envelope instead of falling through to the handler's
@@ -72,7 +73,10 @@ const handler = {
             });
             if (!resp.ok)
                 throw new Error(resp.error?.message ?? "broker error");
-            return resp.result;
+            return {
+                ...(resp.result ?? {}),
+                pluginWarnings: await pollPluginWarnings(bound.pipeClient),
+            };
         }
         const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
         const text = await readFile(modlistPath, "utf8");

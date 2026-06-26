@@ -327,6 +327,7 @@ PLUGINS_LIST_METHOD = "plugins.list"
 PLUGINS_SET_STATE_METHOD = "plugins.set_state"
 PLUGINS_SET_PRIORITY_METHOD = "plugins.set_priority"
 PLUGINS_SET_LOAD_ORDER_METHOD = "plugins.set_load_order"
+PLUGINS_MISSING_MASTERS_METHOD = "plugins.missing_masters"
 PROFILE_LIST_METHOD = "profile.list"
 PROFILE_ACTIVE_METHOD = "profile.active"
 PROFILE_INITIALIZE_METHOD = "profile.initialize"
@@ -1565,6 +1566,73 @@ def _handle_plugins_set_load_order(organizer, pump, payload):
     return {"ok": True, "result": outcome[1], "error": None}
 
 
+def _handle_plugins_missing_masters(organizer, pump, payload):
+    """Compute per-plugin missing master dependencies.
+
+    Mirrors MO2 GUI's PluginList::testMasters() algorithm: for each enabled
+    plugin, report declared masters that are not in the currently-enabled set.
+    Comparison is case-insensitive (MO2 uses FileNameComparator).
+    """
+
+    payload = payload or {}
+    target_names = payload.get("names")
+
+    def work():
+        plugin_list = organizer.pluginList()
+        all_names = list(plugin_list.pluginNames())
+        all_lower = {n.lower(): n for n in all_names}
+        enabled_lower = {
+            n.lower(): n
+            for n in all_names
+            if plugin_list.state(n) == mobase.PluginState.ACTIVE
+        }
+
+        if target_names is None:
+            scan_originals = list(enabled_lower.values())
+        else:
+            scan_originals = []
+            for n in target_names:
+                if not isinstance(n, str):
+                    continue
+                original = all_lower.get(n.lower())
+                if original is not None:
+                    scan_originals.append(original)
+
+        warnings = []
+        for name in scan_originals:
+            try:
+                declared = list(plugin_list.masters(name))
+            except Exception:
+                declared = []
+            missing = []
+            enabled = []
+            for m in declared:
+                if not isinstance(m, str):
+                    continue
+                if m.lower() in enabled_lower:
+                    enabled.append(m)
+                else:
+                    missing.append(m)
+            if missing:
+                warnings.append(
+                    {
+                        "plugin": name,
+                        "missing_masters": missing,
+                        "enabled_masters": enabled,
+                        "declared_masters": declared,
+                    }
+                )
+
+        return {
+            "ok": True,
+            "warnings": warnings,
+            "scanned_count": len(scan_originals),
+            "enabled_count": len(enabled_lower),
+        }
+
+    return pump.invoke_blocking(work)
+
+
 def _handle_profile_list(organizer, payload):
     """Background-safe: enumerate profile dirs containing modlist.txt."""
 
@@ -2729,6 +2797,11 @@ def build_command_handlers(
         request.get("payload", {}),
     )
     handlers[PLUGINS_SET_LOAD_ORDER_METHOD] = lambda request: _handle_plugins_set_load_order(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[PLUGINS_MISSING_MASTERS_METHOD] = lambda request: _handle_plugins_missing_masters(
         organizer,
         main_thread_pump,
         request.get("payload", {}),

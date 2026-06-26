@@ -17,6 +17,7 @@ import { atomicWriteText } from "../atomic.js";
 import { resolveModsDir, resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { requireBoundContext } from "../binding.js";
+import { pollPluginWarnings } from "../plugin-warnings.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("plan"),
@@ -122,6 +123,7 @@ const handler = {
                 }
                 await bound.pipeClient.call("organizer.refresh", { save_changes: false }).catch(() => { });
             }
+            result.pluginWarnings = await pollPluginWarnings(bound.pipeClient);
             return result;
         }
         // Offline: plugins.txt rewrite already done above; no broker -> no
