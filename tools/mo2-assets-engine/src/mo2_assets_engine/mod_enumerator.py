@@ -5,6 +5,12 @@ to compute per-file winners.
 
 Hidden-file convention: any subdirectory whose name ends with `.mohidden`
 (MO2's hide-this-folder marker) is skipped, including its descendants.
+
+Mod-root metadata exclusion: `meta.ini` at the immediate mod-root level is
+MO2 mod metadata, NOT a game asset. MO2's USVFS does not overlay it into
+the game directory. We skip it here so every mod's `meta.ini` does not
+appear as a phantom conflict against every other mod's `meta.ini`. A
+nested `meta.ini` (e.g. inside `Data/`) IS a real asset and is kept.
 """
 
 from __future__ import annotations
@@ -29,7 +35,7 @@ def enumerate_mod_files(*, mod: Mod, archive_order: ArchiveLoadOrder) -> list[Fi
 
 def _enumerate_loose(mod: Mod) -> list[FileEntry]:
     out: list[FileEntry] = []
-    for path in _walk_visible_files(mod.root):
+    for path in _walk_visible_files(mod.root, mod_root=mod.root):
         rel = path.relative_to(mod.root).as_posix().lower()
         out.append(
             FileEntry(
@@ -42,16 +48,26 @@ def _enumerate_loose(mod: Mod) -> list[FileEntry]:
     return out
 
 
-def _walk_visible_files(root: Path) -> Iterator[Path]:
-    for child in sorted(root.iterdir()):
+def _walk_visible_files(current: Path, *, mod_root: Path) -> Iterator[Path]:
+    """Walk loose-file content under `current`, applying mod-root filters
+    only at the immediate `mod_root` level (not at recursive sub-levels).
+    """
+    for child in sorted(current.iterdir()):
         if child.is_dir():
             if child.name.lower().endswith(".mohidden"):
                 continue
-            yield from _walk_visible_files(child)
+            yield from _walk_visible_files(child, mod_root=mod_root)
         elif child.is_file():
-            # Skip archives at the mod-root level; they are handled separately.
-            if child.parent == root and child.suffix.lower() in (".bsa", ".ba2"):
-                continue
+            if child.parent == mod_root:
+                suffix = child.suffix.lower()
+                # Skip archives at the mod-root level; they are handled separately.
+                if suffix in (".bsa", ".ba2"):
+                    continue
+                # Skip mod-root meta.ini: it's MO2 metadata, not a game asset.
+                # USVFS does not overlay it. A nested meta.ini (e.g. under
+                # Data/) is kept because some mods ship one as real content.
+                if child.name.lower() == "meta.ini":
+                    continue
             yield child
 
 

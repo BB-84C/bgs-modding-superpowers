@@ -5,10 +5,17 @@ Offline-first: no MO2 process required. The profile directory is typically
 `<MO2_Root>/mods/`.
 
 MO2 `modlist.txt` line prefixes:
-    +    enabled mod
-    -    disabled mod
-    *    separator (UI grouping only, not a real mod)
+    +    enabled entry (regular mod OR separator)
+    -    disabled entry (regular mod OR separator)
     #    comment
+
+Separators are distinguished from regular mods by a trailing `_separator`
+in the name, NOT by a special prefix. A line like `+某分类_separator`
+is an enabled separator (visible in MO2's GUI mod-list grouping). Real
+MO2 modlist.txt files never use `*` as a prefix. Separators are not
+real mods: they are UI grouping markers with a `meta.ini`-only folder
+under `<mods_root>/<name>_separator/`. They contribute no VFS content
+and must be excluded from any conflict / file-enumeration logic.
 
 In `modlist.txt`, the TOP of the file is the LAST-applied mod (highest priority).
 We assign priorities so that the topmost enabled mod gets the highest integer,
@@ -56,9 +63,17 @@ def _read_enabled_mods(modlist_path: Path, mods_root: Path) -> list[Mod]:
         if not line or line.startswith("#"):
             continue
         prefix, name = line[:1], line[1:]
-        if prefix == "+":
-            names.append(name)
-        # `-` (disabled) and `*` (separator) are skipped.
+        if prefix != "+":
+            # `-` (disabled) and any other prefix are skipped.
+            continue
+        if name.endswith("_separator"):
+            # Separators are UI grouping markers, not real mods. MO2 stores
+            # them as `+<name>_separator` or `-<name>_separator` lines with
+            # a meta.ini-only folder under `<mods_root>/<name>_separator/`.
+            # They contribute no VFS content and must be excluded from the
+            # enabled-mod list so the conflict resolver does not see them.
+            continue
+        names.append(name)
 
     # `names` is in modlist.txt order: top of file first.
     # Top of file = highest priority in MO2's UI.

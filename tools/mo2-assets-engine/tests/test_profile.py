@@ -23,7 +23,12 @@ def test_read_profile_collects_enabled_plugin_load_order(sample_profile_dir: Pat
 def test_read_profile_skips_separators_and_disabled(sample_profile_dir: Path) -> None:
     profile = read_profile(profile_dir=sample_profile_dir, mods_root=sample_profile_dir.parent / "mods")
     names = [m.name for m in profile.enabled_mods]
-    assert "Separator_separator" not in names
+    # Both ENABLED and DISABLED separators must be skipped. Real MO2 uses
+    # `+<name>_separator` and `-<name>_separator`; either prefix means
+    # "UI grouping marker, not a real mod".
+    assert "EnabledSep_separator" not in names
+    assert "DisabledSep_separator" not in names
+    # Standard disabled mods are also skipped.
     assert "DisabledMod" not in names
 
 
