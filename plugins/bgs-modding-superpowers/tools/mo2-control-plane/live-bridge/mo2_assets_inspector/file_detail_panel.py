@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtWidgets import QTextBrowser, QVBoxLayout, QWidget
 
-from mo2_assets_engine.rationale import rationale_for_bucket
-from mo2_assets_engine.types import ConflictBucket, FileEntry, ResolvedWinner
+from mo2_assets_engine.conflict_resolver import ResolvedFile
+from mo2_assets_engine.virtual_data_tree import SourceType
 
 if TYPE_CHECKING:
     from .localization import Strings
@@ -34,42 +34,42 @@ class FileDetailPanel(QWidget):
     def body_text(self) -> str:
         return self._browser.toPlainText()
 
-    def show_winner(self, winner: ResolvedWinner) -> None:
-        rationale = rationale_for_bucket(winner.bucket)
+    def show_winner(self, winner: ResolvedFile) -> None:
         winner_tag = _archive_tag(winner.winner)
         loser_lines = "\n".join(
-            f"  - {loser.owner_mod} [{_archive_tag(loser)}]"
+            f"  - {loser.source_mod} [{_archive_tag(loser)}]"
             for loser in winner.losers
         )
         body = (
             f"Path: {winner.relative_path}\n"
-            f"Bucket: {winner.bucket.value}\n"
+            f"Conflict: {winner.is_conflict}\n"
             f"\n"
-            f"Winner: {winner.winner.owner_mod} [{winner_tag}]\n"
+            f"Winner: {winner.winner.source_mod} [{winner_tag}]\n"
             f"Losers:\n{loser_lines or '  (none)'}\n"
             f"\n"
-            f"{self._strings.rationale_header}:\n{rationale.short}\n"
-            f"\n"
-            f"{self._strings.kb_reference_header}:\n"
-            + "\n".join(f"  - {rid}" for rid in rationale.kb_record_ids)
+            f"{self._strings.rationale_header}:\n{_rationale_for(winner)}"
         )
         self._browser.setPlainText(body)
 
     def show_no_conflict_path(self, path: str) -> None:
-        rationale = rationale_for_bucket(ConflictBucket.NO_CONFLICT)
         body = (
             f"Path: {path}\n"
-            f"Bucket: {ConflictBucket.NO_CONFLICT.value}\n"
+            f"Conflict: False\n"
             f"\n"
-            f"{self._strings.rationale_header}:\n{rationale.short}\n"
-            f"\n"
-            f"{self._strings.kb_reference_header}:\n"
-            + "\n".join(f"  - {rid}" for rid in rationale.kb_record_ids)
+            f"{self._strings.rationale_header}:\nNo other provider contributes this virtual Data path."
         )
         self._browser.setPlainText(body)
 
 
-def _archive_tag(entry: FileEntry) -> str:
-    if entry.archive is None:
+def _archive_tag(entry) -> str:
+    if entry.archive_name is None:
         return "loose"
-    return f"{entry.archive.kind.value}:{entry.archive.name}"
+    return f"archive:{entry.archive_name}"
+
+
+def _rationale_for(resolved: ResolvedFile) -> str:
+    if resolved.winner.source_type is SourceType.LOOSE:
+        if any(loser.source_type is SourceType.ARCHIVE for loser in resolved.losers):
+            return "Loose files override archived assets at the same virtual Data path."
+        return "Among loose-file providers, the highest MO2 mod priority wins."
+    return "Among archive providers, the archive attached to the later plugin load order wins."

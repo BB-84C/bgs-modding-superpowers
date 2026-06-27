@@ -1,27 +1,8 @@
-"""Resolve archive load order from plugins.txt + naming convention.
-
-Phase 1 scope: convention-based attachment only. `SArchiveList` INI handling
-is deferred to Phase 3. Archives with no matching enabled plugin are flagged
-as `unattached` (would not load in the real game without explicit INI list).
-
-Per-game naming convention:
-    Skyrim LE / SE / AE / VR:
-        <base>.bsa
-        <base> - Textures.bsa
-    Fallout 3 / Fallout New Vegas:
-        <base>.bsa
-        <base> - Textures.bsa
-    Fallout 4 / Fallout 4 VR:
-        <base> - Main.ba2
-        <base> - Textures.ba2
-    Starfield:
-        <base> - Main.ba2
-        <base> - Textures.ba2
-"""
+"""Attach BSA/BA2 archives to enabled plugins by runtime naming convention."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import re
 from enum import StrEnum
 
 
@@ -32,24 +13,30 @@ class Game(StrEnum):
     STARFIELD = "starfield"
 
 
-_NAMING_CONVENTIONS: dict[Game, tuple[tuple[str, str], ...]] = {
-    Game.SKYRIM: ((".bsa", " - Textures.bsa"),),
-    Game.FALLOUT3_FNV: ((".bsa", " - Textures.bsa"),),
-    Game.FALLOUT4: ((" - Main.ba2", " - Textures.ba2"),),
-    Game.STARFIELD: ((" - Main.ba2", " - Textures.ba2"),),
+_NAMING_CONVENTIONS: dict[Game, tuple[str, ...]] = {
+    Game.SKYRIM: (
+        r"{base}\.bsa",
+        r"{base} - Textures\.bsa",
+        r"{base} - Textures\d+\.bsa",
+    ),
+    Game.FALLOUT3_FNV: (
+        r"{base}\.bsa",
+        r"{base} - Textures\.bsa",
+    ),
+    Game.FALLOUT4: (
+        r"{base} - Main\.ba2",
+        r"{base} - Textures\.ba2",
+        r"{base} - Main\d+\.ba2",
+        r"{base} - Textures\d+\.ba2",
+    ),
+    Game.STARFIELD: (
+        r"{base}\.ba2",
+        r"{base} - Main\.ba2",
+        r"{base} - Textures\.ba2",
+        r"{base} - Main\d+\.ba2",
+        r"{base} - Textures\d+\.ba2",
+    ),
 }
-
-
-@dataclass(frozen=True)
-class ArchiveLoadOrder:
-    ordered_archives: list[str] = field(default_factory=list)
-    unattached_archives: list[str] = field(default_factory=list)
-
-    def rank_of(self, archive_name: str) -> int | None:
-        try:
-            return self.ordered_archives.index(archive_name)
-        except ValueError:
-            return None
 
 
 def discover_archives_for_plugins(
@@ -57,26 +44,48 @@ def discover_archives_for_plugins(
     plugins: list[str],
     candidate_archives: list[str],
     game: Game,
-) -> ArchiveLoadOrder:
+) -> dict[str, str]:
+    """Return convention attachments as ``archive_name.lower() -> plugin_name``.
+
+    The game runtime binds convention-named archives from a global Data tree,
+    not from the folder that happens to hold the plugin.  Therefore matching is
+    performed across the whole candidate archive pool.  If two enabled plugins
+    can claim the same archive name (normally only duplicate basenames such as
+    ``Foo.esm`` and ``Foo.esp``), the earlier plugin in forward load order wins.
+    I have not found a public runtime fixture that demonstrates duplicate-base
+    reattachment semantics; first-claim is the least surprising model because
+    the archive path itself is single-instance in Data and the loader encounters
+    earlier plugins first.
+    """
     conventions = _NAMING_CONVENTIONS[game]
-    candidate_set = set(candidate_archives)
-    ordered: list[str] = []
-    matched: set[str] = set()
+    plugin_patterns = [
+        (
+            load_order,
+            plugin_name,
+            [
+                re.compile(
+                    pattern.format(base=re.escape(_strip_plugin_suffix(plugin_name))),
+                    flags=re.IGNORECASE,
+                )
+                for pattern in conventions
+            ],
+        )
+        for load_order, plugin_name in enumerate(plugins)
+    ]
 
-    for plugin_name in plugins:
-        base = _strip_plugin_suffix(plugin_name)
-        for main_suffix, textures_suffix in conventions:
-            main_archive = f"{base}{main_suffix}"
-            textures_archive = f"{base}{textures_suffix}"
-            if main_archive in candidate_set:
-                ordered.append(main_archive)
-                matched.add(main_archive)
-            if textures_archive in candidate_set:
-                ordered.append(textures_archive)
-                matched.add(textures_archive)
-
-    unattached = [a for a in candidate_archives if a not in matched]
-    return ArchiveLoadOrder(ordered_archives=ordered, unattached_archives=unattached)
+    attachments: dict[str, str] = {}
+    claim_orders: dict[str, int] = {}
+    for archive_name in candidate_archives:
+        archive_key = archive_name.lower()
+        for load_order, plugin_name, patterns in plugin_patterns:
+            if not any(pattern.fullmatch(archive_name) for pattern in patterns):
+                continue
+            previous_order = claim_orders.get(archive_key)
+            if previous_order is None or load_order < previous_order:
+                attachments[archive_key] = plugin_name
+                claim_orders[archive_key] = load_order
+            break
+    return attachments
 
 
 def _strip_plugin_suffix(plugin_name: str) -> str:

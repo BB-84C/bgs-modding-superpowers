@@ -1,13 +1,4 @@
-"""Install pipeline JSON-RPC methods - PLAN-PATCH P-B6.
-
-install.conflict_preview: preview conflicts between staged files and current
-profile's enabled mods. Uses the engine's real file enumerator
-(mo2_assets_engine.mod_enumerator.enumerate_mod_files) so loose files AND
-attached BSA/BA2 members are checked, not just a non-existent `Mod.files`
-attribute (that was the dead branch flagged in last turn's CONCERNS).
-
-install.stage_fomod: (next task) combine fomod.resolve_files + extraction.
-"""
+"""Install pipeline JSON-RPC methods."""
 from __future__ import annotations
 
 import sys
@@ -54,58 +45,6 @@ def _normalize_staged_paths(staged_files: list[Any]) -> set[str]:
     return normalized
 
 
-def _enumerate_via_engine(mod: Any, archive_order: Any) -> set[str] | None:
-    """Call engine's enumerate_mod_files on a real Mod; return None on import/call failure.
-
-    Returns a set of normalized relative paths or None if the engine path could
-    not be exercised (e.g. mod has no on-disk root, or engine itself raised).
-    """
-    try:
-        from mo2_assets_engine.archive_order import (  # type: ignore[import-untyped]
-            ArchiveLoadOrder,
-        )
-        from mo2_assets_engine.mod_enumerator import (  # type: ignore[import-untyped]
-            enumerate_mod_files,
-        )
-    except ImportError:
-        return None
-
-    ao = archive_order if archive_order is not None else ArchiveLoadOrder()
-    try:
-        entries = enumerate_mod_files(mod=mod, archive_order=ao)
-    except Exception:
-        return None
-    # FileEntry.relative_path is already lowercase-posix for loose; archive
-    # members come straight from BSA/BA2 directories which may include
-    # backslashes -> normalize defensively.
-    return {_normalize(e.relative_path) for e in entries}
-
-
-def _mod_files_set(mod: Any, archive_order: Any) -> set[str]:
-    """Resolve the set of relative file paths for a mod.
-
-    Real engine `Mod` dataclass (mo2_assets_engine.types.Mod) has no `files`
-    field, so production must go through enumerate_mod_files. Unit-test fakes
-    (MagicMock with `m.files = [...]`) supply the list directly; we dispatch
-    on isinstance to keep both paths honest.
-    """
-    try:
-        from mo2_assets_engine.types import Mod as EngineMod  # type: ignore[import-untyped]
-    except ImportError:
-        EngineMod = None
-
-    if EngineMod is not None and isinstance(mod, EngineMod):
-        # Production path
-        paths = _enumerate_via_engine(mod, archive_order)
-        return paths if paths is not None else set()
-
-    # Legacy mock path (unit tests)
-    mod_files = getattr(mod, "files", None)
-    if not mod_files or not isinstance(mod_files, (list, tuple, set, frozenset)):
-        return set()
-    return {_normalize(p) for p in mod_files}
-
-
 def install_conflict_preview(params: dict[str, Any]) -> dict[str, Any]:
     """Preview conflicts between staged install content and current profile's mods.
 
@@ -138,20 +77,24 @@ def install_conflict_preview(params: dict[str, Any]) -> dict[str, Any]:
                 "staged_file_count": 0, "target_priority": target_priority}
 
     world = _cache.get(profile_dir)
-    mods = world.mods if world.mods else []
-    archive_order = getattr(world, "archive_order", None)
+    tree = world.tree
+
+    overlap_by_mod: dict[str, set[str]] = {}
+    for relative_path, providers in tree.file_providers.items():
+        normalized_path = _normalize(relative_path)
+        if normalized_path not in staged_set:
+            continue
+        for provider in providers:
+            overlap_by_mod.setdefault(provider.source_mod, set()).add(normalized_path)
 
     conflicts: list[dict[str, Any]] = []
-    for mod in mods:
-        mod_set = _mod_files_set(mod, archive_order)
-        if not mod_set:
-            continue
-        overlap = sorted(mod_set & staged_set)
+    for mod_name, overlap_set in sorted(overlap_by_mod.items(), key=lambda item: item[0].lower()):
+        overlap = sorted(overlap_set)
         if overlap:
             conflicts.append({
-                "with_mod": getattr(mod, "name", "<unknown>"),
+                "with_mod": mod_name,
                 "shared_count": len(overlap),
-                "shared_files": overlap[:50],  # cap per-mod sample for response budget
+                "shared_files": overlap[:50],  # cap per-source sample for response budget
             })
 
     total_shared = sum(c["shared_count"] for c in conflicts)

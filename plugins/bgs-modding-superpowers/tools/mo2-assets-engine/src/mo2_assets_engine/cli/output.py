@@ -1,53 +1,33 @@
-"""Output formatters: human-readable and JSON.
-
-JSON shape is the agent-facing contract and mirrors the future MO2 MCP
-tool shape (`assets_summary`, `assets_mod_conflicts`, `assets_resolve_file`,
-`assets_archive_inventory`).
-"""
+"""Output formatters: human-readable and JSON."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from ..types import (
-    ArchiveEntry,
-    ConflictReport,
-    FileEntry,
-    Mod,
-    ResolvedWinner,
-)
+from ..conflict_resolver import ResolvedFile
+from ..types import Mod
+from ..virtual_data_tree import Provider
 
 
-def file_entry_to_dict(entry: FileEntry) -> dict[str, Any]:
+def provider_to_dict(provider: Provider) -> dict[str, Any]:
     out: dict[str, Any] = {
-        "path": entry.relative_path,
-        "kind": entry.kind.value,
-        "owner_mod": entry.owner_mod,
+        "mod": provider.source_mod,
+        "source_type": provider.source_type.value,
     }
-    if entry.archive is not None:
-        out["archive"] = archive_entry_to_dict(entry.archive)
+    if provider.archive_name is not None:
+        out["archive_name"] = provider.archive_name
+    if provider.attached_plugin is not None:
+        out["attached_plugin"] = provider.attached_plugin
+        out["attached_plugin_load_order"] = provider.attached_plugin_load_order
     return out
 
 
-def archive_entry_to_dict(archive: ArchiveEntry) -> dict[str, Any]:
-    return {"name": archive.name, "kind": archive.kind.value, "load_order": archive.load_order}
-
-
-def resolved_winner_to_dict(winner: ResolvedWinner) -> dict[str, Any]:
+def resolved_file_to_dict(resolved: ResolvedFile) -> dict[str, Any]:
     return {
-        "path": winner.relative_path,
-        "bucket": winner.bucket.value,
-        "winner": file_entry_to_dict(winner.winner),
-        "losers": [file_entry_to_dict(loser) for loser in winner.losers],
-    }
-
-
-def conflict_report_to_dict(report: ConflictReport) -> dict[str, Any]:
-    return {
-        "mod": report.mod.name,
-        "kept": [resolved_winner_to_dict(w) for w in report.kept],
-        "overwritten": [resolved_winner_to_dict(w) for w in report.overwritten],
-        "no_conflict": [entry.relative_path for entry in report.no_conflict],
+        "path": resolved.relative_path,
+        "winner": provider_to_dict(resolved.winner),
+        "losers": [provider_to_dict(loser) for loser in resolved.losers],
+        "is_conflict": resolved.is_conflict,
     }
 
 

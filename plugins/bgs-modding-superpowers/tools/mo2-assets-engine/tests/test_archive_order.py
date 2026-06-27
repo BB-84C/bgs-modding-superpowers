@@ -1,74 +1,64 @@
 from mo2_assets_engine.archive_order import Game, discover_archives_for_plugins
 
 
-def test_skyrim_archive_naming_convention() -> None:
-    order = discover_archives_for_plugins(
-        plugins=["Skyrim.esm", "Foo.esp", "Bar.esp"],
+def test_numbered_texture_variants_attach_to_plugin() -> None:
+    attachments = discover_archives_for_plugins(
+        plugins=["Foo.esm"],
         candidate_archives=[
-            "Skyrim.bsa",
-            "Skyrim - Textures.bsa",
-            "Foo.bsa",
-            "Bar.bsa",
-            "Bar - Textures.bsa",
-            "Unrelated.bsa",
-        ],
-        game=Game.SKYRIM,
-    )
-    # plugins.txt order = Skyrim, Foo, Bar; Bar loaded last -> wins.
-    # Per plugin: main first, textures second.
-    assert order.ordered_archives == [
-        "Skyrim.bsa",
-        "Skyrim - Textures.bsa",
-        "Foo.bsa",
-        "Bar.bsa",
-        "Bar - Textures.bsa",
-    ]
-    assert order.unattached_archives == ["Unrelated.bsa"]
-
-
-def test_fo4_archive_naming_convention() -> None:
-    order = discover_archives_for_plugins(
-        plugins=["Fallout4.esm", "MyMod.esp"],
-        candidate_archives=[
-            "Fallout4 - Main.ba2",
-            "Fallout4 - Textures.ba2",
-            "MyMod - Main.ba2",
-            "MyMod - Textures.ba2",
-            "Orphan - Main.ba2",
+            "Foo - Textures.ba2",
+            "Foo - Textures01.ba2",
+            "Foo - Textures02.ba2",
+            "Foo - Main01.ba2",
+            "Unrelated - Textures01.ba2",
         ],
         game=Game.FALLOUT4,
     )
-    assert order.ordered_archives == [
-        "Fallout4 - Main.ba2",
-        "Fallout4 - Textures.ba2",
-        "MyMod - Main.ba2",
-        "MyMod - Textures.ba2",
-    ]
-    assert order.unattached_archives == ["Orphan - Main.ba2"]
+
+    assert attachments == {
+        "foo - textures.ba2": "Foo.esm",
+        "foo - textures01.ba2": "Foo.esm",
+        "foo - textures02.ba2": "Foo.esm",
+        "foo - main01.ba2": "Foo.esm",
+    }
 
 
-def test_starfield_uses_ba2() -> None:
-    order = discover_archives_for_plugins(
-        plugins=["Starfield.esm", "MyOutpost.esp"],
+def test_starfield_accepts_no_suffix_ba2() -> None:
+    attachments = discover_archives_for_plugins(
+        plugins=["StarfieldCommunityPatch.esm"],
         candidate_archives=[
-            "Starfield - Localization.ba2",
-            "MyOutpost - Main.ba2",
-            "MyOutpost - Textures.ba2",
+            "StarfieldCommunityPatch.ba2",
+            "StarfieldCommunityPatch - Main.ba2",
+            "StarfieldCommunityPatch - Textures02.ba2",
         ],
         game=Game.STARFIELD,
     )
-    assert "MyOutpost - Main.ba2" in order.ordered_archives
-    assert "MyOutpost - Textures.ba2" in order.ordered_archives
-    assert "Starfield - Localization.ba2" in order.unattached_archives
+
+    assert attachments == {
+        "starfieldcommunitypatch.ba2": "StarfieldCommunityPatch.esm",
+        "starfieldcommunitypatch - main.ba2": "StarfieldCommunityPatch.esm",
+        "starfieldcommunitypatch - textures02.ba2": "StarfieldCommunityPatch.esm",
+    }
 
 
-def test_load_order_rank_lookup() -> None:
-    order = discover_archives_for_plugins(
-        plugins=["A.esp", "B.esp"],
-        candidate_archives=["A.bsa", "B.bsa", "B - Textures.bsa"],
+def test_skyrim_numbered_texture_bsa_variants_attach() -> None:
+    attachments = discover_archives_for_plugins(
+        plugins=["Foo.esp"],
+        candidate_archives=["Foo.bsa", "Foo - Textures.bsa", "Foo - Textures2.bsa"],
         game=Game.SKYRIM,
     )
-    assert order.rank_of("A.bsa") == 0
-    assert order.rank_of("B.bsa") == 1
-    assert order.rank_of("B - Textures.bsa") == 2
-    assert order.rank_of("Nope.bsa") is None
+
+    assert attachments == {
+        "foo.bsa": "Foo.esp",
+        "foo - textures.bsa": "Foo.esp",
+        "foo - textures2.bsa": "Foo.esp",
+    }
+
+
+def test_ambiguous_archive_match_is_claimed_by_earliest_plugin() -> None:
+    attachments = discover_archives_for_plugins(
+        plugins=["Foo.esm", "Foo.esp"],
+        candidate_archives=["Foo - Main.ba2"],
+        game=Game.FALLOUT4,
+    )
+
+    assert attachments == {"foo - main.ba2": "Foo.esm"}

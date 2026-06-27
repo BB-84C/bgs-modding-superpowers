@@ -1,4 +1,5 @@
 """Unit tests for asset JSON-RPC methods. Uses fake WorldCache, no real engine."""
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -31,6 +32,12 @@ def test_assets_summary_returns_counts_and_game(tmp_path):
     fake_world = MagicMock()
     fake_world.game = "FALLOUT4"
     fake_world.mods = [MagicMock(enabled=True), MagicMock(enabled=False), MagicMock(enabled=True)]
+    fake_world.tree = SimpleNamespace(
+        plugins=[object()],
+        archives=[object(), object()],
+        file_providers={"textures/a.dds": [], "meshes/b.nif": []},
+        unattached_archives=[object()],
+    )
     assets.init_assets(_fake_cache_with_world(fake_world))
 
     result = assets.assets_summary({"profile_dir": str(tmp_path / "Default")})
@@ -39,6 +46,10 @@ def test_assets_summary_returns_counts_and_game(tmp_path):
     assert result["game"] == "FALLOUT4"
     assert result["mod_count"] == 3
     assert result["enabled_mod_count"] == 2
+    assert result["plugin_count"] == 1
+    assert result["archive_count"] == 2
+    assert result["unattached_archive_count"] == 1
+    assert result["file_count"] == 2
 
 
 def test_world_invalidate_calls_cache(tmp_path):
@@ -130,44 +141,8 @@ def test_assets_report_for_mod_missing_mod_returns_empty_report(tmp_path):
     }
 
 
-# --- F-M2: assets reuses World.archive_order instead of re-discovering ---
-
-
-def test_build_entries_by_mod_reuses_world_archive_order(monkeypatch):
-    """F-M2: when w.archive_order is set, must NOT call discover_archives_for_plugins.
-
-    Sets a real (empty) ArchiveLoadOrder on the fake world; spies on the engine's
-    discover function via monkeypatch; asserts the spy is never invoked. This is
-    the perf-critical fast path on multi-hundred-mod profiles.
-    """
-    # Force the sidecar's sibling-dep shim to run so we can import the engine.
-    from mo2_mcp_sidecar import world as _w  # noqa: F401
-    from mo2_assets_engine import archive_order as ao_module
-
-    # Spy that fails the test if called.
-    spy_calls = {"count": 0}
-
-    def _spy_discover(*args, **kwargs):
-        spy_calls["count"] += 1
-        return ao_module.ArchiveLoadOrder()
-
-    monkeypatch.setattr(ao_module, "discover_archives_for_plugins", _spy_discover)
-
-    # Fake world with archive_order pre-populated (mirrors what WorldCache._build does)
-    fake_world = MagicMock(game="FALLOUT4", mods=[])
-    fake_world.archive_order = ao_module.ArchiveLoadOrder()  # non-None -> fast path
-
-    result = assets._build_entries_by_mod(fake_world)
-
-    assert result == {}, "empty mods list -> empty entries_by_mod"
-    assert spy_calls["count"] == 0, (
-        "F-M2 regression: discover_archives_for_plugins called despite "
-        "w.archive_order being non-None"
-    )
-
-
 def test_assets_resolve_file_exposes_winning_owner_mod_at_top_level(tmp_path):
-    """AT19 expects result.winner.owner_mod, not nested winner.winner.owner_mod."""
+    """Resolve output exposes the winning provider directly."""
     from mo2_mcp_sidecar.world import WorldCache
 
     mods = tmp_path / "mods"
@@ -186,7 +161,8 @@ def test_assets_resolve_file_exposes_winning_owner_mod_at_top_level(tmp_path):
         "virtual_path": "textures/acceptance/at19.dds",
     })
 
-    assert result["winner"]["owner_mod"] == "High"
+    assert result["winner"]["mod"] == "High"
+    assert result["winner"]["source_type"] == "loose"
 
 
 # --- BUG-25: Data/ prefix + case normalization in resolve_file + conflicts ---
@@ -285,7 +261,7 @@ def test_assets_resolve_file_strips_leading_data_prefix(tmp_path):
     assert result["winner"] is not None, (
         "BUG-25: 'Data/' prefix must be stripped before winners.get(...)"
     )
-    assert result["winner"]["owner_mod"] == "ModA"
+    assert result["winner"]["mod"] == "ModA"
     # Response echoes the original virtual_path so the caller sees what they asked for.
     assert result["virtual_path"] == "Data/textures/bug25/tex.dds"
 
@@ -315,7 +291,7 @@ def test_assets_resolve_file_mixed_case_extension_resolves(tmp_path):
     assert result["winner"] is not None, (
         "BUG-25: mixed-case input must lowercase before lookup"
     )
-    assert result["winner"]["owner_mod"] == "ModA"
+    assert result["winner"]["mod"] == "ModA"
 
 
 def test_assets_resolve_file_no_prefix_no_change_regression(tmp_path):
@@ -342,7 +318,7 @@ def test_assets_resolve_file_no_prefix_no_change_regression(tmp_path):
     })
 
     assert result["winner"] is not None
-    assert result["winner"]["owner_mod"] == "ModA"
+    assert result["winner"]["mod"] == "ModA"
     assert result["virtual_path"] == "textures/noprefix.dds"
 
 
@@ -382,7 +358,7 @@ def test_assets_conflicts_path_prefix_strips_data(tmp_path):
 
 
 def test_assets_conflicts_path_prefix_unset_unaffected(tmp_path):
-    """BUG-25 regression guard: omitting path_prefix entirely still returns all."""
+    """BUG-25 regression guard: omitting path_prefix returns the conflict set."""
     from mo2_mcp_sidecar.world import WorldCache
 
     mods = tmp_path / "mods"
@@ -395,4 +371,4 @@ def test_assets_conflicts_path_prefix_unset_unaffected(tmp_path):
     assets.init_assets(WorldCache(mods_root=mods, game="FALLOUT4"))
 
     result = assets.assets_conflicts({"profile_dir": str(profile)})
-    assert result["total_count"] >= 1
+    assert result["total_count"] == 0

@@ -2,7 +2,7 @@
 
 Mirrors MO2's left-pane "Mods" view: one row per enabled mod, columns
 match the user's reference screenshots (priority / name / conflicts /
-files / source type). Double-click a row opens the per-mod detail dialog.
+files / source type). Double-click a row opens the attribution detail dialog.
 
 NOTE: No automated tests for this module — PyQt6 import fails in the
 anaconda dev env (Qt DLL conflict), so offscreen Qt smoke tests cannot run
@@ -26,17 +26,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from mo2_assets_engine.archive_order import (
-    ArchiveLoadOrder,
-    discover_archives_for_plugins,
-)
-from mo2_assets_engine.conflict_resolver import (
-    ConflictResolver,
-    resolve_all_winners,
-)
-from mo2_assets_engine.mod_enumerator import enumerate_mod_files
+from mo2_assets_engine.conflict_resolver import ResolvedFile, resolve_tree
 from mo2_assets_engine.profile import read_profile
-from mo2_assets_engine.types import FileEntryKind
+from mo2_assets_engine.virtual_data_tree import SourceType, build_virtual_data_tree
 
 from .bridge import PathsBundle
 
@@ -151,44 +143,26 @@ class _World:
             profile_dir=paths_bundle.profile_dir,
             mods_root=paths_bundle.mods_root,
         )
-        candidate_archives: list[str] = []
-        for mod in profile.enabled_mods:
-            if mod.root.exists():
-                for child in mod.root.iterdir():
-                    if child.is_file() and child.suffix.lower() in (".bsa", ".ba2"):
-                        candidate_archives.append(child.name)
-        archive_order: ArchiveLoadOrder = discover_archives_for_plugins(
-            plugins=profile.enabled_plugins,
-            candidate_archives=candidate_archives,
-            game=paths_bundle.game,
-        )
         self.profile = profile
-        self.entries_by_mod = {
-            mod.name: enumerate_mod_files(mod=mod, archive_order=archive_order)
-            for mod in profile.enabled_mods
-        }
-        self.winners = resolve_all_winners(
-            mods=profile.enabled_mods, entries_by_mod=self.entries_by_mod
-        )
-        self.resolver = ConflictResolver(
-            mods=profile.enabled_mods, entries_by_mod=self.entries_by_mod
-        )
+        self.tree = build_virtual_data_tree(profile=profile, game=paths_bundle.game)
+        self.resolved = resolve_tree(self.tree)
 
     def summary_rows(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for mod in self.profile.enabled_mods:
-            entries = self.entries_by_mod.get(mod.name, [])
-            conflicts = sum(
-                1
-                for e in entries
-                if self.winners[e.relative_path].bucket.value != "no-conflict"
-            )
-            kinds = {e.kind for e in entries}
-            if kinds == {FileEntryKind.LOOSE}:
+            paths = self.paths_for_mod(mod.name)
+            conflicts = sum(1 for path in paths if self.resolved[path].is_conflict)
+            kinds = {
+                provider.source_type
+                for path in paths
+                for provider in self.tree.file_providers[path]
+                if provider.source_mod == mod.name
+            }
+            if kinds == {SourceType.LOOSE}:
                 source_type = "loose"
-            elif kinds == {FileEntryKind.ARCHIVED}:
+            elif kinds == {SourceType.ARCHIVE}:
                 source_type = "archive"
-            elif kinds == {FileEntryKind.LOOSE, FileEntryKind.ARCHIVED}:
+            elif kinds == {SourceType.LOOSE, SourceType.ARCHIVE}:
                 source_type = "mixed"
             else:
                 source_type = "empty"
@@ -197,11 +171,38 @@ class _World:
                     "priority": mod.priority,
                     "name": mod.name,
                     "conflicts": conflicts,
-                    "files": len(entries),
+                    "files": len(paths),
                     "source_type": source_type,
                 }
             )
         return rows
+
+    def paths_for_mod(self, mod_name: str) -> list[str]:
+        return sorted(
+            path
+            for path, providers in self.tree.file_providers.items()
+            if any(provider.source_mod == mod_name for provider in providers)
+        )
+
+    def report_for_mod(self, mod_name: str) -> Any:
+        class Report:
+            kept: list[ResolvedFile]
+            overwritten: list[ResolvedFile]
+            no_conflict: list[str]
+
+        report = Report()
+        report.kept = []
+        report.overwritten = []
+        report.no_conflict = []
+        for path in self.paths_for_mod(mod_name):
+            item = self.resolved[path]
+            if not item.is_conflict:
+                report.no_conflict.append(path)
+            elif item.winner.source_mod == mod_name:
+                report.kept.append(item)
+            else:
+                report.overwritten.append(item)
+        return report
 
 
 def _build_world(paths_bundle: PathsBundle) -> _World:

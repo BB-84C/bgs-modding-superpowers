@@ -93,8 +93,8 @@ def test_game_param_carried_into_world(tmp_path, fake_world_factory):
     assert w.game == "STARFIELD"
 
 
-def test_real_build_populates_archive_order(tmp_path):
-    """P-B6: _build must populate world.archive_order with an ArchiveLoadOrder.
+def test_real_build_populates_virtual_data_tree(tmp_path):
+    """_build must populate world.tree with a VirtualDataTree.
 
     Uses a real (empty) profile fixture on disk + monkeypatch nothing — exercises
     the lazy engine imports inside _build so the wiring is verified end-to-end.
@@ -107,11 +107,25 @@ def test_real_build_populates_archive_order(tmp_path):
     cache = WorldCache(mods_root=mods_dir, game="FALLOUT4")
     world = cache.get(profile)
 
-    # Engine's ArchiveLoadOrder is a frozen dataclass; even empty, the instance
-    # must exist (not None) so install.conflict_preview can pass it through.
-    assert world.archive_order is not None
-    assert hasattr(world.archive_order, "ordered_archives")
-    assert hasattr(world.archive_order, "rank_of")
+    assert world.tree is not None
+    assert world.tree.game == "fallout4"
+    assert hasattr(world.tree, "file_providers")
+
+
+def test_cache_invalidates_when_profile_archive_ini_changes(tmp_path, fake_world_factory):
+    profile = _make_profile(tmp_path)
+    cache = WorldCache(mods_root=tmp_path / "mods", game="STARFIELD")
+
+    w1 = cache.get(profile)
+    time.sleep(0.05)  # mtime resolution headroom on Windows NTFS
+    (profile / "StarfieldCustom.ini").write_text(
+        "[Archive]\nsResourceArchive2List=Foo.ba2\n",
+        encoding="utf-8",
+    )
+    w2 = cache.get(profile)
+
+    assert w1 is not w2
+    assert fake_world_factory["calls"] == 2
 
 
 def test_concurrent_get_coalesces_builds(tmp_path, monkeypatch):

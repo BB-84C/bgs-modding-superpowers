@@ -16,7 +16,7 @@ import pytest
 from mo2_mcp_sidecar import world as _world  # noqa: F401  (import-for-side-effects)
 
 pytest.importorskip("mo2_assets_engine.mod_enumerator")
-pytest.importorskip("mo2_assets_engine.archive_order")
+pytest.importorskip("mo2_assets_engine.virtual_data_tree")
 
 
 @pytest.fixture
