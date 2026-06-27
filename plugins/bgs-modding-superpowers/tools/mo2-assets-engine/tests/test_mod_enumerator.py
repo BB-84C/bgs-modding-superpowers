@@ -47,7 +47,15 @@ def test_skips_mohidden_subdirectories(tmp_path: Path) -> None:
     assert enumerate_projected_loose_paths(mod) == ["textures/kept.dds"]
 
 
-def test_skips_top_level_archives_from_loose_projection(tmp_path: Path) -> None:
+def test_top_level_archives_are_projected_as_files(tmp_path: Path) -> None:
+    """Mod-root .ba2/.bsa are projected by MO2 USVFS into Data/ as files.
+
+    The conflict engine treats them as file-to-file collisions on the
+    archive name itself — it does NOT open the archive. Two mods shipping
+    the same `Foo.ba2` collide on the path `foo.ba2`; the higher mod_priority
+    wins (USVFS hides the other). A nested .ba2 deeper in the mod tree is
+    also a real projected path and is kept.
+    """
     mod_root = tmp_path / "ExampleMod"
     mod_root.mkdir()
     (mod_root / "Example - Main.ba2").write_bytes(b"archive")
@@ -56,4 +64,7 @@ def test_skips_top_level_archives_from_loose_projection(tmp_path: Path) -> None:
 
     mod = Mod(name="ExampleMod", priority=0, enabled=True, root=mod_root)
 
-    assert enumerate_projected_loose_paths(mod) == ["nested/example - main.ba2"]
+    assert sorted(enumerate_projected_loose_paths(mod)) == [
+        "example - main.ba2",
+        "nested/example - main.ba2",
+    ]
