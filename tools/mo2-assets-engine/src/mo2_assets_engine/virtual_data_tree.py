@@ -8,7 +8,7 @@ from enum import StrEnum
 
 from .archive_ini import IniArchiveLists
 from .archive_order import Game, discover_archives_for_plugins
-from .mod_enumerator import enumerate_archive_member_paths, enumerate_projected_loose_paths
+from .mod_enumerator import enumerate_projected_loose_paths
 from .profile import MO2Profile
 
 
@@ -86,6 +86,18 @@ def build_virtual_data_tree(
         for archive_name in (ini_archive_lists.explicit_archives if ini_archive_lists else [])
     }
 
+    # Build file providers from PROJECTED LOOSE PATHS only.
+    #
+    # Archive contents are NOT enumerated. `.ba2`/`.bsa` files at the mod-root
+    # are projected by `enumerate_projected_loose_paths` as ordinary files
+    # (path = `<archive_name>.{ba2,bsa}`), which gives clean file-to-file
+    # conflict detection when two mods ship the same archive name without
+    # requiring archive format parsing.
+    #
+    # The Plugin/Archive metadata above and `attachments` map remain populated
+    # for future re-expansion (member-level enumeration was previously here and
+    # may return when the engine's BA2 reader covers Starfield v3+ etc.), but
+    # no archive-source providers are produced today.
     file_providers: dict[str, list[Provider]] = defaultdict(list)
     for mod in profile.enabled_mods:
         for relative_path in enumerate_projected_loose_paths(mod):
@@ -97,25 +109,10 @@ def build_virtual_data_tree(
                 )
             )
 
-    for archive in archives:
-        archive_key = archive.name.lower()
-        attached_plugin_name = attachments.get(archive_key)
-        is_ini_attached = archive_key in ini_claimed
-        if attached_plugin_name is None and not is_ini_attached:
-            continue
-        plugin = plugin_by_name.get(attached_plugin_name.lower()) if attached_plugin_name else None
-        archive_path = profile.mods_root / archive.source_mod / archive.name
-        for member_path in enumerate_archive_member_paths(archive_path):
-            file_providers[member_path.lower()].append(
-                Provider(
-                    source_mod=archive.source_mod,
-                    source_type=SourceType.ARCHIVE,
-                    mod_priority=archive.mod_priority,
-                    archive_name=archive.name,
-                    attached_plugin=plugin.name if plugin is not None else None,
-                    attached_plugin_load_order=plugin.load_order if plugin is not None else None,
-                )
-            )
+    # `plugin_by_name` is no longer consumed in this function (was used by the
+    # removed archive-member loop). Kept built above because future re-expansion
+    # will need it; suppress the unused-variable signal.
+    _ = plugin_by_name
 
     unattached = [
         UnattachedArchive(
