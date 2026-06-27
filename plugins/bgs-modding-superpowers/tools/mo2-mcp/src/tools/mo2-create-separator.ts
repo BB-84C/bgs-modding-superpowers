@@ -16,6 +16,7 @@ import { atomicWriteText } from "../atomic.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -100,6 +101,13 @@ const handler: PlanApplyHandler = {
     }
 
     await invalidateWorld(ctx, [profile]);
+    await logApplyEvent(
+      handler.toolName,
+      `created separator "${sepName}" wins_over="${winsOver ?? "none"}" → priority ${targetPri ?? "none"}`,
+      bound,
+      plan.planId,
+      profile,
+    );
 
     return { separator_name: sepName, color_set: typeof plan.args.color === "string", _meta: RESPONSE_META };
   },

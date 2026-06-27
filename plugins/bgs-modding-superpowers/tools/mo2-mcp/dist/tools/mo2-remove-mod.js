@@ -14,6 +14,8 @@ import { resolveModsDir } from "../path-helpers.js";
 import { atomicWriteText } from "../atomic.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext } from "../binding.js";
+import { CONFLICT_PREVIEW_SIDECAR_SKIPPED, computeRemovedPreview, isSidecarReport, previewOrUnavailable, reportForMod, } from "../conflict-preview.js";
+import { logApplyEvent } from "../log-apply.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("plan"), name: z.string(), backup_first: z.boolean().default(true) }),
     z.object({ mode: z.literal("apply"), plan_id: z.string(), lease_token: z.string() }),
@@ -89,11 +91,15 @@ const handler = {
         const modsDir = await resolveModsDir(ctx);
         const modPath = join(modsDir, name);
         let backupName;
+        const bound = requireBoundContext(ctx);
+        const profile = bound.config.allowedProfiles[0] ?? "Default";
+        const preReport = bound.sidecar
+            ? await previewOrUnavailable(() => reportForMod(name, bound, profile))
+            : undefined;
         if (backupFirst) {
             backupName = await _nextBackupName(modsDir, name);
             await cp(modPath, join(modsDir, backupName), { recursive: true });
         }
-        const bound = requireBoundContext(ctx);
         // BUG-15 fix (2026-06-17) - preface. The broker call below is
         // informational for the unified filesystem cleanup that follows: it
         // tells MO2's in-memory model to drop the mod, but it does NOT reliably
@@ -127,7 +133,13 @@ const handler = {
         }
         const profilesUpdated = await _scrubAllProfileModlists(bound.config.mo2Root, name);
         await invalidateWorld(ctx, profilesUpdated.length ? profilesUpdated : ["Default"]);
-        return { removed: name, backup_name: backupName, profiles_updated: profilesUpdated };
+        await logApplyEvent(handler.toolName, `removed "${name}" backup="${backupName ?? "none"}"`, bound, plan.planId, profile);
+        const conflictsPreview = bound.sidecar
+            ? isSidecarReport(preReport)
+                ? computeRemovedPreview(preReport)
+                : preReport
+            : CONFLICT_PREVIEW_SIDECAR_SKIPPED;
+        return { removed: name, backup_name: backupName, profiles_updated: profilesUpdated, conflicts_preview: conflictsPreview };
     },
 };
 registerTool({

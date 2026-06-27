@@ -12,6 +12,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { detectMo2Running } from "../detection.js";
 import { requireBoundContext } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 // BUG-10 fix (2026-06-17): source + target + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
@@ -76,6 +77,7 @@ const handler = {
         if (!includeSaves)
             skipDirs.add("saves");
         await copyDir(srcDir, dstDir, skipDirs);
+        await logApplyEvent(handler.toolName, `cloned profile "${source}" → "${target}" include_saves=${includeSaves}`, bound, plan.planId, "");
         return { cloned_from: source, to: target, dst_path: dstDir };
     },
 };

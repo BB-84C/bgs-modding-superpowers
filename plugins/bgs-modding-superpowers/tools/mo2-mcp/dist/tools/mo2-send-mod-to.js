@@ -24,6 +24,9 @@ import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { requireBoundContext } from "../binding.js";
+import { invalidateWorld } from "./state-sync.js";
+import { CONFLICT_PREVIEW_SIDECAR_SKIPPED, computeConflictDelta, conflictPreviewFromReport, isSidecarReport, previewOrUnavailable, reportForMod, } from "../conflict-preview.js";
+import { logApplyEvent } from "../log-apply.js";
 const ModeSchema = z.enum([
     "gui_top",
     "gui_bottom",
@@ -146,6 +149,9 @@ const handler = {
         const bound = requireBoundContext(ctx);
         const args = plan.args;
         const profile = args.profile ?? "Default";
+        const preReport = bound.sidecar
+            ? await previewOrUnavailable(() => reportForMod(args.name, bound, profile))
+            : undefined;
         if (bound.pipeClient) {
             await assertActiveProfile(ctx, profile);
             const targetPri = await _computeTargetPriority(args, ctx, profile);
@@ -155,9 +161,24 @@ const handler = {
             });
             if (!resp.ok)
                 throw new Error(resp.error?.message ?? "broker error");
+            await invalidateWorld(ctx, [profile]);
+            await logApplyEvent(handler.toolName, `moved "${args.name}" mode=${args.target_mode} anchor="${args.anchor ?? "none"}" priority→${targetPri}`, bound, plan.planId, profile);
+            const postReport = bound.sidecar
+                ? await previewOrUnavailable(() => reportForMod(args.name, bound, profile))
+                : undefined;
+            const conflictsPreview = bound.sidecar
+                ? isSidecarReport(postReport)
+                    ? conflictPreviewFromReport(postReport)
+                    : postReport
+                : CONFLICT_PREVIEW_SIDECAR_SKIPPED;
+            const conflictsDelta = isSidecarReport(preReport) && isSidecarReport(postReport)
+                ? computeConflictDelta(preReport, postReport)
+                : undefined;
             return {
                 ...resp.result,
                 target_mode: args.target_mode,
+                conflicts_preview: conflictsPreview,
+                ...(conflictsDelta ? { conflicts_delta: conflictsDelta } : {}),
                 _meta: RESPONSE_META,
             };
         }
@@ -174,11 +195,26 @@ const handler = {
         const insertIdx = Math.max(0, Math.min(lines.length - targetPri, lines.length));
         lines.splice(insertIdx, 0, moved);
         await atomicWriteText(modlistPath, lines.join("\n") + "\n");
+        await invalidateWorld(ctx, [profile]);
+        await logApplyEvent(handler.toolName, `moved "${args.name}" mode=${args.target_mode} anchor="${args.anchor ?? "none"}" priority→${targetPri}`, bound, plan.planId, profile);
+        const postReport = bound.sidecar
+            ? await previewOrUnavailable(() => reportForMod(args.name, bound, profile))
+            : undefined;
+        const conflictsPreview = bound.sidecar
+            ? isSidecarReport(postReport)
+                ? conflictPreviewFromReport(postReport)
+                : postReport
+            : CONFLICT_PREVIEW_SIDECAR_SKIPPED;
+        const conflictsDelta = isSidecarReport(preReport) && isSidecarReport(postReport)
+            ? computeConflictDelta(preReport, postReport)
+            : undefined;
         return {
             name: args.name,
             new_priority: targetPri,
             target_mode: args.target_mode,
             source: "offline_modlist_reorder",
+            conflicts_preview: conflictsPreview,
+            ...(conflictsDelta ? { conflicts_delta: conflictsDelta } : {}),
             _meta: RESPONSE_META,
         };
     },

@@ -13,6 +13,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
 import { requireBoundContext } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 // BUG-10 fix (2026-06-17): executable title + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
@@ -74,22 +75,26 @@ const handler = {
                 if (!waited.ok)
                     throw new Error(waited.error?.message ?? "broker error");
                 const waitResult = waited.result;
+                await logApplyEvent(handler.toolName, `ran tool "${title}" wait=${wait}`, bound, plan.planId, profile);
                 return {
                     handle,
                     exit_code: typeof waitResult?.exit_code === "number" ? waitResult.exit_code : null,
                     success: waitResult?.success === true,
                 };
             }
+            await logApplyEvent(handler.toolName, `ran tool "${title}" wait=${wait}`, bound, plan.planId, profile);
             return { handle, waiting: false };
         }
         const child = spawn(join(bound.config.mo2Root, "ModOrganizer.exe"), ["-p", profile, "run", "-e", title], { detached: !wait, stdio: "ignore" });
         if (!wait) {
             child.unref();
+            await logApplyEvent(handler.toolName, `ran tool "${title}" wait=${wait}`, bound, plan.planId, profile);
             return { pid: child.pid, waiting: false, source: "offline_cli" };
         }
         const exitCode = await new Promise((resolve) => {
             child.on("exit", (code) => resolve(code ?? -1));
         });
+        await logApplyEvent(handler.toolName, `ran tool "${title}" wait=${wait}`, bound, plan.planId, profile);
         return { exit_code: exitCode, source: "offline_cli" };
     },
 };

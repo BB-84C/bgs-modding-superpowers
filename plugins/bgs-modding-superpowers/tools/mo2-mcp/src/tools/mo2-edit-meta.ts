@@ -12,6 +12,7 @@ import { atomicWriteText } from "../atomic.js";
 import { resolveModMetaPath } from "../path-helpers.js";
 import { upsertIniValue } from "../ini-helpers.js";
 import { requireBoundContext } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 // BUG-10 fix (2026-06-17): name + plan_id + lease_token gain .min(1). `updates`
 // keys/values are arbitrary INI section/value pairs and may legitimately be
@@ -49,13 +50,21 @@ const handler: PlanApplyHandler = {
     const args = plan.args;
     const updates = args.updates as Record<string, Record<string, string>>;
     const metaPath = await resolveModMetaPath(args.name as string, ctx);
-    const pipeClient = requireBoundContext(ctx).pipeClient;
+    const bound = requireBoundContext(ctx);
+    const pipeClient = bound.pipeClient;
     if (pipeClient) {
       const resp = await pipeClient.call("mods.meta_write", {
         name: args.name,
         updates,
       });
       if (resp.ok) {
+        await logApplyEvent(
+          handler.toolName,
+          `edited meta of "${args.name as string}" sections=${Object.keys(updates).join(",")}`,
+          bound,
+          plan.planId,
+          "",
+        );
         return resp.result as Record<string, unknown>;
       }
       // BUG-23 (issue #12) fix (2026-06-25): stale-broker deploys lack the
@@ -82,6 +91,13 @@ const handler: PlanApplyHandler = {
       }
     }
     await atomicWriteText(metaPath, text);
+    await logApplyEvent(
+      handler.toolName,
+      `edited meta of "${args.name as string}" sections=${Object.keys(updates).join(",")}`,
+      bound,
+      plan.planId,
+      "",
+    );
     return {
       name: args.name,
       sections_updated: Object.keys(updates),

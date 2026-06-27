@@ -32,6 +32,7 @@ import { readProfile } from "../profile-reader.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { requireBoundContext } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 const ModeSchema = z.enum([
     "gui_top",
     "gui_bottom",
@@ -190,6 +191,7 @@ const handler = {
             });
             if (!resp.ok)
                 throw new Error(resp.error?.message ?? "plugins.set_priority failed");
+            await logApplyEvent(handler.toolName, `moved plugin "${args.name}" mode=${args.target_mode} anchor="${args.anchor ?? "none"}"`, bound, plan.planId, profile);
             return {
                 ...resp.result,
                 new_priority: targetPri,
@@ -200,6 +202,7 @@ const handler = {
         const pluginsPath = join(resolveProfileDir(ctx, profile), "plugins.txt");
         const text = await readFile(pluginsPath, "utf8");
         await atomicWriteText(pluginsPath, _rewritePluginsTxtAtPriority(text, args.name, targetPri));
+        await logApplyEvent(handler.toolName, `moved plugin "${args.name}" mode=${args.target_mode} anchor="${args.anchor ?? "none"}"`, bound, plan.planId, profile);
         return {
             name: args.name,
             new_priority: targetPri,

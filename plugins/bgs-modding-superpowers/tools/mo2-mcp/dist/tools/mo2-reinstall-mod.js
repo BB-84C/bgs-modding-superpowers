@@ -55,6 +55,8 @@ import { FomodChoicesRequiredError } from "../fomod-required-error.js";
 import { gatherMo2FomodState } from "../mo2-state-for-fomod.js";
 import { pollPluginWarnings } from "../plugin-warnings.js";
 import { registerPluginsInPluginsTxt } from "../plugin-registration.js";
+import { CONFLICT_PREVIEW_SIDECAR_SKIPPED, computeConflictDelta, conflictPreviewFromReport, isSidecarReport, previewOrUnavailable, reportForMod, } from "../conflict-preview.js";
+import { logApplyEvent } from "../log-apply.js";
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + mod name + plan_id
 // + lease_token all gain .min(1) so empty strings fail Zod safeParse instead
 // of falling through to handler-level errors.
@@ -205,7 +207,26 @@ const handler = {
         if (!pipeClient)
             throw new Error("live_mo2_required_for_reinstall");
         const name = plan.args.name;
+        const profile = bound.config.allowedProfiles[0] ?? "Default";
         const { installFile, archivePath, modPath } = await _readInstallSource(plan.args, ctx);
+        const preReport = bound.sidecar
+            ? await previewOrUnavailable(() => reportForMod(name, bound, profile))
+            : undefined;
+        const buildConflictFields = async () => {
+            if (!bound.sidecar)
+                return { conflicts_preview: CONFLICT_PREVIEW_SIDECAR_SKIPPED };
+            const postReport = await previewOrUnavailable(() => reportForMod(name, bound, profile));
+            const conflictsPreview = isSidecarReport(postReport)
+                ? conflictPreviewFromReport(postReport)
+                : postReport;
+            const conflictsDelta = isSidecarReport(preReport) && isSidecarReport(postReport)
+                ? computeConflictDelta(preReport, postReport)
+                : undefined;
+            return {
+                conflicts_preview: conflictsPreview,
+                ...(conflictsDelta ? { conflicts_delta: conflictsDelta } : {}),
+            };
+        };
         // Re-detect FOMOD at apply (defense-in-depth: archive could change between
         // plan and apply; the broker primitive is FOMOD-blind so we must gate).
         let isFomod = false;
@@ -226,7 +247,6 @@ const handler = {
             try {
                 // Lane V3 FOMOD-EXT: forward MO2 state so the wizard enforces
                 // dependencies during the apply.
-                const profile = bound.config.allowedProfiles[0] ?? "Default";
                 const mo2State = await gatherMo2FomodState(ctx, profile);
                 await bound.sidecar.call("install.stage_fomod", {
                     archive_path: archivePath,
@@ -242,12 +262,14 @@ const handler = {
                 await rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
             }
             const pluginsRegistered = await _registerReinstalledPlugins(ctx, modPath);
-            await invalidateWorld(ctx, ["Default"]);
+            await invalidateWorld(ctx, [profile]);
+            await logApplyEvent(handler.toolName, `reinstalled "${name}"`, bound, plan.planId, profile);
             return {
                 reinstalled: name,
                 archive: installFile,
                 fomod_used: true,
                 plugins_registered: pluginsRegistered,
+                ...(await buildConflictFields()),
                 pluginWarnings: await pollPluginWarnings(pipeClient),
             };
         }
@@ -260,12 +282,14 @@ const handler = {
         if (!resp.ok)
             throw new Error(resp.error?.message ?? "installation.install_local_archive failed");
         const pluginsRegistered = await _registerReinstalledPlugins(ctx, modPath);
-        await invalidateWorld(ctx, ["Default"]);
+        await invalidateWorld(ctx, [profile]);
+        await logApplyEvent(handler.toolName, `reinstalled "${name}"`, bound, plan.planId, profile);
         return {
             reinstalled: name,
             archive: installFile,
             fomod_used: false,
             plugins_registered: pluginsRegistered,
+            ...(await buildConflictFields()),
             pluginWarnings: await pollPluginWarnings(pipeClient),
         };
     },

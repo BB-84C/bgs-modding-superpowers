@@ -36,6 +36,12 @@ import { FomodChoicesRequiredError, type FomodTreeShape } from "../fomod-require
 import { gatherMo2FomodState } from "../mo2-state-for-fomod.js";
 import { pollPluginWarnings } from "../plugin-warnings.js";
 import { registerPluginsInPluginsTxt } from "../plugin-registration.js";
+import {
+  CONFLICT_PREVIEW_SIDECAR_SKIPPED,
+  computeConflictPreview,
+  previewOrUnavailable,
+} from "../conflict-preview.js";
+import { logApplyEvent } from "../log-apply.js";
 
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + archive_path +
 // mod_name + plan_id + lease_token all gain .min(1). Empty strings in any of
@@ -433,6 +439,16 @@ const handler: PlanApplyHandler = {
     await invalidateWorld(ctx, [profile]);
 
     const finalPriority = await _readFinalPriority(ctx, profile, modName, targetPriority);
+    await logApplyEvent(
+      handler.toolName,
+      `installed "${modName}" from "${basename(archivePath)}" priority=${finalPriority} plugins=${pluginsRegistered.length}`,
+      bound,
+      plan.planId,
+      profile,
+    );
+    const conflictsPreview = bound.sidecar
+      ? await previewOrUnavailable(() => computeConflictPreview(modName, bound, profile))
+      : CONFLICT_PREVIEW_SIDECAR_SKIPPED;
 
     return {
       mod_name: modName,
@@ -441,6 +457,7 @@ const handler: PlanApplyHandler = {
       installation_file: basename(archivePath),
       plugins_registered: pluginsRegistered,
       final_priority: finalPriority,
+      conflicts_preview: conflictsPreview,
       _meta: RESPONSE_META,
       pluginWarnings: bound.pipeClient ? await pollPluginWarnings(bound.pipeClient) : undefined,
     };

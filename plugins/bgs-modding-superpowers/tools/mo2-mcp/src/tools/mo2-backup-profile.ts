@@ -12,6 +12,7 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import type { ToolContext } from "../types.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -66,6 +67,13 @@ const handler: PlanApplyHandler = {
         }
       }
     }
+    await logApplyEvent(
+      handler.toolName,
+      `backed up profile "${profile}" → label "${label}"`,
+      requireBoundContext(ctx),
+      plan.planId,
+      profile,
+    );
     return {
       backup_label: label,
       backup_dir: backupDir,

@@ -14,6 +14,7 @@ import { upsertIniValue } from "../ini-helpers.js";
 import { readMoIni, resolveGameName } from "../mo-ini.js";
 import { detectMo2Running } from "../detection.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 // BUG-10 fix (2026-06-17): section + key + plan_id + lease_token gain .min(1).
 // `value` stays a free-form string — clearing an INI key to empty is a
@@ -73,9 +74,11 @@ const handler: PlanApplyHandler = {
   },
   async applyMutation(plan, ctx) {
     const args = plan.args;
+    const bound = requireBoundContext(ctx);
+    const profile = (args.profile as string) ?? "Default";
     const iniPath = await _resolveIniPath(
       {
-        profile: (args.profile as string) ?? "Default",
+        profile,
         ini_name: args.ini_name as "game" | "prefs" | "custom",
       },
       ctx,
@@ -93,6 +96,13 @@ const handler: PlanApplyHandler = {
       args.value as string,
     );
     await atomicWriteText(iniPath, text);
+    await logApplyEvent(
+      handler.toolName,
+      `set profile ini ${args.ini_name as string}:${args.section as string}:${args.key as string}`,
+      bound,
+      plan.planId,
+      profile,
+    );
     return { ini_path: iniPath, key_set: `${args.section}/${args.key}` };
   },
 };

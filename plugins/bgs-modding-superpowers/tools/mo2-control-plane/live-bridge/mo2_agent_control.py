@@ -315,6 +315,7 @@ RUNTIME_FILE_NAMES = (
 SYSTEM_PING_METHOD = "system.ping"
 SYSTEM_CAPABILITIES_METHOD = "system.capabilities"
 SYSTEM_SHUTDOWN_METHOD = "system.shutdown"
+SYSTEM_LOG_APPLY_METHOD = "system.log_apply"
 MODS_LIST_METHOD = "mods.list"
 MODS_SET_ACTIVE_METHOD = "mods.set_active"
 MODS_SET_PRIORITY_METHOD = "mods.set_priority"
@@ -860,6 +861,22 @@ def _handle_system_shutdown(organizer, payload):
 
     register_post_response_hook(enqueue_quit)
     return {"ok": True, "result": {"shutting_down": True}, "error": None}
+
+
+def _handle_system_log_apply(payload):
+    tool = payload.get("tool", "?")
+    plan_id = payload.get("plan_id", "?")
+    profile = payload.get("profile", "")
+    summary = payload.get("summary", "")
+    line = f"[mo2-mcp] APPLY tool={tool} plan={plan_id} profile={profile} {summary}"
+    try:
+        from PyQt6.QtCore import qInfo
+
+        qInfo(line)
+    except Exception as exc:
+        log.info(line)
+        log.debug(f"qInfo unavailable: {exc}")
+    return {"logged": True}
 
 
 def _handle_mods_list(organizer, payload):
@@ -2802,6 +2819,9 @@ def build_command_handlers(
     handlers[SYSTEM_CAPABILITIES_METHOD] = handle_system_capabilities
     handlers[SYSTEM_SHUTDOWN_METHOD] = lambda request: _handle_system_shutdown(
         organizer,
+        request.get("payload", {}),
+    )
+    handlers[SYSTEM_LOG_APPLY_METHOD] = lambda request: _handle_system_log_apply(
         request.get("payload", {}),
     )
     handlers[MODS_LIST_METHOD] = lambda request: _handle_mods_list(

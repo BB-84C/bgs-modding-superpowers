@@ -18,6 +18,7 @@ import { resolveModsDir, resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
 import { pollPluginWarnings } from "../plugin-warnings.js";
+import { logApplyEvent } from "../log-apply.js";
 
 const inputSchema = z.discriminatedUnion("mode", [
   z.object({
@@ -131,10 +132,24 @@ const handler: PlanApplyHandler = {
         await bound.pipeClient.call("organizer.refresh", { save_changes: false }).catch(() => {});
       }
       result.pluginWarnings = await pollPluginWarnings(bound.pipeClient);
+      await logApplyEvent(
+        handler.toolName,
+        `${args.enabled ? "enabled" : "disabled"} plugin "${args.name as string}"`,
+        bound,
+        plan.planId,
+        profile,
+      );
       return result;
     }
     // Offline: plugins.txt rewrite already done above; no broker -> no
     // file-hide path.
+    await logApplyEvent(
+      handler.toolName,
+      `${args.enabled ? "enabled" : "disabled"} plugin "${args.name as string}"`,
+      bound,
+      plan.planId,
+      profile,
+    );
     return {
       name: args.name,
       enabled: args.enabled,

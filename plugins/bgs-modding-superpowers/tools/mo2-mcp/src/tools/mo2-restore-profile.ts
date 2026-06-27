@@ -13,6 +13,7 @@ import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import type { ToolContext } from "../types.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 // BUG-10 fix (2026-06-17): backup label + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
@@ -60,6 +61,13 @@ const handler: PlanApplyHandler = {
         failed.push(f);
       }
     }
+    await logApplyEvent(
+      handler.toolName,
+      `restored profile "${profile}" from label "${label}"`,
+      requireBoundContext(ctx),
+      plan.planId,
+      profile,
+    );
     return { profile, label, restored, failed };
   },
 };

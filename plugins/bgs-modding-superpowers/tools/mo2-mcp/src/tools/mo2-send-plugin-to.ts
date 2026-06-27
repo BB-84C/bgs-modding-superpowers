@@ -33,6 +33,7 @@ import { resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import type { ToolContext } from "../types.js";
 import { requireBoundContext } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 const ModeSchema = z.enum([
   "gui_top",
@@ -215,6 +216,13 @@ const handler: PlanApplyHandler = {
         priority: targetPri,
       });
       if (!resp.ok) throw new Error(resp.error?.message ?? "plugins.set_priority failed");
+      await logApplyEvent(
+        handler.toolName,
+        `moved plugin "${args.name as string}" mode=${args.target_mode as string} anchor="${(args.anchor as string | undefined) ?? "none"}"`,
+        bound,
+        plan.planId,
+        profile,
+      );
       return {
         ...(resp.result as Record<string, unknown>),
         new_priority: targetPri,
@@ -226,6 +234,13 @@ const handler: PlanApplyHandler = {
     const pluginsPath = join(resolveProfileDir(ctx, profile), "plugins.txt");
     const text = await readFile(pluginsPath, "utf8");
     await atomicWriteText(pluginsPath, _rewritePluginsTxtAtPriority(text, args.name as string, targetPri));
+    await logApplyEvent(
+      handler.toolName,
+      `moved plugin "${args.name as string}" mode=${args.target_mode as string} anchor="${(args.anchor as string | undefined) ?? "none"}"`,
+      bound,
+      plan.planId,
+      profile,
+    );
     return {
       name: args.name,
       new_priority: targetPri,

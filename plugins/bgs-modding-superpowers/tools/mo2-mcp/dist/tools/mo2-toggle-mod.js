@@ -17,6 +17,9 @@ import { resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { requireBoundContext } from "../binding.js";
 import { pollPluginWarnings } from "../plugin-warnings.js";
+import { invalidateWorld } from "./state-sync.js";
+import { CONFLICT_PREVIEW_SIDECAR_SKIPPED, computeConflictPreview, computeRemovedPreview, isSidecarReport, previewOrUnavailable, reportForMod, } from "../conflict-preview.js";
+import { logApplyEvent } from "../log-apply.js";
 // BUG-10 fix (2026-06-17): name+plan_id+lease_token gain .min(1) so empty
 // strings fail Zod safeParse and reach the caller as the stable
 // invalid_arguments envelope instead of falling through to the handler's
@@ -65,6 +68,9 @@ const handler = {
         const bound = requireBoundContext(ctx);
         const args = plan.args;
         const profile = args.profile ?? "Default";
+        const preReport = args.enabled === false && bound.sidecar
+            ? await previewOrUnavailable(() => reportForMod(args.name, bound, profile))
+            : undefined;
         if (bound.pipeClient) {
             await assertActiveProfile(ctx, profile);
             const resp = await bound.pipeClient.call("mods.set_active", {
@@ -73,9 +79,19 @@ const handler = {
             });
             if (!resp.ok)
                 throw new Error(resp.error?.message ?? "broker error");
+            await invalidateWorld(ctx, [profile]);
+            await logApplyEvent(handler.toolName, `${args.enabled ? "enabled" : "disabled"} "${args.name}"`, bound, plan.planId, profile);
+            const conflictsPreview = bound.sidecar
+                ? args.enabled
+                    ? await previewOrUnavailable(() => computeConflictPreview(args.name, bound, profile))
+                    : isSidecarReport(preReport)
+                        ? computeRemovedPreview(preReport)
+                        : preReport
+                : CONFLICT_PREVIEW_SIDECAR_SKIPPED;
             return {
                 ...(resp.result ?? {}),
                 pluginWarnings: await pollPluginWarnings(bound.pipeClient),
+                conflicts_preview: conflictsPreview,
             };
         }
         const modlistPath = join(resolveProfileDir(ctx, profile), "modlist.txt");
@@ -91,10 +107,20 @@ const handler = {
             return l;
         });
         await atomicWriteText(modlistPath, newLines.join("\n"));
+        await invalidateWorld(ctx, [profile]);
+        await logApplyEvent(handler.toolName, `${args.enabled ? "enabled" : "disabled"} "${args.name}"`, bound, plan.planId, profile);
+        const conflictsPreview = bound.sidecar
+            ? args.enabled
+                ? await previewOrUnavailable(() => computeConflictPreview(args.name, bound, profile))
+                : isSidecarReport(preReport)
+                    ? computeRemovedPreview(preReport)
+                    : preReport
+            : CONFLICT_PREVIEW_SIDECAR_SKIPPED;
         return {
             name: args.name,
             enabled: args.enabled,
             source: "offline_modlist_rewrite",
+            conflicts_preview: conflictsPreview,
         };
     },
 };

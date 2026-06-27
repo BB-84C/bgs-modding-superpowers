@@ -15,6 +15,7 @@ import { detectMo2Running } from "../detection.js";
 import { readMoIni } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 // BUG-10 fix (2026-06-17): rename profile name args + plan_id/lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
@@ -81,8 +82,22 @@ const handler: PlanApplyHandler = {
     const rewritten = rewriteSelectedProfileLine(text, oldName, newName);
     if (rewritten.updated) {
       await atomicWriteText(iniPath, rewritten.text);
+      await logApplyEvent(
+        handler.toolName,
+        `renamed profile "${oldName}" → "${newName}"`,
+        bound,
+        plan.planId,
+        "",
+      );
       return { renamed: true, ini_updated: true };
     }
+    await logApplyEvent(
+      handler.toolName,
+      `renamed profile "${oldName}" → "${newName}"`,
+      bound,
+      plan.planId,
+      "",
+    );
     return { renamed: true, ini_updated: false };
   },
 };

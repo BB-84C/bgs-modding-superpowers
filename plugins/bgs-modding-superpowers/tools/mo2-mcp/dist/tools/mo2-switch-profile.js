@@ -16,6 +16,7 @@ import { routeToPlanApply } from "../plan-apply.js";
 import { resolveProfileDir } from "../path-helpers.js";
 import { registerTool } from "../tool-registry.js";
 import { requireBoundContext } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 // BUG-10 fix (2026-06-17): new_profile + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({ mode: z.literal("plan"), new_profile: z.string().min(1) }),
@@ -85,6 +86,7 @@ const handler = {
     },
     async applyMutation(plan, ctx) {
         const bound = requireBoundContext(ctx);
+        const oldProfile = bound.config.allowedProfiles[0] ?? "";
         const newProfile = plan.args.new_profile;
         await _shutdownCurrentPipe(ctx);
         await _waitForMo2Gone(bound.config.mo2Root);
@@ -99,6 +101,7 @@ const handler = {
                 profile_dir: resolveProfileDir(ctx, newProfile),
             });
         }
+        await logApplyEvent(handler.toolName, `switched profile "${oldProfile}" → "${newProfile}"`, bound, plan.planId, newProfile);
         return { new_profile: newProfile, new_pipe: newPipe };
     },
 };

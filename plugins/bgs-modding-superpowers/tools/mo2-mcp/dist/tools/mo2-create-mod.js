@@ -14,6 +14,7 @@ import { resolveProfileDir, resolveModsDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 const inputSchema = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("plan"),
@@ -87,6 +88,7 @@ const handler = {
             : join(modsDir, plan.args.name);
         await mkdir(absPath, { recursive: true });
         await invalidateWorld(ctx, [profile]);
+        await logApplyEvent(handler.toolName, `created "${plan.args.name}" wins_over="${winsOver ?? "none"}" → priority ${targetPri ?? "none"}`, bound, plan.planId, profile);
         return { ...result, _meta: RESPONSE_META };
     },
 };

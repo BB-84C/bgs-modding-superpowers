@@ -15,6 +15,7 @@ import { readProfile } from "../profile-reader.js";
 import type { ToolContext } from "../types.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 // BUG-10 fix (2026-06-17): virtual_path + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
@@ -123,13 +124,30 @@ const handler: PlanApplyHandler = {
     };
   },
   async applyMutation(plan, ctx) {
+    const bound = requireBoundContext(ctx);
     const realPath = await _resolveRealPath(plan.args, ctx, plan);
     const hidden = plan.args.hidden as boolean;
     const state = _transition(realPath, hidden);
-    if (state.noOp) return { no_op: true, path: realPath };
+    if (state.noOp) {
+      await logApplyEvent(
+        handler.toolName,
+        `${hidden ? "hidden" : "unhidden"} "${plan.args.virtual_path as string}"`,
+        bound,
+        plan.planId,
+        "",
+      );
+      return { no_op: true, path: realPath };
+    }
 
     await rename(realPath, state.newPath);
     await invalidateWorld(ctx, ["Default"]);
+    await logApplyEvent(
+      handler.toolName,
+      `${hidden ? "hidden" : "unhidden"} "${plan.args.virtual_path as string}"`,
+      bound,
+      plan.planId,
+      "",
+    );
     return { renamed_from: realPath, renamed_to: state.newPath, hidden };
   },
 };

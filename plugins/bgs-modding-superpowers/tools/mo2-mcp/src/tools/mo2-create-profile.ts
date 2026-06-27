@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 const ProfileSettingSchema = z.enum(["MODS", "SAVEGAMES", "CONFIGURATION", "PREFER_DEFAULTS"]);
 
@@ -85,6 +86,13 @@ const handler: PlanApplyHandler = {
     if (typeof plan.args.from_profile === "string") {
       await _copyProfileTextAndIni(profilesRoot, plan.args.from_profile, newDir);
     }
+    await logApplyEvent(
+      handler.toolName,
+      `created profile "${name}" settings=${((plan.args.settings as string[] | undefined) ?? []).join(",")}`,
+      bound,
+      plan.planId,
+      name,
+    );
 
     return {
       profile_name: name,

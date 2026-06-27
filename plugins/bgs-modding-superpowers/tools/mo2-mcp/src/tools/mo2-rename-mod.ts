@@ -15,6 +15,7 @@ import { readMoIni } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
 import { invalidateWorld } from "./state-sync.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 // BUG-10 fix (2026-06-17): rename name args + plan_id/lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
@@ -114,6 +115,13 @@ const handler: PlanApplyHandler = {
     if (bound.pipeClient) {
       await invalidateWorld(ctx, updated.length ? updated : ["Default"]);
     }
+    await logApplyEvent(
+      handler.toolName,
+      `renamed "${oldName}" → "${newName}"`,
+      bound,
+      plan.planId,
+      "",
+    );
     return { renamed_dir: true, profiles_updated: updated };
   },
 };

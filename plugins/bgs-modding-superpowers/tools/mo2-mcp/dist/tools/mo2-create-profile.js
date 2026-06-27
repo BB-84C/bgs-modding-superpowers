@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { requireBoundContext } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 const ProfileSettingSchema = z.enum(["MODS", "SAVEGAMES", "CONFIGURATION", "PREFER_DEFAULTS"]);
 // BUG-10 fix (2026-06-17): profile name + plan_id + lease_token gain .min(1).
 // from_profile stays optional (clone source is allowed to be omitted).
@@ -83,6 +84,7 @@ const handler = {
         if (typeof plan.args.from_profile === "string") {
             await _copyProfileTextAndIni(profilesRoot, plan.args.from_profile, newDir);
         }
+        await logApplyEvent(handler.toolName, `created profile "${name}" settings=${(plan.args.settings ?? []).join(",")}`, bound, plan.planId, name);
         return {
             profile_name: name,
             path: newDir,

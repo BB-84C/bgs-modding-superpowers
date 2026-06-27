@@ -14,6 +14,7 @@ import { z } from "zod";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 // BUG-10 fix (2026-06-17): snapshot_id + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
@@ -35,8 +36,15 @@ const handler: PlanApplyHandler = {
     };
   },
   async applyMutation(plan, ctx) {
-    requireBoundContext(ctx);
+    const bound = requireBoundContext(ctx);
     const result = await ctx.snapshots.restore(plan.args.snapshot_id as string);
+    await logApplyEvent(
+      handler.toolName,
+      `rolled back snapshot "${plan.args.snapshot_id as string}"`,
+      bound,
+      plan.planId,
+      "",
+    );
     return result as unknown as Record<string, unknown>;
   },
 };

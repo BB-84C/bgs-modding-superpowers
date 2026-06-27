@@ -12,6 +12,7 @@ import { readMoIni, type MoIniCustomExecutable } from "../mo-ini.js";
 import { atomicWriteText } from "../atomic.js";
 import { detectMo2Running } from "../detection.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 // BUG-10 fix (2026-06-17): identifier fields on add/edit/remove gain .min(1).
 // Add: title + binary must be non-empty (without them the entry can't even be
@@ -232,6 +233,16 @@ const handler: PlanApplyHandler = {
       entries,
     );
     await atomicWriteText(iniPath, newText);
+    const title = plan.args.action === "add"
+      ? (plan.args.entry as ExecutableEntry).title
+      : plan.args.title as string;
+    await logApplyEvent(
+      handler.toolName,
+      `${plan.args.action as string} executable "${title}"`,
+      bound,
+      plan.planId,
+      "",
+    );
     return { action: plan.args.action as string, executables_count: entries.length };
   },
 };

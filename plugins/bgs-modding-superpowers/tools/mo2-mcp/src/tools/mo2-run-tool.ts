@@ -13,6 +13,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { readMoIni } from "../mo-ini.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 // BUG-10 fix (2026-06-17): executable title + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
@@ -90,12 +91,14 @@ const handler: PlanApplyHandler = {
         });
         if (!waited.ok) throw new Error(waited.error?.message ?? "broker error");
         const waitResult = waited.result as WaitApplicationResult | undefined;
+        await logApplyEvent(handler.toolName, `ran tool "${title}" wait=${wait}`, bound, plan.planId, profile);
         return {
           handle,
           exit_code: typeof waitResult?.exit_code === "number" ? waitResult.exit_code : null,
           success: waitResult?.success === true,
         };
       }
+      await logApplyEvent(handler.toolName, `ran tool "${title}" wait=${wait}`, bound, plan.planId, profile);
       return { handle, waiting: false };
     }
 
@@ -106,11 +109,13 @@ const handler: PlanApplyHandler = {
     );
     if (!wait) {
       child.unref();
+      await logApplyEvent(handler.toolName, `ran tool "${title}" wait=${wait}`, bound, plan.planId, profile);
       return { pid: child.pid, waiting: false, source: "offline_cli" };
     }
     const exitCode = await new Promise<number>((resolve) => {
       child.on("exit", (code) => resolve(code ?? -1));
     });
+    await logApplyEvent(handler.toolName, `ran tool "${title}" wait=${wait}`, bound, plan.planId, profile);
     return { exit_code: exitCode, source: "offline_cli" };
   },
 };
