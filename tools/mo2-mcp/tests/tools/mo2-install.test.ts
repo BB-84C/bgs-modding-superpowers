@@ -352,6 +352,7 @@ describe("mo2_install", () => {
       "installation.create_mod_from_directory",
       "organizer.refresh", // post-plugins.txt refresh (BUG-14 BUG-E)
       "mods.list", // final_priority readback
+      "system.log_apply",
       "plugins.missing_masters",
     ]);
     expect(apply.result.pluginWarnings).toMatchObject({ warnings: [], scannedCount: 1, enabledCount: 1 });

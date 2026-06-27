@@ -159,6 +159,14 @@ describe("mo2_create_profile", () => {
     expect(apply.result.source).toBe("online_initialized");
     expect(pipeCalls).toEqual([
       { method: "profile.initialize", params: { profile_dir: join(root, "profiles", "OnlineNew"), settings: ["MODS", "SAVEGAMES"] } },
+      {
+        method: "system.log_apply",
+        params: expect.objectContaining({
+          tool: "mo2_create_profile",
+          profile: "OnlineNew",
+          summary: "created profile \"OnlineNew\" settings=MODS,SAVEGAMES",
+        }),
+      },
     ]);
   });
 

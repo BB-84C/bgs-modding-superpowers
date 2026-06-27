@@ -13,6 +13,7 @@ import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply, type PlanApplyHandler } from "../plan-apply.js";
 import { resolveModsDir } from "../path-helpers.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 // BUG-10 fix (2026-06-17): mod name + plan_id + lease_token gain .min(1).
 const inputSchema = z.discriminatedUnion("mode", [
@@ -44,12 +45,21 @@ const handler: PlanApplyHandler = {
     while (existsSync(join(modsDir, `${plan.args.name}backup${i}`))) i++;
     const backupPath = join(modsDir, `${plan.args.name}backup${i}`);
     await cp(sourceMod, backupPath, { recursive: true });
-    const pipeClient = requireBoundContext(ctx).pipeClient;
+    const bound = requireBoundContext(ctx);
+    const pipeClient = bound.pipeClient;
     if (pipeClient) {
       // Refresh MO2 so it picks up the new backup mod (auto-tags FLAG_BACKUP)
       await pipeClient.call("organizer.refresh", { save_changes: false }).catch(() => {});
     }
-    return { backup_name: `${plan.args.name}backup${i}`, backup_path: backupPath };
+    const backupName = `${plan.args.name}backup${i}`;
+    await logApplyEvent(
+      handler.toolName,
+      `backed up "${plan.args.name as string}" → "${backupName}"`,
+      bound,
+      plan.planId,
+      "",
+    );
+    return { backup_name: backupName, backup_path: backupPath };
   },
 };
 

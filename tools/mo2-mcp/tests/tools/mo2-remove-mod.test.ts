@@ -144,9 +144,15 @@ describe("mo2_remove_mod", () => {
     )) as { ok: boolean; result: { removed: string; backup_name?: string } };
 
     expect(cp).toHaveBeenCalledWith(join(root, "mods", "Target"), join(root, "mods", "Targetbackup0"), { recursive: true });
-    expect(pipeCalls).toEqual([
-      { method: "mods.remove", params: { name: "Target" } },
-    ]);
+    expect(pipeCalls[0]).toEqual({ method: "mods.remove", params: { name: "Target" } });
+    expect(pipeCalls[1]).toMatchObject({
+      method: "system.log_apply",
+      params: {
+        tool: "mo2_remove_mod",
+        profile: "Default",
+        summary: "removed \"Target\" backup=\"Targetbackup0\"",
+      },
+    });
     expect(apply.result).toMatchObject({ removed: "Target", backup_name: "Targetbackup0" });
   });
 
@@ -185,9 +191,15 @@ describe("mo2_remove_mod", () => {
 
     const backupCopies = vi.mocked(cp).mock.calls.filter(([, dest]) => String(dest).includes("Targetbackup"));
     expect(backupCopies).toEqual([]);
-    expect(pipeCalls).toEqual([
-      { method: "mods.remove", params: { name: "Target" } },
-    ]);
+    expect(pipeCalls[0]).toEqual({ method: "mods.remove", params: { name: "Target" } });
+    expect(pipeCalls[1]).toMatchObject({
+      method: "system.log_apply",
+      params: {
+        tool: "mo2_remove_mod",
+        profile: "Default",
+        summary: "removed \"Target\" backup=\"none\"",
+      },
+    });
     expect(apply.result.backup_name).toBeUndefined();
   });
 

@@ -217,6 +217,14 @@ describe("mo2_set_file_hidden", () => {
     expect(pipeCalls).toEqual([
       { method: "organizer.resolve_path", params: { filename: "Data/textures/same.dds" } },
       { method: "organizer.resolve_path", params: { filename: "Data/textures/same.dds" } },
+      {
+        method: "system.log_apply",
+        params: expect.objectContaining({
+          tool: "mo2_set_file_hidden",
+          profile: "",
+          summary: "hidden \"Data/textures/same.dds\"",
+        }),
+      },
     ]);
     expect(sidecarCalls).toEqual([
       { method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } },

@@ -36,6 +36,14 @@ export interface ConflictPreviewRemoved {
   top_affected: Array<{mod: string; files: number}>;
 }
 
+export function isSidecarReport(value: unknown): value is SidecarReport {
+  return typeof value === "object"
+    && value !== null
+    && typeof (value as { mod?: unknown }).mod === "string"
+    && typeof (value as { total_files?: unknown }).total_files === "number"
+    && typeof (value as { winners_by_file?: unknown }).winners_by_file === "object";
+}
+
 function topFive(entries: Array<{ mod: string; files: number }>): Array<{ mod: string; files: number }> {
   return [...entries]
     .sort((a, b) => b.files - a.files || a.mod.localeCompare(b.mod))
@@ -60,6 +68,10 @@ export async function computeConflictPreview(
   profile: string,
 ): Promise<ConflictPreview> {
   const report = await reportForMod(modName, ctx, profile);
+  return conflictPreviewFromReport(report);
+}
+
+export function conflictPreviewFromReport(report: SidecarReport): ConflictPreview {
   return {
     mod: report.mod,
     files_total: report.total_files,

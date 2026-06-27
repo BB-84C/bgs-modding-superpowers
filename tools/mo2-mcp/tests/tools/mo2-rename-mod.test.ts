@@ -110,7 +110,16 @@ describe("mo2_rename_mod", () => {
     )) as { ok: boolean; result: { renamed_dir: boolean; profiles_updated: string[] } };
 
     expect(apply.ok).toBe(true);
-    expect(pipeCalls).toEqual([]);
+    expect(pipeCalls).toEqual([
+      {
+        method: "system.log_apply",
+        params: expect.objectContaining({
+          tool: "mo2_rename_mod",
+          profile: "",
+          summary: "renamed \"OldMod\" → \"NewMod\"",
+        }),
+      },
+    ]);
     expect(apply.result.renamed_dir).toBe(true);
     expect(apply.result.profiles_updated.sort()).toEqual(["Alt", "Default"]);
     expect(existsSync(join(root, "mods", "OldMod"))).toBe(false);

@@ -12,6 +12,7 @@ import { atomicWriteText } from "../atomic.js";
 import { resolveModMetaPath } from "../path-helpers.js";
 import { upsertIniValue } from "../ini-helpers.js";
 import { requireBoundContext, bindingSnapshot } from "../binding.js";
+import { logApplyEvent } from "../log-apply.js";
 
 // BUG-10 fix (2026-06-17): name + plan_id + lease_token gain .min(1). `notes`
 // stays a free-form string — clearing notes to empty is a legitimate use.
@@ -33,13 +34,21 @@ const handler: PlanApplyHandler = {
   async applyMutation(plan, ctx) {
     const args = plan.args;
     const metaPath = await resolveModMetaPath(args.name as string, ctx);
-    const pipeClient = requireBoundContext(ctx).pipeClient;
+    const bound = requireBoundContext(ctx);
+    const pipeClient = bound.pipeClient;
     if (pipeClient) {
       const resp = await pipeClient.call("mods.meta_write", {
         name: args.name,
         updates: { General: { notes: `"${args.notes}"` } },
       });
       if (!resp.ok) throw new Error(resp.error?.message ?? "broker error");
+      await logApplyEvent(
+        handler.toolName,
+        `set notes of "${args.name as string}" (length=${String(args.notes).length})`,
+        bound,
+        plan.planId,
+        "",
+      );
       return resp.result as Record<string, unknown>;
     }
     // Offline: atomic write
@@ -51,6 +60,13 @@ const handler: PlanApplyHandler = {
     }
     text = upsertIniValue(text, "General", "notes", `"${args.notes}"`);
     await atomicWriteText(metaPath, text);
+    await logApplyEvent(
+      handler.toolName,
+      `set notes of "${args.name as string}" (length=${String(args.notes).length})`,
+      bound,
+      plan.planId,
+      "",
+    );
     return { name: args.name, notes_set: true, source: "offline" };
   },
 };

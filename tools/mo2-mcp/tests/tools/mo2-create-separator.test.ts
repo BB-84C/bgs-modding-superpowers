@@ -135,6 +135,14 @@ describe("mo2_create_separator", () => {
       { method: "profile.active", params: {} },
       { method: "profile.active", params: {} },
       { method: "mods.create", params: { name: "Section_separator", priority: 2 } },
+      {
+        method: "system.log_apply",
+        params: expect.objectContaining({
+          tool: "mo2_create_separator",
+          profile: "Default",
+          summary: "created separator \"Section_separator\" wins_over=\"AnchorMod\" → priority 2",
+        }),
+      },
     ]);
     expect(await readFile(join(root, "mods", "Section_separator", "meta.ini"), "utf8")).toBe("[General]\ncolor=#aabbcc\n");
     expect(sidecarCalls).toEqual([{ method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } }]);

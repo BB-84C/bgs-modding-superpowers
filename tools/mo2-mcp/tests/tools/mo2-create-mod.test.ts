@@ -143,6 +143,14 @@ describe("mo2_create_mod", () => {
       { method: "profile.active", params: {} },
       { method: "profile.active", params: {} },
       { method: "mods.create", params: { name: "NewEmpty", priority: 2 } },
+      {
+        method: "system.log_apply",
+        params: expect.objectContaining({
+          tool: "mo2_create_mod",
+          profile: "Default",
+          summary: "created \"NewEmpty\" wins_over=\"AnchorMod\" → priority 2",
+        }),
+      },
     ]);
     expect(existsSync(join(root, "mods", "NewEmpty"))).toBe(true);
     expect(sidecarCalls).toEqual([{ method: "world.invalidate", params: { profile_dir: join(root, "profiles", "Default") } }]);
