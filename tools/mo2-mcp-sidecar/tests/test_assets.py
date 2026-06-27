@@ -57,7 +57,7 @@ def test_world_invalidate_without_init_returns_uninitialized():
     assert result["reason"] == "cache_not_init"
 
 
-def test_register_wires_four_methods(tmp_path):
+def test_register_wires_five_methods(tmp_path):
     fake_world = MagicMock(game="FALLOUT4", mods=[])
     assets.init_assets(_fake_cache_with_world(fake_world))
 
@@ -65,8 +65,69 @@ def test_register_wires_four_methods(tmp_path):
 
     assert "assets.summary" in _METHODS
     assert "assets.conflicts" in _METHODS
+    assert "assets.report_for_mod" in _METHODS
     assert "assets.resolve_file" in _METHODS
     assert "world.invalidate" in _METHODS
+
+
+def test_assets_report_for_mod_groups_conflicts_and_winners_by_file(tmp_path):
+    from mo2_mcp_sidecar.world import WorldCache
+
+    mods = tmp_path / "mods"
+    profile = tmp_path / "profiles" / "Default"
+    (mods / "Winner" / "textures").mkdir(parents=True)
+    (mods / "Target" / "textures").mkdir(parents=True)
+    (mods / "Target" / "meshes").mkdir(parents=True)
+    (mods / "Loser" / "textures").mkdir(parents=True)
+    (mods / "Winner" / "textures" / "shared_losing.dds").write_text("winner", encoding="utf-8")
+    (mods / "Target" / "textures" / "shared_losing.dds").write_text("target", encoding="utf-8")
+    (mods / "Target" / "textures" / "shared_winning.dds").write_text("target", encoding="utf-8")
+    (mods / "Loser" / "textures" / "shared_winning.dds").write_text("loser", encoding="utf-8")
+    (mods / "Target" / "meshes" / "unique.nif").write_text("unique", encoding="utf-8")
+    profile.mkdir(parents=True)
+    (profile / "modlist.txt").write_text("+Winner\n+Target\n+Loser\n", encoding="utf-8")
+    (profile / "plugins.txt").write_text("", encoding="utf-8")
+    assets.init_assets(WorldCache(mods_root=mods, game="FALLOUT4"))
+
+    result = assets.assets_report_for_mod({"profile_dir": str(profile), "mod_name": "Target"})
+
+    assert result["mod"] == "Target"
+    assert result["total_files"] == 3
+    assert result["files_winning"] == 1
+    assert result["files_losing"] == 1
+    assert result["files_unique"] == 1
+    assert result["overridden_by"] == [{"mod": "Winner", "files": 1}]
+    assert result["overrides"] == [{"mod": "Loser", "files": 1}]
+    assert result["winners_by_file"] == {
+        "textures/shared_losing.dds": "Winner",
+        "textures/shared_winning.dds": "Target",
+        "meshes/unique.nif": "Target",
+    }
+
+
+def test_assets_report_for_mod_missing_mod_returns_empty_report(tmp_path):
+    from mo2_mcp_sidecar.world import WorldCache
+
+    mods = tmp_path / "mods"
+    profile = tmp_path / "profiles" / "Default"
+    (mods / "OnlyMod").mkdir(parents=True)
+    profile.mkdir(parents=True)
+    (profile / "modlist.txt").write_text("+OnlyMod\n", encoding="utf-8")
+    (profile / "plugins.txt").write_text("", encoding="utf-8")
+    assets.init_assets(WorldCache(mods_root=mods, game="FALLOUT4"))
+
+    result = assets.assets_report_for_mod({"profile_dir": str(profile), "mod_name": "MissingMod"})
+
+    assert result == {
+        "mod": "MissingMod",
+        "total_files": 0,
+        "files_winning": 0,
+        "files_losing": 0,
+        "files_unique": 0,
+        "overridden_by": [],
+        "overrides": [],
+        "winners_by_file": {},
+    }
 
 
 # --- F-M2: assets reuses World.archive_order instead of re-discovering ---

@@ -5,6 +5,7 @@ re-uses the cache so the engine sees consistent (profile_dir, game) per call.
 """
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -228,6 +229,76 @@ def assets_resolve_file(params: dict) -> dict:
     return {"virtual_path": virtual_path, "winner": entry, "providers": providers}
 
 
+def _empty_report(mod_name: str) -> dict:
+    return {
+        "mod": mod_name,
+        "total_files": 0,
+        "files_winning": 0,
+        "files_losing": 0,
+        "files_unique": 0,
+        "overridden_by": [],
+        "overrides": [],
+        "winners_by_file": {},
+    }
+
+
+def _counter_to_sorted_list(counter: Counter[str]) -> list[dict[str, int | str]]:
+    return [
+        {"mod": mod, "files": count}
+        for mod, count in sorted(counter.items(), key=lambda item: (-item[1], item[0].lower()))
+    ]
+
+
+def assets_report_for_mod(params: dict) -> dict:
+    """Return a compact conflict preview report for one mod."""
+    profile_dir = params["profile_dir"]
+    mod_name = params["mod_name"]
+    w = _world(profile_dir)
+    mods = w.mods or []
+    if not any(getattr(mod, "name", None) == mod_name for mod in mods):
+        return _empty_report(mod_name)
+
+    try:
+        from mo2_assets_engine.conflict_resolver import ConflictResolver  # type: ignore[import-not-found]
+    except ImportError:
+        return {**_empty_report(mod_name), "error": "mo2_assets_engine.conflict_resolver not importable"}
+
+    entries_by_mod = _build_entries_by_mod(w)
+    try:
+        report = ConflictResolver(mods=mods, entries_by_mod=entries_by_mod).report_for_mod(mod_name)
+    except KeyError:
+        return _empty_report(mod_name)
+
+    overridden_by: Counter[str] = Counter()
+    overrides: Counter[str] = Counter()
+    winners_by_file: dict[str, str] = {}
+
+    for item in report.overwritten:
+        winner_mod = item.winner.owner_mod
+        overridden_by[winner_mod] += 1
+        winners_by_file[item.relative_path] = winner_mod
+
+    for item in report.kept:
+        winners_by_file[item.relative_path] = item.winner.owner_mod
+        for loser in item.losers:
+            overrides[loser.owner_mod] += 1
+
+    for entry in report.no_conflict:
+        winners_by_file[entry.relative_path] = entry.owner_mod
+
+    total_files = len(report.kept) + len(report.overwritten) + len(report.no_conflict)
+    return {
+        "mod": report.mod.name,
+        "total_files": total_files,
+        "files_winning": len(report.kept),
+        "files_losing": len(report.overwritten),
+        "files_unique": len(report.no_conflict),
+        "overridden_by": _counter_to_sorted_list(overridden_by),
+        "overrides": _counter_to_sorted_list(overrides),
+        "winners_by_file": winners_by_file,
+    }
+
+
 def world_invalidate(params: dict) -> dict:
     """Explicit cache invalidation — called by MCP after T2/T3 apply."""
     profile_dir = params["profile_dir"]
@@ -241,5 +312,6 @@ def register() -> None:
     """Register all asset JSON-RPC methods. Call after init_assets()."""
     register_method("assets.summary", assets_summary)
     register_method("assets.conflicts", assets_conflicts)
+    register_method("assets.report_for_mod", assets_report_for_mod)
     register_method("assets.resolve_file", assets_resolve_file)
     register_method("world.invalidate", world_invalidate)
