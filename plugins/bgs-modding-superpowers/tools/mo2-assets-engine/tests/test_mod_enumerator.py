@@ -21,6 +21,38 @@ def test_enumerates_loose_files_recursively(tmp_path: Path) -> None:
     assert all(e.owner_mod == "ExampleMod" for e in entries)
 
 
+def test_skips_mod_root_meta_ini_but_keeps_nested(tmp_path: Path) -> None:
+    """Mod-root `meta.ini` is MO2 metadata, not a game asset.
+
+    Regression guard: prior to this fix, every mod's `meta.ini` was
+    enumerated as a loose file, producing phantom conflicts where every
+    mod "competed" with every other mod on the path `meta.ini`. MO2's
+    USVFS itself does not overlay mod-root meta.ini, so the engine
+    must mirror that behavior.
+
+    A nested meta.ini under Data/ or similar IS kept — some mods ship
+    real meta.ini content as part of their assets.
+    """
+    mod_root = tmp_path / "ExampleMod"
+    mod_root.mkdir()
+    # MO2-managed mod metadata at the root — must be skipped.
+    (mod_root / "meta.ini").write_text("[General]\nversion=1.0\n", encoding="utf-8")
+    # Real game content alongside.
+    (mod_root / "textures").mkdir()
+    (mod_root / "textures" / "foo.dds").write_bytes(b"x")
+    # Nested meta.ini (some mods ship one) — must be kept.
+    (mod_root / "Data" / "Scripts").mkdir(parents=True)
+    (mod_root / "Data" / "Scripts" / "meta.ini").write_text("nested", encoding="utf-8")
+
+    mod = Mod(name="ExampleMod", priority=0, enabled=True, root=mod_root)
+    entries = enumerate_mod_files(mod=mod, archive_order=ArchiveLoadOrder())
+    paths = sorted(e.relative_path for e in entries)
+
+    assert "meta.ini" not in paths, "mod-root meta.ini must be skipped"
+    assert "textures/foo.dds" in paths
+    assert "data/scripts/meta.ini" in paths, "nested meta.ini is real content, must be kept"
+
+
 def test_skips_mohidden_subdirectories(tmp_path: Path) -> None:
     mod_root = tmp_path / "ExampleMod"
     (mod_root / "textures").mkdir(parents=True)
