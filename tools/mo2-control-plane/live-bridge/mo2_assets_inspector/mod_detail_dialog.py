@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from mo2_assets_engine.types import ConflictBucket, FileEntry, ResolvedWinner
+from mo2_assets_engine.conflict_resolver import ResolvedFile
 
 if TYPE_CHECKING:
     from .localization import Strings
@@ -48,7 +48,7 @@ class ModDetailDialog(QDialog):
         self.setWindowTitle(f"Conflicts — {mod_name}")
         self.resize(1100, 640)
 
-        report = world.resolver.report_for_mod(mod_name)
+        report = world.report_for_mod(mod_name)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         sections_widget = QWidget(splitter)
@@ -59,12 +59,14 @@ class ModDetailDialog(QDialog):
             entries=report.kept,
             kind_column_header=strings.column_overridden_by,
             strings=strings,
+            show_winner=False,
         )
         self.overwritten_tree = _build_winner_tree(
             title=f"{strings.section_overwritten} ({len(report.overwritten)})",
             entries=report.overwritten,
             kind_column_header=strings.column_overrider,
             strings=strings,
+            show_winner=True,
         )
         self.no_conflict_tree = _build_no_conflict_tree(
             title=f"{strings.section_no_conflict} ({len(report.no_conflict)})",
@@ -118,9 +120,10 @@ class ModDetailDialog(QDialog):
 def _build_winner_tree(
     *,
     title: str,
-    entries: list[ResolvedWinner],
+    entries: list[ResolvedFile],
     kind_column_header: str,
     strings: "Strings",
+    show_winner: bool,
 ) -> QTreeWidget:
     tree = QTreeWidget()
     tree.setHeaderLabels([strings.column_file, kind_column_header])
@@ -132,7 +135,7 @@ def _build_winner_tree(
         row = QTreeWidgetItem(
             [
                 entry.relative_path,
-                _format_other_party(entry),
+                _format_other_party(entry, show_winner=show_winner),
             ]
         )
         row.setData(0, Qt.ItemDataRole.UserRole, entry)
@@ -143,7 +146,7 @@ def _build_winner_tree(
 def _build_no_conflict_tree(
     *,
     title: str,
-    entries: list[FileEntry],
+    entries: list[str],
     file_column_header: str,
 ) -> QTreeWidget:
     tree = QTreeWidget()
@@ -152,40 +155,33 @@ def _build_no_conflict_tree(
     tree.setUniformRowHeights(True)
     tree.setAlternatingRowColors(True)
     tree.setObjectName(title)
-    for entry in entries:
-        row = QTreeWidgetItem([entry.relative_path])
+    for path in entries:
+        row = QTreeWidgetItem([path])
         tree.addTopLevelItem(row)
     return tree
 
 
-def _selected_winner(tree: QTreeWidget) -> ResolvedWinner | None:
+def _selected_winner(tree: QTreeWidget) -> ResolvedFile | None:
     item = tree.currentItem()
     if item is None:
         return None
     data = item.data(0, Qt.ItemDataRole.UserRole)
-    if isinstance(data, ResolvedWinner):
+    if isinstance(data, ResolvedFile):
         return data
     return None
 
 
-def _format_other_party(entry: ResolvedWinner) -> str:
-    # Kept-tree -> show all losers; Overwritten-tree -> show the single winner.
-    bucket = entry.bucket
-    is_overwritten_perspective = bucket in {
-        ConflictBucket.LOOSE_OVERWRITTEN_BY_LOOSE,
-        ConflictBucket.ARCHIVE_OVERWRITTEN_BY_LOOSE,
-        ConflictBucket.ARCHIVE_OVERWRITTEN_BY_ARCHIVE,
-    }
-    if is_overwritten_perspective:
-        return f"{entry.winner.owner_mod} [{_archive_tag(entry.winner)}]"
+def _format_other_party(entry: ResolvedFile, *, show_winner: bool) -> str:
+    if show_winner:
+        return f"{entry.winner.source_mod} [{_archive_tag(entry.winner)}]"
     # Kept perspective: list all losers.
     tags = ", ".join(
-        f"{loser.owner_mod} [{_archive_tag(loser)}]" for loser in entry.losers
+        f"{loser.source_mod} [{_archive_tag(loser)}]" for loser in entry.losers
     )
     return tags
 
 
-def _archive_tag(entry: FileEntry) -> str:
-    if entry.archive is None:
+def _archive_tag(entry) -> str:
+    if entry.archive_name is None:
         return "loose"
-    return f"{entry.archive.kind.value}:{entry.archive.name}"
+    return f"archive:{entry.archive_name}"
