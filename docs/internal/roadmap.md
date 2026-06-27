@@ -1806,3 +1806,44 @@ Real-world workflow round on BB84's `D:\Starfield MO2\` instance — a live 393-
   - 304 mod meta.ini files updated, sha256 of UTF-8 Chinese content verified via PowerShell explicit decoder.
   - SFSE upgrade: 4 files in game root, all sha256 match staging, old `sfse_1_15_222.dll` removed, backup intact at `D:\Starfield MO2\.backups\sfse-0.2.20_pre-0.2.21-update_2026-06-24_1804\`.
   - Fresh refresh: 172 Nexus mods refreshed, 0 API errors, hourly budget 1825/2500 remaining, daily 19825/20000 remaining.
+
+## 2026-06-27 Round Closeout: mo2-mcp conflict-preview + asset-engine substrate rebuild
+
+### Shipped (21 commits since `d05e209`)
+
+| Commit class | Commits | Summary |
+|---|---|---|
+| PR #21 closeout | `7da8203` | Backfill 4 missed source-tree `dist/` files from PR #18 (gitignore swallowed new files on first commit). |
+| KB | `c112b78`, `026826a` | 3 new core records: `mo2-mcp-meta-contract.v1`, `official-cc-as-vanilla-baseline.v1`, `patch-loads-before-master-heuristic.v1`. |
+| feat conflict-preview + log-apply | `0f24238`..`b59ad85` | Sidecar `assets.report_for_mod` RPC, broker `system.log_apply` Qt qInfo handler, TS shared helpers, 5 modlist tools wire preview + 10 T3 tools wire APPLY log. Single commit `3537127` recovered the gitignore-swallowed `conflict-preview.{js,d.ts}` + `log-apply.{js,d.ts}` after the runtime crashed with `ERR_MODULE_NOT_FOUND`. |
+| fix engine phantom conflicts | `6725a24`, `bb785d3` | Exclude `_separator` modlist entries from enabled_mods (real MO2 format is `+/- *_separator`, not `*` prefix); exclude mod-root `meta.ini` from VFS projection (USVFS does not overlay it). Both bugs were per-mod-walk phantom-positive sources. |
+| refactor substrate | `a0d7ed8`..`57ec4ae` | Replace per-mod enumeration with `VirtualDataTree` model: file_providers dict keyed by virtual path; mod is provider-attribution not enumeration axis; conflict_resolver runs over the unified tree. |
+| scope rollback | `b2f679c`, `47c75b8` | Engine BA2 reader supports only `{1,2,8}`; Starfield modset has 17 v3 archives that crash the reader. User direction: don't open BA2s at all; treat `.ba2`/`.bsa` at mod-root as projected loose files for file-to-file conflict; Plugin/Archive/attachments metadata remain for future re-expansion. |
+
+### What's now known
+
+- **MO2 modlist.txt separator convention**: real MO2 uses `+`/`-` prefix with `_separator` name suffix; `*` prefix never appears. The existing `profile.py` doc comment was wrong AND the test fixture used `*Separator_separator`, making the existing skip-separator test a false positive.
+- **MO2 mod-root meta.ini**: USVFS does NOT overlay it. Engine must mirror or every mod "conflicts" with every other mod on `meta.ini`.
+- **Per-mod-walk pattern is a phantom-conflict source**: both separator and meta.ini bugs were the same shape — engine treating a mod folder as the enumeration unit instead of as a VFS-projection source. First-principles fix: model the virtualized Data tree the game runtime sees; mod is attribution metadata.
+- **Cross-mod plugin↔BA2 attachment is real**: BB84's Starfield HD Overhaul = 1 ESM in mod folder A + 16 numbered BA2s in folders B-Q. Auto-attach matcher needs numbered-variant regex (`<base> - Textures\d+\.ba2`) AND must operate against a GLOBAL plugin+archive pool, not per-mod-folder.
+- **BA2 format coverage gap**: engine reader does v1/v2/v8 (header 24B + entry records + name table). Starfield v3 (DX10/LZ4) is the workhorse Starfield texture format; 17 of 202 enabled archives in BB84 profile are v3. Until reader supports v3, archive-member-level conflict resolution is offline.
+- **Source-tree `tools/mo2-mcp/dist/` is the OpenCode load path** (per memory rule 24). The plugin-tree mirror is for Claude Code / Codex marketplace. Both need to stay in sync.
+- **Force-add new dist files on first commit**: `tools/mo2-mcp/dist/` is gitignored; `git add tools/mo2-mcp/dist/` silently skips NEW files (modified-tracked files still get staged despite warning). Hit twice — rule 29 in `45-mo2-mcp-internals.md` codifies the detection helper.
+- **Worktree dist rebuild is mandatory before materialize**: `git worktree add` only checks out tracked files; gitignored dist starts with ~18 files instead of 154. Materializing without rebuild deletes ~136 files from plugin tree via robocopy /MIR. Hit and recovered once (commit `bb785d3`).
+
+### What later phases should do differently / open items
+
+- **BA2 v3 reader is the unlock**: ~50 lines of header parsing (no LZ4 needed for member-name listing because names are NOT compressed, only data is). Substrate already supports archive-member providers — only `enumerate_archive_member_paths` call site needs re-enabling in `virtual_data_tree.py`. Regression guard `test_archives_are_projected_as_loose_files_and_never_opened` uses invalid BA2 bytes as bait; would need to relax that single test.
+- **Sister tool `tools/bgs-archive` archive reader**: independent codebase. If engine ever extends to v3+, consider refactoring into shared library rather than duplicating.
+- **SArchiveList INI reader**: `archive_ini.py` module shipped + has tests, but no caller wires it into `world.py`'s `WorldCache._build` yet because archive-member enumeration is off. Plumbing exists; activation deferred with v3 reader work.
+- **Conflict-preview cross-mod attachment metadata exposure**: `tree.attachments` is populated and tested but not surfaced in any tool result today. Future "which BA2s belong to my ESM" query would consume it. No demand yet.
+
+### Test state (main `47c75b8`)
+
+- `tools/mo2-assets-engine`: 47 passed (was 41 at session start; +6 net for VirtualDataTree + archive-as-file regression guards).
+- `tools/mo2-mcp-sidecar`: 114 passed, unchanged.
+- `tools/mo2-mcp`: 585 passed / 19 skipped / 0 failed (incl smoke).
+- **Live verification on D:\Starfield MO2 BB84自用2** (374 mod profile, 174 enabled plugins):
+  - `mo2_toggle_mod` disable + re-enable on `starfieldcompendium-cc - Loose Files`: `conflicts_preview` returned `files_total:4, files_winning:2, files_unique:2, top_overrides:[{Undelayed Menu - Latest Version, 2}]`. Disable view symmetric: `top_affected:[{Undelayed Menu - Latest Version, 2}]`. Same 2 files referenced from opposite angles.
+  - MO2 `mo_interface.log` shows `[mo2-mcp] APPLY tool=... plan=... profile=BB84自用2 ...` lines via Qt qInfo, UTF-8 profile name intact.
+  - Net modlist state restored end-to-end; no orphan plan IDs, no broker hangs.
