@@ -24,6 +24,7 @@ import "./tools/mo2-backup-profile.js";
 import "./tools/mo2-toggle-mod.js";
 import "./tools/mo2-toggle-plugin.js";
 import "./tools/mo2-send-mod-to.js";
+import "./tools/mo2-send-plugin-to.js";
 import "./tools/mo2-rollback.js";
 import "./tools/mo2-restore-profile.js";
 import "./tools/mo2-install.js";

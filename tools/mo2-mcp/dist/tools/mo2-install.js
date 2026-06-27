@@ -25,6 +25,7 @@ import { randomUUID } from "node:crypto";
 import { registerTool } from "../tool-registry.js";
 import { routeToPlanApply } from "../plan-apply.js";
 import { atomicWriteText } from "../atomic.js";
+import { readProfile } from "../profile-reader.js";
 import { resolveModsDir, resolveProfileDir } from "../path-helpers.js";
 import { readMoIni, resolveGameName } from "../mo-ini.js";
 import { assertActiveProfile } from "../profile-guard.js";
@@ -34,6 +35,7 @@ import { detectFomod, hasFomodChoices } from "../fomod-helpers.js";
 import { FomodChoicesRequiredError } from "../fomod-required-error.js";
 import { gatherMo2FomodState } from "../mo2-state-for-fomod.js";
 import { pollPluginWarnings } from "../plugin-warnings.js";
+import { registerPluginsInPluginsTxt } from "../plugin-registration.js";
 // BUG-10 fix (2026-06-17): FOMOD page/group/option names + archive_path +
 // mod_name + plan_id + lease_token all gain .min(1). Empty strings in any of
 // these fall through to internal "<thing> not found" handler errors today;
@@ -48,7 +50,7 @@ const inputSchema = z.discriminatedUnion("mode", [
         archive_path: z.string().min(1),
         mod_name: z.string().min(1),
         profile: z.string().default("Default"),
-        target_priority: z.union([z.literal("top"), z.literal("bottom"), z.number().int()]).default("bottom"),
+        target_priority: z.union([z.literal("gui_top"), z.literal("gui_bottom"), z.number().int()]).default("gui_bottom"),
         fomod_choices: z.array(FomodChoiceSchema).optional(),
         nexus_mod_id: z.number().int().optional(),
         version: z.string().optional(),
@@ -56,6 +58,11 @@ const inputSchema = z.discriminatedUnion("mode", [
     }),
     z.object({ mode: z.literal("apply"), plan_id: z.string().min(1), lease_token: z.string().min(1) }),
 ]);
+const RESPONSE_META = {
+    priority_convention: "mobase_full_space_higher_wins",
+    modlist_file_order: "reverse_of_gui",
+    gui_direction_hint: "priority_0_at_gui_top_loses; priority_(N-1)_at_gui_bottom_wins",
+};
 async function _copyDirectoryContents(sourceDir, destDir) {
     await mkdir(destDir, { recursive: true });
     const entries = await readdir(sourceDir, { withFileTypes: true });
@@ -164,55 +171,52 @@ async function _flattenBgsArchive(stagingDir) {
     }
     return { flattened: true, from: root };
 }
-// BUG-14 BUG-E (issue #14): enumerate plugin files at the final mod root
-// and register them in the profile's plugins.txt. Without this, every
-// install completed "successfully" but the mod's plugins stayed inactive
-// — the agent had to do a separate enumeration + N×toggle_plugin calls
-// to actually activate them.
-//
-// Behavior matches MO2 GUI's "Install Mod from Archive": newly-installed
-// plugins land enabled (asterisk prefix in plugins.txt per FO4/SSE
-// convention). Existing entries (case-insensitive match) are preserved
-// — we never overwrite a disabled plugin's state.
-async function _registerPluginsInPluginsTxt(modRoot, pluginsTxtPath) {
-    let modEntries;
-    try {
-        modEntries = await readdir(modRoot, { withFileTypes: true });
-    }
-    catch {
-        return [];
-    }
-    const newPlugins = modEntries
-        .filter((e) => e.isFile() && _PLUGIN_EXTS.has(extname(e.name).toLowerCase()))
-        .map((e) => e.name)
-        .sort();
-    if (newPlugins.length === 0)
-        return [];
-    const existingTxt = await readFile(pluginsTxtPath, "utf8").catch(() => "");
-    const existingLower = new Set(existingTxt
-        .split(/\r?\n/)
-        .filter((line) => line.length > 0 && !line.startsWith("#"))
-        .map((line) => line.replace(/^\*/, "").trim().toLowerCase()));
-    const linesToAdd = [];
-    const registered = [];
-    for (const plugin of newPlugins) {
-        if (!existingLower.has(plugin.toLowerCase())) {
-            linesToAdd.push(`*${plugin}`);
-            registered.push(plugin);
-        }
-    }
-    if (linesToAdd.length === 0)
-        return [];
-    const sep = existingTxt.length === 0 || existingTxt.endsWith("\n") ? "" : "\n";
-    const newTxt = `${existingTxt}${sep}${linesToAdd.join("\n")}\n`;
-    await atomicWriteText(pluginsTxtPath, newTxt);
-    return registered;
-}
 // FOMOD detection + choices-shape helpers were extracted into
 // ../fomod-helpers.ts (2026-06-17 v1.2 Batch 4 Lane 4C) so mo2_reinstall_mod
 // can share the same contract with the sidecar instead of carrying a parallel
 // regex / shape that drifts. See fomod-helpers.ts for the not_a_fomod/info.xml
 // substring contract and the empty-array=no-choices semantics (BUG-19 fix).
+function _resolveTargetPriorityValue(targetPriority, maxPri) {
+    if (targetPriority === "gui_top")
+        return 0;
+    if (targetPriority === "gui_bottom" || targetPriority == null)
+        return maxPri;
+    if (typeof targetPriority === "number" && Number.isInteger(targetPriority)) {
+        return Math.max(0, Math.min(targetPriority, maxPri));
+    }
+    throw new Error(`invalid_target_priority: ${String(targetPriority)}`);
+}
+function _rewriteModlistAtPriority(existing, modName, targetPriority) {
+    const lines = existing
+        .split(/\r?\n/)
+        .filter((line) => line.length > 0)
+        .filter((line) => line.replace(/^[+\-*]/, "") !== modName);
+    const insertIdx = Math.max(0, Math.min(lines.length - targetPriority, lines.length));
+    lines.splice(insertIdx, 0, `+${modName}`);
+    return `${lines.join("\n")}\n`;
+}
+async function _readFinalPriority(ctx, profile, modName, fallback) {
+    const bound = requireBoundContext(ctx);
+    if (bound.pipeClient) {
+        try {
+            const resp = await bound.pipeClient.call("mods.list", {});
+            if (resp.ok && resp.result && typeof resp.result === "object") {
+                const mods = resp.result.mods ?? [];
+                const found = mods.find((mod) => mod.name === modName);
+                if (typeof found?.priority === "number")
+                    return found.priority;
+            }
+        }
+        catch {
+            // Fall back to disk read below.
+        }
+    }
+    const p = await readProfile(join(bound.config.mo2Root, "profiles", profile));
+    return p.mods.find((mod) => mod.name === modName)?.priority ?? fallback;
+}
+function _requiresBrokerPriorityPlacement(targetPriority) {
+    return typeof targetPriority === "number" || targetPriority === "gui_top";
+}
 const handler = {
     toolName: "mo2_install",
     // BUG-14 BUG-F (issue #14): defer lease lock to apply time so parallel
@@ -365,24 +369,32 @@ const handler = {
             "validated=true",
         ].join("\n");
         await atomicWriteText(join(finalDestPath, "meta.ini"), meta + "\n");
-        // 4. Register in modlist.txt.
+        // 4. Register in modlist.txt with GUI-aligned priority semantics.
         const profileDir = resolveProfileDir(ctx, profile);
         const modlistPath = join(profileDir, "modlist.txt");
         const existing = await readFile(modlistPath, "utf8").catch(() => "");
-        const newLine = `+${modName}`;
-        const lines = existing.length === 0 ? [] : existing.split(/\r?\n/).filter((line) => line.length > 0);
-        if (!lines.includes(newLine)) {
-            const updated = args.target_priority === "top"
-                ? `${newLine}\n${existing}`
-                : `${existing}${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}${newLine}\n`;
+        const existingLines = existing.split(/\r?\n/).filter((line) => line.length > 0);
+        const existingWithoutMod = existingLines.filter((line) => line.replace(/^[+\-*]/, "") !== modName);
+        const maxPriAfterInstall = existingWithoutMod.length;
+        const targetPriority = _resolveTargetPriorityValue(args.target_priority, maxPriAfterInstall);
+        const updated = _rewriteModlistAtPriority(existing, modName, targetPriority);
+        if (updated !== existing) {
             await atomicWriteText(modlistPath, updated);
+        }
+        if (bound.pipeClient && _requiresBrokerPriorityPlacement(args.target_priority)) {
+            const resp = await bound.pipeClient.call("mods.set_priority", {
+                name: modName,
+                priority: targetPriority,
+            });
+            if (!resp.ok)
+                throw new Error(resp.error?.message ?? "mods.set_priority failed");
         }
         // 5. BUG-14 BUG-E: register fresh-install plugins in plugins.txt.
         // Before this fix, every mo2_install completed "successfully" but
         // the mod's plugins stayed inactive — the agent had to do a separate
         // enumeration + N×toggle_plugin calls to actually activate them.
         const pluginsTxtPath = join(profileDir, "plugins.txt");
-        const pluginsRegistered = await _registerPluginsInPluginsTxt(finalDestPath, pluginsTxtPath);
+        const pluginsRegistered = await registerPluginsInPluginsTxt(finalDestPath, pluginsTxtPath);
         // 6. If live broker is up, ask MO2 to re-scan so the freshly-written
         // plugins.txt rows become active in MO2's in-memory plugin list.
         // Best-effort: ignore failures (the file write already took, and
@@ -397,12 +409,15 @@ const handler = {
         }
         // 7. Invalidate sidecar World cache so subsequent asset reads see the new mod.
         await invalidateWorld(ctx, [profile]);
+        const finalPriority = await _readFinalPriority(ctx, profile, modName, targetPriority);
         return {
             mod_name: modName,
             dest_path: finalDestPath,
             fomod_used: useFomodChoices,
             installation_file: basename(archivePath),
             plugins_registered: pluginsRegistered,
+            final_priority: finalPriority,
+            _meta: RESPONSE_META,
             pluginWarnings: bound.pipeClient ? await pollPluginWarnings(bound.pipeClient) : undefined,
         };
     },
