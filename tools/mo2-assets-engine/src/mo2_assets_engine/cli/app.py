@@ -1,8 +1,8 @@
 """mo2-assets CLI app.
 
 Subcommands:
-    summary             mod-vs-mod overview (matches MO2 left-pane shape)
-    mod-conflicts NAME  per-mod 3-section report (matches MO2 dialog)
+    summary             mod attribution overview
+    mod-conflicts NAME  attribution-filtered conflict report
     resolve-file PATH   winner + losers for one VFS path
     archive-inventory NAME  every BA2/BSA member contributed by a mod
 """
@@ -16,17 +16,16 @@ from typing import Annotated, Any
 
 import typer
 
-from ..archive_order import Game, discover_archives_for_plugins
-from ..conflict_resolver import ConflictResolver, resolve_all_winners
-from ..mod_enumerator import enumerate_mod_files
+from ..archive_order import Game
+from ..conflict_resolver import resolve_tree
+from ..mod_enumerator import enumerate_archive_member_paths
 from ..profile import read_profile
-from ..types import FileEntry, Mod
+from ..types import Mod
+from ..virtual_data_tree import SourceType, VirtualDataTree, build_virtual_data_tree
 from .output import (
-    archive_entry_to_dict,
-    conflict_report_to_dict,
     mod_summary_to_dict,
     render_summary_human,
-    resolved_winner_to_dict,
+    resolved_file_to_dict,
 )
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -54,26 +53,39 @@ def _resolve_mods_root(profile: Path, mods: Path | None) -> Path:
 
 def _build_world(
     profile_dir: Path, mods_root: Path, game: Game
-) -> tuple[list[Mod], dict[str, list[FileEntry]]]:
+) -> VirtualDataTree:
     profile = read_profile(profile_dir=profile_dir, mods_root=mods_root)
-    candidate_archives: list[str] = []
-    for mod in profile.enabled_mods:
-        if mod.root.exists():
-            candidate_archives.extend(
-                child.name
-                for child in mod.root.iterdir()
-                if child.is_file() and child.suffix.lower() in (".bsa", ".ba2")
-            )
-    archive_order = discover_archives_for_plugins(
-        plugins=profile.enabled_plugins,
-        candidate_archives=candidate_archives,
-        game=game,
-    )
-    entries_by_mod: dict[str, list[FileEntry]] = {
-        mod.name: enumerate_mod_files(mod=mod, archive_order=archive_order)
-        for mod in profile.enabled_mods
+    return build_virtual_data_tree(profile=profile, game=game)
+
+
+def _providers_for_mod(tree: VirtualDataTree, mod_name: str) -> dict[str, list[Any]]:
+    return {
+        path: [provider for provider in providers if provider.source_mod == mod_name]
+        for path, providers in tree.file_providers.items()
+        if any(provider.source_mod == mod_name for provider in providers)
     }
-    return profile.enabled_mods, entries_by_mod
+
+
+def _report_for_mod(tree: VirtualDataTree, mod_name: str) -> dict[str, Any]:
+    resolved = resolve_tree(tree)
+    paths = sorted(_providers_for_mod(tree, mod_name))
+    kept: list[dict[str, Any]] = []
+    overwritten: list[dict[str, Any]] = []
+    no_conflict: list[str] = []
+    for path in paths:
+        item = resolved[path]
+        if not item.is_conflict:
+            no_conflict.append(path)
+        elif item.winner.source_mod == mod_name:
+            kept.append(resolved_file_to_dict(item))
+        else:
+            overwritten.append(resolved_file_to_dict(item))
+    return {
+        "mod": mod_name,
+        "kept": kept,
+        "overwritten": overwritten,
+        "no_conflict": no_conflict,
+    }
 
 
 @app.command()
@@ -85,18 +97,15 @@ def summary(
 ) -> None:
     """Mod-vs-mod overview."""
     mods_root = _resolve_mods_root(profile, mods)
-    enabled_mods, entries_by_mod = _build_world(profile, mods_root, game)
-    winners = resolve_all_winners(mods=enabled_mods, entries_by_mod=entries_by_mod)
+    tree = _build_world(profile, mods_root, game)
+    resolved = resolve_tree(tree)
 
     rows: list[dict[str, Any]] = []
-    for mod in enabled_mods:
-        entries = entries_by_mod.get(mod.name, [])
-        conflicts = sum(
-            1
-            for e in entries
-            if winners[e.relative_path].bucket.value != "no-conflict"
-        )
-        rows.append(mod_summary_to_dict(mod, total_files=len(entries), total_conflicts=conflicts))
+    mods_by_name: dict[str, Mod] = {mod.name: mod for mod in read_profile(profile_dir=profile, mods_root=mods_root).enabled_mods}
+    for mod_name, mod in mods_by_name.items():
+        paths = _providers_for_mod(tree, mod_name)
+        conflicts = sum(1 for path in paths if resolved[path].is_conflict)
+        rows.append(mod_summary_to_dict(mod, total_files=len(paths), total_conflicts=conflicts))
 
     if output_format is OutputFormat.JSON:
         typer.echo(json.dumps({"mods": rows}, indent=2))
@@ -114,10 +123,8 @@ def mod_conflicts(
 ) -> None:
     """3-section conflict report for one mod."""
     mods_root = _resolve_mods_root(profile, mods)
-    enabled_mods, entries_by_mod = _build_world(profile, mods_root, game)
-    resolver = ConflictResolver(mods=enabled_mods, entries_by_mod=entries_by_mod)
-    report = resolver.report_for_mod(mod_name)
-    payload = conflict_report_to_dict(report)
+    tree = _build_world(profile, mods_root, game)
+    payload = _report_for_mod(tree, mod_name)
 
     if output_format is OutputFormat.JSON:
         typer.echo(json.dumps(payload, indent=2))
@@ -126,11 +133,11 @@ def mod_conflicts(
         typer.echo(f"kept ({len(payload['kept'])}):")
         for k in payload["kept"]:
             typer.echo(
-                f"  + {k['path']}  (vs {', '.join(loser['owner_mod'] for loser in k['losers'])})"
+                f"  + {k['path']}  (vs {', '.join(loser['mod'] for loser in k['losers'])})"
             )
         typer.echo(f"overwritten ({len(payload['overwritten'])}):")
         for o in payload["overwritten"]:
-            typer.echo(f"  - {o['path']}  (by {o['winner']['owner_mod']})")
+            typer.echo(f"  - {o['path']}  (by {o['winner']['mod']})")
         typer.echo(f"no_conflict ({len(payload['no_conflict'])}):")
         for path in payload["no_conflict"]:
             typer.echo(f"    {path}")
@@ -146,8 +153,8 @@ def resolve_file(
 ) -> None:
     """Resolve the winner for a single VFS path."""
     mods_root = _resolve_mods_root(profile, mods)
-    enabled_mods, entries_by_mod = _build_world(profile, mods_root, game)
-    winners = resolve_all_winners(mods=enabled_mods, entries_by_mod=entries_by_mod)
+    tree = _build_world(profile, mods_root, game)
+    winners = resolve_tree(tree)
     normalized = path.replace("\\", "/").lower()
     winner = winners.get(normalized)
     if winner is None:
@@ -156,13 +163,13 @@ def resolve_file(
         else:
             typer.echo(f"{normalized}: not contributed by any enabled mod")
         return
-    payload = resolved_winner_to_dict(winner)
+    payload = resolved_file_to_dict(winner)
     if output_format is OutputFormat.JSON:
         typer.echo(json.dumps(payload, indent=2))
     else:
-        typer.echo(f"{payload['path']} -> {payload['winner']['owner_mod']} [{payload['bucket']}]")
+        typer.echo(f"{payload['path']} -> {payload['winner']['mod']}")
         for loser in payload["losers"]:
-            typer.echo(f"  loses: {loser['owner_mod']}")
+            typer.echo(f"  loses: {loser['mod']}")
 
 
 @app.command("archive-inventory")
@@ -175,17 +182,22 @@ def archive_inventory(
 ) -> None:
     """List every BA2/BSA member a mod contributes."""
     mods_root = _resolve_mods_root(profile, mods)
-    _enabled_mods, entries_by_mod = _build_world(profile, mods_root, game)
+    tree = _build_world(profile, mods_root, game)
+    loaded_archive_names = {
+        provider.archive_name
+        for providers in tree.file_providers.values()
+        for provider in providers
+        if provider.source_type is SourceType.ARCHIVE and provider.archive_name is not None
+    }
     archives: dict[str, dict[str, Any]] = {}
-    for entry in entries_by_mod.get(mod_name, []):
-        if entry.archive is None:
+    for archive in tree.archives:
+        if archive.source_mod != mod_name or archive.name not in loaded_archive_names:
             continue
-        key = entry.archive.name
-        archives.setdefault(
-            key,
-            {**archive_entry_to_dict(entry.archive), "members": []},
-        )
-        archives[key]["members"].append(entry.relative_path)
+        archive_path = mods_root / archive.source_mod / archive.name
+        archives[archive.name] = {
+            "name": archive.name,
+            "members": enumerate_archive_member_paths(archive_path),
+        }
 
     archive_rows: list[dict[str, Any]] = list(archives.values())
     payload: dict[str, Any] = {"mod": mod_name, "archives": archive_rows}
@@ -196,7 +208,7 @@ def archive_inventory(
             typer.echo(f"{mod_name}: no archives")
             return
         for arc in payload["archives"]:
-            typer.echo(f"-- {arc['name']} [{arc['kind']}] load_order={arc['load_order']} --")
+            typer.echo(f"-- {arc['name']} --")
             for member in arc["members"]:
                 typer.echo(f"  {member}")
 

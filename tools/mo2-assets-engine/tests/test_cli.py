@@ -102,9 +102,9 @@ def test_resolve_file_returns_winner_and_losers(
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert data["path"] == "textures/shared.dds"
-    assert data["winner"]["owner_mod"] == "ModA"
-    assert any(loser["owner_mod"] == "ModB" for loser in data["losers"])
-    assert data["bucket"] == "loose-overwrites-loose"
+    assert data["winner"]["mod"] == "ModA"
+    assert any(loser["mod"] == "ModB" for loser in data["losers"])
+    assert data["is_conflict"] is True
 
 
 def test_archive_inventory_empty_for_no_archives(
