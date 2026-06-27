@@ -4,6 +4,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from mo2_assets_engine.virtual_data_tree import Provider, SourceType, VirtualDataTree
 
 from mo2_mcp_sidecar import install
 from mo2_mcp_sidecar.envelope import _METHODS
@@ -22,11 +23,21 @@ def _world_with_mods(mods_data):
     """mods_data: list of (name, files: list[str])."""
     world = MagicMock()
     world.mods = []
+    file_providers = {}
     for name, files in mods_data:
         m = MagicMock()
         m.name = name
-        m.files = files
         world.mods.append(m)
+        for path in files:
+            normalized = path.replace("\\", "/").lower()
+            file_providers.setdefault(normalized, []).append(
+                Provider(
+                    source_mod=name,
+                    source_type=SourceType.LOOSE,
+                    mod_priority=0,
+                )
+            )
+    world.tree = VirtualDataTree(file_providers=file_providers, game="fallout4")
     return world
 
 
