@@ -604,6 +604,191 @@ pwsh scripts\install-xse-update.ps1 -GameRoot <path> -XseMod sfse|skse|f4se|nvse
 
 See KB record `engine.xse-update-workflow.v1`.
 
+## xEdit binary upgrade workflow — sister of xSE upgrade, but tools-tree-local
+
+Use this when the user wants to verify or upgrade the xEdit installation
+without launching the MO2 GUI by hand. Sister flow to xSE upgrade but with
+different mechanics: xEdit lives in `<MO2_Root>/tools/xEdit/` (NOT game root,
+NOT under STOCK001 protection), and its runtime carries a versioned binary
+cache that must be invalidated on every binary swap or the daemon launches
+against a stale cache and either crashes or returns wrong data.
+
+### When to check
+
+- The user explicitly asks to verify / upgrade xEdit.
+- A scheduled environment health pass is running.
+- The xEdit MCP daemon fails to launch, crashes mid-session, or returns
+  unexpected protocol errors against a load order that worked before.
+- New automation features are needed (multi-pattern filters, reverse
+  navigation, WRLD parent coords, etc. — anything past the contract version
+  the deployed binary supports).
+
+### Stale detection — SHA-256 hash comparison
+
+`Get-Item.VersionInfo.FileVersion` is unreliable for xEdit because the
+contrib fork ships multiple builds under the same `4.1.5.0` / `4.1.6` label.
+Use SHA-256 against the reference source:
+
+```powershell
+$mo2Bin     = "$MO2_Root\tools\xEdit\SF1Edit64.exe"
+$refSource  = "D:\TES5Edit-contrib\Build\xEdit64.exe"   # OR the path returned by fetch-xedit-release.ps1
+$mo2Hash    = (Get-FileHash -LiteralPath $mo2Bin -Algorithm SHA256).Hash
+$refHash    = (Get-FileHash -LiteralPath $refSource -Algorithm SHA256).Hash
+if ($mo2Hash -ne $refHash) {
+  Write-Warning "xEdit stale: MO2 has $($mo2Hash.Substring(0,16))... reference has $($refHash.Substring(0,16))..."
+}
+```
+
+Also surface mtimes for human readability — a 10-day gap with non-matching
+hashes is a real version drift, not a build metadata glitch.
+
+For the `xEditHookBridge.dll`: compare against the plugin-tree source
+`<plugin>\tools\xedit-hook-bridge\dist\xEditHookBridge.dll`. If hashes match,
+no swap needed. The HookBridge is owned by THIS plugin and follows the
+plugin's release cadence, not the xEdit binary's.
+
+### Reference source — contrib build vs release channel
+
+Two reference sources exist:
+
+1. **Local dev build at `D:\TES5Edit-contrib\Build\`** — the contrib fork's
+   continuously-rebuilt artifacts. Captures unreleased features (contract
+   0.18 → 0.19 → 0.20 additions, WRLD parent, reverse navigation, etc.) and
+   bug fixes. Use this when the user is developing against the latest
+   automation surface or needs features not yet in a tagged release.
+
+2. **GitHub release artifacts via `fetch-xedit-release.ps1`** — the
+   `BB-84C/TES5Edit` tagged-release stream. Stable, reproducible, ships
+   with a manifest. Use this for end-user installs, reproducible modpack
+   build chains, or any scenario where the user is not the binary's author.
+
+For BB84's developer workstation: contrib build is canonical because BB84
+authors the contrib fork. For end-user installs: release channel is
+canonical. The skill should ask which source the user wants when ambiguous.
+
+### Upgrade workflow
+
+```powershell
+$ts = Get-Date -Format 'yyyyMMdd-HHmmss'
+
+# 1. Backup current tools/xEdit/ (full mirror, mtimes preserved)
+robocopy "$MO2_Root\tools\xEdit" "$MO2_Root\tools\xEdit.backup-$ts" /MIR /NFL /NDL /NJH /NJS
+
+# 2. Swap binaries (rename to game-specific filename so xEdit auto-detects mode)
+Copy-Item "$refSource\xEdit64.exe" "$MO2_Root\tools\xEdit\SF1Edit64.exe" -Force  # Starfield
+Copy-Item "$refSource\xEdit64.exe" "$MO2_Root\tools\xEdit\xEdit64.exe"   -Force
+Copy-Item "$refSource\xEdit.exe"   "$MO2_Root\tools\xEdit\xEdit.exe"     -Force
+
+# (For other games: FO4Edit64.exe, SSEEdit64.exe, etc. — the xEdit binary
+#  detects game mode from its filename when launched directly.)
+
+# 3. (Optional) Swap HookBridge.dll if hash differs from plugin-tree source
+& "<plugin>\scripts\install-xedit-hook-bridge.ps1" -MO2Root "$MO2_Root"
+
+# 4. INVALIDATE CACHE — mandatory after any binary swap
+$cacheDir = "$MO2_Root\overwrite\<Game>Edit Cache"  # e.g. SF1Edit Cache
+Move-Item -LiteralPath $cacheDir "$MO2_Root\overwrite\<Game>Edit Cache.stale-$ts" -ErrorAction SilentlyContinue
+```
+
+### Cache lifecycle — REQUIRED reading before launch
+
+xEdit's binary cache lives at `<MO2_Root>/overwrite/<Game>Edit Cache/`
+(e.g. `SF1Edit Cache/`, `FO4Edit Cache/`, `SSEEdit Cache/`). Files are
+named `<load-order-hash>_<plugin>_<plugin-hash>_g<cp>_t<cp>_l<cp>_<lang>.refcache`.
+
+**The cache is binary-version-bound.** A binary upgrade invalidates every
+cache file because:
+
+- xEdit's internal record-parsing logic may have changed (new contract
+  features, fixes to malformed-data tolerance, etc.).
+- The cache format itself may have evolved.
+- Stale caches produce subtle wrong-answer bugs that look like xEdit
+  protocol errors but are actually parser drift.
+
+ALWAYS move the cache dir aside (don't delete — it's the safety net) before
+the first launch after a binary swap. Pattern:
+`overwrite/<Game>Edit Cache.stale-<timestamp>/`.
+
+The cache will be rebuilt automatically on first launch. Once stable and
+verified, the `.stale-*` backup can be removed in a future cleanup pass.
+
+### First-launch timing (cold cache)
+
+Cache-cold launch on a 175-plugin Starfield profile takes **9-10 minutes**.
+This is real-time wall clock for xEdit to:
+
+1. Parse every plugin in the load order.
+2. Hash each plugin's records.
+3. Write the per-plugin `.refcache` file.
+
+The current xedit-mcp `xedit-client.ps1` has a **240-second timeout** for
+daemon readiness. **First-launch on a real-world load order will exceed
+this timeout and fail.**
+
+Workaround options:
+
+1. **Build cache via manual GUI launch first** (preferred for current
+   tooling): run xEdit through MO2's normal launch path (either via
+   `Mo2Mo2RunTool_tool` with the configured customExecutable, or have the
+   user click the MO2 button). Wait until xEdit's window finishes loading
+   (status bar shows "Background Loader: finished" or similar). Close
+   xEdit. Then `xedit_start` will launch in <3 min wall-clock against the
+   warm cache.
+2. **Bump the timeout in xedit-client.ps1** if scripting around step 1 is
+   undesirable. The relevant constant is documented in the xedit-mcp
+   broker source.
+
+### Polling discipline during cold-cache launch
+
+`xedit_status({})` sends a lightweight read against the daemon's state file,
+but the daemon's response handler is on the same Pascal thread that's
+parsing the load order. **Aggressive polling during the cold-cache build
+can stall or crash xEdit's parser.** Empirically observed on a 175-plugin
+Starfield profile on 2026-06-27: 30-second poll cadence during cold-cache
+build correlated with a parse hang requiring manual kill.
+
+Polling discipline:
+
+- During cold-cache build (first launch after binary swap): wait at least
+  60 seconds between polls. Better: don't poll at all until 8+ minutes have
+  elapsed, then check once.
+- During cache-warm launch (subsequent launches): 30-60 second poll cadence
+  is fine. Total launch time ~3 minutes.
+- After `status: "ready"`: domain tools (`xedit_session`, `xedit_health`,
+  `xedit_call`) can be called freely.
+
+### Verification after launch
+
+```text
+xedit_health({})       -> { responsive: true, pingEnvelope: { ok: true } }
+xedit_session({})      -> { gameMode: "Starfield", contractVersion: "0.20",
+                            loadOrderSize: N, consentEnabled: false (read-only)
+                                                or true (mutations allowed) }
+xedit_dirty({})        -> { dirty: false, unsavedChangeCount: 0 }
+```
+
+Check `contractVersion` against the contract level the new binary should
+have shipped. If contractVersion is lower than expected, the binary didn't
+swap correctly OR the daemon picked up the wrong binary path.
+
+### Clean shutdown — cache preserved
+
+`xedit_stop({})` on a clean dirty state preserves the cache for the next
+launch. Subsequent `xedit_start({})` will hit the warm cache and complete
+in ~3 minutes. Do not delete the cache dir between sessions unless a
+binary upgrade is happening.
+
+### See also
+
+- KB record `engine.xedit-binary-cache-lifecycle.v1` for the full
+  binary-cache binding mechanism.
+- KB record `engine.xedit-stale-detection-via-hash.v1` for the SHA-256
+  comparison method against reference sources.
+- KB record `tooling.xedit-contrib-build-vs-release-channel.v1` for the
+  source-selection strategy.
+- KB record `debugging.xedit-cold-cache-launch-timeout-and-polling.v1`
+  for the 240s timeout + polling-discipline gotchas.
+
 ## meta.ini `comments=` vs `notes=` as visibility design
 
 MO2 has two note-shaped fields because it has two different reading modes:
