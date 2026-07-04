@@ -1,5 +1,5 @@
 {
-  "builtAt": "2026-07-04T18:06:32.322Z",
+  "builtAt": "2026-07-04T20:44:34.679Z",
   "displayName": "BGS Modding Core Knowledge",
   "domains": [
     "archive-precedence",
@@ -40,8 +40,8 @@
   "recordCount": 171,
   "schemaVersion": 1,
   "sha256": {
-    "kb.sqlite": "387a787fe6b1a3c1378405557655df2da6f3f75b8c10137dab752f4d4f4ee98b"
+    "kb.sqlite": "0b1d0827965a6ef7bf264459f4563cefa4ef140b7af21f2f327eee3d6a634149"
   },
-  "sourceCommit": "b9fa7f5533d6adcd5a135249036272043dba7dd7",
+  "sourceCommit": "fcc069d42e27a4ff66726f85fcb2be43155ceafb",
   "version": "2026.06.23"
 }
