@@ -128,6 +128,27 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
 
+## 2026-07-06 — KB release kb-2026.07.06 cut (core → RedPill record) + issues #10/#22/#23/#24 shipped
+
+**Delivered on `main` (11 fix commits + 1 KB release commit, `da2f800 → 9094ac4`):** four GitHub issues closed, KB core pack bumped, KB release published.
+
+- **#10** — `.opencode/plugins/bgs-modding-superpowers.js` `resolveMcpEntry` — layout-aware (dev checkout / git-spec clone / portable-as-root) with skip-and-log on unresolvable entries. Fixes the "MCP Connection closed on git-spec install" report.
+- **#22** — mo2 broker `plugins.set_priority` silent no-op race (200 ms `DelayedFileWriter` vs `organizer.refresh` rescan). Broker drops the racy refresh + verifies readback + returns structured `priority_not_applied` on MO2 refusal. TS `mo2_send_plugin_to` honestly echoes broker-verified `actual_priority`, surfaces broker error code via `BrokerEnrichedError`, adds resilient `disk_flush_confirmed` polling that never fails the call. Live E2E verified on `D:\Starfield MO2` against `BB84 Game Tweak.esm`: 187→100→187 round-trip, IPluginList readback matches, plugins.txt disk-flushed by DelayedFileWriter, plugins.txt SHA256 matches pre-E2E snapshot. Memory rules 30–33 in `.opencode/memory/45-mo2-mcp-internals.md`.
+- **#23** — (a) `xedit_find_records_by_pattern` r7 contract 0.21 pagination (`offset` / `nextOffset` / `drainAll` with 20-page / 2000-match hard cap). `limit > 100` rejected client-side. `capabilities-digest.contractVersionExpected` bumped to `"0.21"`. (b) Starfield RedPill save-unlock trio (`-ItJustWorksTM -ThisIsFine -GiveMeTheRedPill`) default-on in `tools/mo2-vfs-launcher/lib/xedit-client.launch.ps1` with `starfieldRedPill: false` opt-out threaded TS → PS1. Skill doc + KB record `xedit.starfield-redpill-save-unlock.v1`. Live PS1 option-map probe verified all three cases (Starfield default → activate, Starfield opt-out → deactivate, Fallout4 → correctly ignored).
+- **#24** — `mo2_install` fire-and-forget refresh race (follow-up to #22). New broker handler `plugins.register_from_mod(mod_name)` uses `IPluginList.onRefreshed` (fires AFTER `PluginList::refresh` completes with fully re-materialized state) — NOT `IOrganizer.onNextRefresh` (fires too early, before `refreshLists()`; would see stale `pluginList()`; documented as trap in memory rule 34). One-shot guard flag + threading.Event cross-thread completion pattern. Auto-retry once when settlement check finds the plugin absent (in-flight external refresh raced our plugins.txt append). TS `mo2_install` prefers broker method; `method_not_found` → `registration_mode: "ts_fallback"` (rule 23 stale-broker compat); other broker errors surface via `BrokerEnrichedError`. Live E2E on `D:\Starfield MO2` against `BB84 ToolBox` mod: `plugins_added: []`, `refresh_settled: true`, correct state readback (priority=187, state=1 INACTIVE, is_master=true).
+
+**KB release `kb-2026.07.06` published:**
+
+- Core pack bumped `2026.07.05 → 2026.07.06` (186 records; adds `xedit.starfield-redpill-save-unlock.v1`).
+- Other packs unchanged (skyrim/fallout4/fallout3-fnv/starfield/l10n-starfield-zhhans at their prior versions).
+- `dist/kb-release/manifest-index.json` staged, `gh release create kb-2026.07.06` published, vendor clone at `D:\Starfield MO2\.opencode\vendor\bgs-modding-superpowers` pulled to `9094ac4`.
+
+**Known residuals (documented, not blocking):**
+
+- `mo2_reinstall_mod` still uses the old TS `registerPluginsInPluginsTxt` + fire-and-forget refresh path. Same race family as #22/#24. Track separately if reinstall-then-immediate-priority-move surfaces in practice; mechanical port of the #24 fix pattern.
+- Persistent `IPluginList.onRefreshed` callbacks accumulate one per install per MO2 session (boost::signals2, no Python-visible disconnect). Trivial memory leak (~few KB per closure). Blocked on upstream mobase `disconnect` API — worth filing.
+- Externally-triggered `organizer.refresh` within ~200 ms of a plugin move can still race the DelayedFileWriter and revert on-disk state. Unavoidable without an upstream `IPluginList::save()` / `writeImmediately` API.
+
 ## 2026-06-23 — 思想论 judgment layer batch2 built (pushed branch, pending merge)
 
 **Delivered on feature branch `feat/sixiang-judgment-layer-batch2` (pushed, pending final user merge decision):** 4 new standalone judgment skills + 5 injected judgment sections + 3 new core KB records, all built on top of the flagship `evaluating-bgs-mods` pattern and reviewed/fixed in one batch.
