@@ -277,6 +277,19 @@ def test_plugins_set_priority_plugin_not_found(monkeypatch):
     organizer.refresh.assert_not_called()
 
 
+def test_plugins_set_priority_rejects_bool_priority(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    result = bridge._handle_plugins_set_priority(
+        MagicMock(),
+        MagicMock(),
+        {"name": "A.esp", "priority": True},
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "invalid_params"
+
+
 def test_plugins_set_load_order_success(monkeypatch):
     bridge = _load_bridge(monkeypatch)
 

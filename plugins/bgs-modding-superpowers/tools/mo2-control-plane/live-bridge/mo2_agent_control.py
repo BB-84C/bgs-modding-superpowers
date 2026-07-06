@@ -1563,7 +1563,7 @@ def _handle_plugins_set_priority(organizer, pump, payload):
             "result": None,
             "error": {"code": ErrorCode.INVALID_PARAMS, "message": "name: str"},
         }
-    if not isinstance(priority, int):
+    if not isinstance(priority, int) or isinstance(priority, bool):
         return {
             "ok": False,
             "result": None,

@@ -33,6 +33,7 @@ import { resolveProfileDir } from "../path-helpers.js";
 import { assertActiveProfile } from "../profile-guard.js";
 import { requireBoundContext } from "../binding.js";
 import { logApplyEvent } from "../log-apply.js";
+import { BrokerEnrichedError } from "../broker-error.js";
 const ModeSchema = z.enum([
     "gui_top",
     "gui_bottom",
@@ -204,14 +205,24 @@ async function _confirmPluginsTxtFlush(pluginsPath, beforeText, args, timeoutMs 
     const anchor = args.anchor;
     const deadline = Date.now() + timeoutMs;
     while (true) {
-        const current = await readFile(pluginsPath, "utf8");
-        const relative = _relativeOrderSatisfied(current, pluginName, targetMode, anchor);
-        if (relative === true)
-            return true;
-        if (relative === null && current !== beforeText)
-            return true;
+        try {
+            const current = await readFile(pluginsPath, "utf8");
+            const relative = _relativeOrderSatisfied(current, pluginName, targetMode, anchor);
+            if (relative === true)
+                return true;
+            if (relative === null && current !== beforeText)
+                return true;
+            if (Date.now() >= deadline)
+                return relative === null ? null : false;
+        }
+        catch {
+            // MO2's delayed writer may briefly replace or lock plugins.txt. Treat
+            // transient read failures as "not confirmed yet"; the caller degrades
+            // timeout/unexpected failures to disk_flush_confirmed:null rather than
+            // failing an already-verified in-memory broker move.
+        }
         if (Date.now() >= deadline)
-            return relative === null ? null : false;
+            return targetMode === "raw_priority" ? null : false;
         await _sleep(intervalMs);
     }
 }
@@ -255,15 +266,28 @@ const handler = {
             if (!resp.ok) {
                 const code = resp.error?.code ?? "unknown";
                 const message = resp.error?.message ?? "plugins.set_priority failed";
-                throw new Error(`plugins.set_priority failed [${code}]: ${message}`);
+                const details = resp.error?.details && typeof resp.error.details === "object"
+                    ? { ...resp.error.details }
+                    : { broker_error_details: resp.error?.details };
+                throw new BrokerEnrichedError({
+                    code,
+                    message: `plugins.set_priority failed [${code}]: ${message}`,
+                    details: { method: "plugins.set_priority", ...details },
+                });
             }
             const brokerResult = resp.result ?? {};
             const actualPriority = typeof brokerResult.actual_priority === "number"
                 ? brokerResult.actual_priority
                 : targetPri;
-            const diskFlushConfirmed = brokerResult.noop === true
-                ? true
-                : await _confirmPluginsTxtFlush(pluginsPath, beforePluginsTxt, args);
+            let diskFlushConfirmed;
+            try {
+                diskFlushConfirmed = brokerResult.noop === true
+                    ? true
+                    : await _confirmPluginsTxtFlush(pluginsPath, beforePluginsTxt, args);
+            }
+            catch {
+                diskFlushConfirmed = null;
+            }
             await logApplyEvent(handler.toolName, `moved plugin "${args.name}" mode=${args.target_mode} anchor="${args.anchor ?? "none"}"`, bound, plan.planId, profile);
             return {
                 ...brokerResult,

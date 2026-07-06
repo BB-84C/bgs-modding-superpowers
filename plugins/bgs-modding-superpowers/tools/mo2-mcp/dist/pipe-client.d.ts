@@ -4,6 +4,7 @@ export interface BrokerResponse {
     error?: {
         code: string;
         message: string;
+        details?: unknown;
     };
 }
 export declare class PipeClient {

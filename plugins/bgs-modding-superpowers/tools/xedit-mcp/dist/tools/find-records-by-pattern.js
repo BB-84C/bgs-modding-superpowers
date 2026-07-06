@@ -160,7 +160,8 @@ export function makeFindRecordsByPatternHandler(opts) {
         const drainAll = parsedArgs.drainAll === true;
         if (drainAll) {
             const pageLimit = parsedArgs.limit ?? 100;
-            let pageOffset = parsedArgs.offset ?? 0;
+            const startingOffset = parsedArgs.offset ?? 0;
+            let pageOffset = startingOffset;
             let pagesFetched = 0;
             let drainCapped = false;
             let finalNextOffset;
@@ -224,7 +225,7 @@ export function makeFindRecordsByPatternHandler(opts) {
                 pagesFetched,
             };
             if (typeof lastOffset === "number")
-                data.offset = lastOffset;
+                data.offset = startingOffset;
             if (typeof lastLimit === "number")
                 data.limit = lastLimit;
             if (drainCapped) {
