@@ -210,11 +210,46 @@ def test_mods_set_priority_silent_noop_detected(monkeypatch):
 
     result = bridge._handle_mods_set_priority(organizer, pump, {"name": "ModA", "priority": 2})
 
-    assert result["ok"] is True
-    readback = result["result"]
-    assert readback["actual_priority"] == 0
-    assert readback["noop"] is True
-    assert readback["gui_refreshed"] is True
+    assert result["ok"] is False
+    assert result["error"]["code"] == "priority_not_applied"
+    assert result["error"]["details"] == {
+        "name": "ModA",
+        "requested_priority": 2,
+        "before_priority": 0,
+        "final_priority": 0,
+    }
+    organizer.refresh.assert_called_once_with()
+
+
+def test_mods_set_priority_post_refresh_revert_returns_priority_not_applied(monkeypatch):
+    """mods.set_priority verifies after refresh because refresh is the modlist flush boundary."""
+    bridge = _load_bridge(monkeypatch)
+
+    actual = {"current": 0}
+    mod_list = MagicMock()
+    mod_list.getMod.return_value = MagicMock()
+    mod_list.allMods.return_value = ["ModA", "ModB", "ModC"]
+
+    def _set(_name, priority):
+        actual["current"] = priority
+
+    def _refresh_reverts():
+        actual["current"] = 0
+
+    mod_list.setPriority.side_effect = _set
+    mod_list.priority.side_effect = lambda _name: actual["current"]
+
+    organizer = MagicMock()
+    organizer.modList.return_value = mod_list
+    organizer.refresh.side_effect = _refresh_reverts
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=10: fn()
+
+    result = bridge._handle_mods_set_priority(organizer, pump, {"name": "ModA", "priority": 2})
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "priority_not_applied"
+    assert result["error"]["details"]["final_priority"] == 0
     organizer.refresh.assert_called_once_with()
 
 
