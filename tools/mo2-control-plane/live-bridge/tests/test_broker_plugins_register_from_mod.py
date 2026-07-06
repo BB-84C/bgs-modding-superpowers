@@ -59,6 +59,7 @@ class _FakePluginList:
     def __init__(self, names: list[str]):
         self.names = list(names)
         self.callbacks = []
+        self.callback_calls = {}
 
     def pluginNames(self):
         return list(self.names)
@@ -74,16 +75,27 @@ class _FakePluginList:
 
     def onRefreshed(self, callback):
         self.callbacks.append(callback)
+        self.callback_calls.setdefault(id(callback), 0)
         return True
 
 
 class _FakeOrganizer:
-    def __init__(self, profile_dir: Path, mod_list, plugin_list, *, settle_refresh=True, fire_refresh=True):
+    def __init__(
+        self,
+        profile_dir: Path,
+        mod_list,
+        plugin_list,
+        *,
+        settle_refresh=True,
+        fire_refresh=True,
+        settle_after_refresh_calls=1,
+    ):
         self.profile_dir = profile_dir
         self._mod_list = mod_list
         self._plugin_list = plugin_list
         self.settle_refresh = settle_refresh
         self.fire_refresh = fire_refresh
+        self.settle_after_refresh_calls = settle_after_refresh_calls
         self.refresh_calls = []
 
     def modList(self):
@@ -97,7 +109,7 @@ class _FakeOrganizer:
 
     def refresh(self, save_changes=False):
         self.refresh_calls.append(save_changes)
-        if self.settle_refresh:
+        if self.settle_refresh and len(self.refresh_calls) >= self.settle_after_refresh_calls:
             plugins_txt = self.profile_dir / "plugins.txt"
             if plugins_txt.exists():
                 for line in plugins_txt.read_text(encoding="utf-8").splitlines():
@@ -106,6 +118,7 @@ class _FakeOrganizer:
                         self._plugin_list.names.append(name)
         if self.fire_refresh:
             for callback in list(self._plugin_list.callbacks):
+                self._plugin_list.callback_calls[id(callback)] = self._plugin_list.callback_calls.get(id(callback), 0) + 1
                 callback()
 
 
@@ -138,6 +151,7 @@ def test_plugins_register_from_mod_writes_plugins_txt_and_waits_for_on_refreshed
     assert "*FreshA.esp" in plugins_txt
     assert "*FreshB.esm" in plugins_txt
     assert organizer.refresh_calls == [False]
+    assert result["result"]["refresh_attempts"] == 1
 
 
 def test_plugins_register_from_mod_mod_not_found(monkeypatch, tmp_path):
@@ -212,6 +226,75 @@ def test_plugins_register_from_mod_refresh_callback_can_report_unsettled(monkeyp
     assert result["result"]["plugins_added"] == ["Unsettled.esp"]
     assert result["result"]["plugins_registered"] == []
     assert result["result"]["refresh_settled"] is False
+    assert result["result"]["refresh_attempts"] == 2
+    assert organizer.refresh_calls == [False, False]
+
+
+def test_plugins_register_from_mod_retries_once_when_first_refresh_does_not_settle(monkeypatch, tmp_path):
+    bridge = _load_bridge(monkeypatch)
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    mod_root = tmp_path / "mods" / "RetryMod"
+    mod_root.mkdir(parents=True)
+    (mod_root / "Retry.esp").write_text("fake", encoding="utf-8")
+    organizer = _FakeOrganizer(
+        profile_dir,
+        _FakeModList("RetryMod", mod_root),
+        _FakePluginList([]),
+        settle_after_refresh_calls=2,
+    )
+
+    result = bridge._handle_plugins_register_from_mod(organizer, _pump(), {"mod_name": "RetryMod"})
+
+    assert result["ok"] is True
+    assert result["result"]["plugins_added"] == ["Retry.esp"]
+    assert [entry["name"] for entry in result["result"]["plugins_registered"]] == ["Retry.esp"]
+    assert result["result"]["refresh_settled"] is True
+    assert result["result"]["refresh_attempts"] == 2
+    assert organizer.refresh_calls == [False, False]
+
+
+def test_plugins_register_from_mod_preserves_crlf_plugins_txt(monkeypatch, tmp_path):
+    bridge = _load_bridge(monkeypatch)
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    (profile_dir / "plugins.txt").write_text("# comment\r\n*Existing.esm\r\n", encoding="utf-8", newline="")
+    mod_root = tmp_path / "mods" / "CrlfMod"
+    mod_root.mkdir(parents=True)
+    (mod_root / "Crlf.esp").write_text("fake", encoding="utf-8")
+    organizer = _FakeOrganizer(profile_dir, _FakeModList("CrlfMod", mod_root), _FakePluginList(["Existing.esm"]))
+
+    result = bridge._handle_plugins_register_from_mod(organizer, _pump(), {"mod_name": "CrlfMod"})
+
+    assert result["ok"] is True
+    raw = (profile_dir / "plugins.txt").read_bytes()
+    assert b"*Existing.esm\r\n*Crlf.esp\r\n" in raw
+
+
+def test_plugins_register_from_mod_persistent_prior_callbacks_are_one_shot_guarded(monkeypatch, tmp_path):
+    bridge = _load_bridge(monkeypatch)
+    profile_dir = tmp_path / "profile"
+    profile_dir.mkdir()
+    plugin_list = _FakePluginList([])
+
+    mod_one_root = tmp_path / "mods" / "OneMod"
+    mod_one_root.mkdir(parents=True)
+    (mod_one_root / "One.esp").write_text("fake", encoding="utf-8")
+    organizer = _FakeOrganizer(profile_dir, _FakeModList("OneMod", mod_one_root), plugin_list)
+    first = bridge._handle_plugins_register_from_mod(organizer, _pump(), {"mod_name": "OneMod"})
+    first_callback = plugin_list.callbacks[0]
+
+    mod_two_root = tmp_path / "mods" / "TwoMod"
+    mod_two_root.mkdir(parents=True)
+    (mod_two_root / "Two.esp").write_text("fake", encoding="utf-8")
+    organizer._mod_list = _FakeModList("TwoMod", mod_two_root)
+    second = bridge._handle_plugins_register_from_mod(organizer, _pump(), {"mod_name": "TwoMod"})
+
+    assert first["ok"] is True
+    assert first["result"]["plugins_added"] == ["One.esp"]
+    assert second["ok"] is True
+    assert second["result"]["plugins_added"] == ["Two.esp"]
+    assert plugin_list.callback_calls[id(first_callback)] >= 2
 
 
 def test_plugins_register_from_mod_rejects_empty_mod_name(monkeypatch):

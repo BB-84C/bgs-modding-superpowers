@@ -36,6 +36,7 @@ import { FomodChoicesRequiredError, type FomodTreeShape } from "../fomod-require
 import { gatherMo2FomodState } from "../mo2-state-for-fomod.js";
 import { pollPluginWarnings } from "../plugin-warnings.js";
 import { registerPluginsInPluginsTxt } from "../plugin-registration.js";
+import { BrokerEnrichedError } from "../broker-error.js";
 import {
   CONFLICT_PREVIEW_SIDECAR_SKIPPED,
   computeConflictPreview,
@@ -426,12 +427,22 @@ const handler: PlanApplyHandler = {
     //
     // Fallback (offline OR stale broker): keep the previous TS-direct write.
     let pluginsRegistered: string[] = [];
-    let registrationMode: "broker" | "ts_fallback" | "offline" = "offline";
+    let registrationMode: "broker" | "broker_unsettled" | "ts_fallback" | "offline" = "offline";
+    let refreshSettled: boolean | undefined;
+    let refreshAttempts: number | undefined;
     if (bound.pipeClient) {
       const resp = await bound.pipeClient.call("plugins.register_from_mod", { mod_name: modName });
       if (resp.ok && resp.result && Array.isArray((resp.result as { plugins_added?: unknown }).plugins_added)) {
-        pluginsRegistered = (resp.result as { plugins_added: string[] }).plugins_added;
-        registrationMode = "broker";
+        const brokerResult = resp.result as { plugins_added: string[]; refresh_settled?: boolean; refresh_attempts?: number };
+        pluginsRegistered = brokerResult.plugins_added;
+        refreshSettled = brokerResult.refresh_settled;
+        refreshAttempts = brokerResult.refresh_attempts;
+        if (refreshSettled === false) {
+          console.error(`[mo2-mcp] plugins.register_from_mod for '${modName}' returned refresh_settled=false after ${refreshAttempts ?? "unknown"} attempts; subsequent plugin mutations may race a still-in-flight MO2 refresh`);
+          registrationMode = "broker_unsettled";
+        } else {
+          registrationMode = "broker";
+        }
       } else if (!resp.ok && resp.error?.code === "method_not_found") {
         // Stale broker (memory rule 23): fall back to TS write + fire-and-forget refresh.
         console.error("[mo2-mcp] plugins.register_from_mod not available on deployed broker; falling back to TS write + fire-and-forget refresh. Redeploy: scripts/install-mo2-control-plane.ps1");
@@ -446,7 +457,15 @@ const handler: PlanApplyHandler = {
         }
         registrationMode = "ts_fallback";
       } else {
-        throw new Error(`plugins.register_from_mod failed: ${resp.error?.message ?? "unknown"}`);
+        const code = resp.error?.code ?? "broker_error";
+        const details = resp.error?.details && typeof resp.error.details === "object"
+          ? { ...(resp.error.details as Record<string, unknown>) }
+          : { broker_error_details: resp.error?.details };
+        throw new BrokerEnrichedError({
+          code,
+          message: `plugins.register_from_mod failed: ${resp.error?.message ?? "unknown"}`,
+          details,
+        });
       }
     } else {
       const pluginsTxtPath = join(profileDir, "plugins.txt");
@@ -476,6 +495,8 @@ const handler: PlanApplyHandler = {
       installation_file: basename(archivePath),
       plugins_registered: pluginsRegistered,
       registration_mode: registrationMode,
+      refresh_settled: refreshSettled,
+      refresh_attempts: refreshAttempts,
       final_priority: finalPriority,
       conflicts_preview: conflictsPreview,
       _meta: RESPONSE_META,

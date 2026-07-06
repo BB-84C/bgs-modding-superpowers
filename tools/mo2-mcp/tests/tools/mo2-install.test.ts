@@ -835,6 +835,68 @@ describe("mo2_install", () => {
       expect(brokerCalls).not.toContain("organizer.refresh");
     });
 
+    it("BUG-24 review: broker refresh_settled=false is surfaced as broker_unsettled", async () => {
+      const { root, ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(dest, { recursive: true });
+            await writeFile(join(dest, "Unsettled.esp"), "fake", "utf8");
+            return { files: ["Unsettled.esp"], file_count: 1, dest, format: "zip" };
+          }
+          if (method === "world.invalidate") return { invalidated: true };
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+      ctx.pipeClient = {
+        call: async (method: string) => {
+          if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+          if (method === "installation.create_mod_from_directory") {
+            const absolutePath = join(root, "mods", "UnsettledMod");
+            await mkdir(absolutePath, { recursive: true });
+            return { ok: true, result: { name: "UnsettledMod", absolute_path: absolutePath }, error: null };
+          }
+          if (method === "plugins.register_from_mod") {
+            return {
+              ok: true,
+              result: {
+                plugins_added: ["Unsettled.esp"],
+                plugins_registered: [],
+                refresh_settled: false,
+                refresh_attempts: 2,
+              },
+              error: null,
+            };
+          }
+          if (method === "mods.list") return { ok: true, result: { mods: [{ name: "UnsettledMod", priority: 1 }] }, error: null };
+          if (method === "plugins.missing_masters") return { ok: true, result: { warnings: [], scanned_count: 1, enabled_count: 1 }, error: null };
+          throw new Error(`unmocked broker: ${method}`);
+        },
+        close: () => {},
+        discoverAndConnect: async () => {},
+        isConnected: () => true,
+      } as unknown as ToolContext["pipeClient"];
+
+      const tool = getTool("mo2_install")!;
+      const plan = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/unsettled.zip", mod_name: "UnsettledMod" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+      const apply = (await tool.handler(
+        { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+      )) as { ok: boolean; result: { registration_mode: string; refresh_settled?: boolean; refresh_attempts?: number } };
+
+      expect(apply.ok).toBe(true);
+      expect(apply.result.registration_mode).toBe("broker_unsettled");
+      expect(apply.result.refresh_settled).toBe(false);
+      expect(apply.result.refresh_attempts).toBe(2);
+    });
+
     it("BUG-24: stale broker falls back to TS plugins.txt write plus fire-and-forget refresh", async () => {
       const { root, ctx } = await _fixture((_root) => ({
         call: async (method, params) => {
@@ -933,6 +995,61 @@ describe("mo2_install", () => {
         { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
         ctx,
       )).rejects.toThrow(/plugins\.register_from_mod failed: did not settle/);
+    });
+
+    it("BUG-24 review: dispatch envelope preserves plugins.register_from_mod refresh_timeout code", async () => {
+      const { root, ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(dest, { recursive: true });
+            await writeFile(join(dest, "Timeout.esp"), "fake", "utf8");
+            return { files: ["Timeout.esp"], file_count: 1, dest, format: "zip" };
+          }
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+      ctx.pipeClient = {
+        call: async (method: string) => {
+          if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+          if (method === "installation.create_mod_from_directory") {
+            const absolutePath = join(root, "mods", "TimeoutMod");
+            await mkdir(absolutePath, { recursive: true });
+            return { ok: true, result: { name: "TimeoutMod", absolute_path: absolutePath }, error: null };
+          }
+          if (method === "plugins.register_from_mod") return {
+            ok: false,
+            result: null,
+            error: { code: "refresh_timeout", message: "did not settle", details: { mod_name: "TimeoutMod" } },
+          };
+          throw new Error(`unmocked broker: ${method}`);
+        },
+        close: () => {},
+        discoverAndConnect: async () => {},
+        isConnected: () => true,
+      } as unknown as ToolContext["pipeClient"];
+
+      const tool = getTool("mo2_install")!;
+      const plan = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/timeout.zip", mod_name: "TimeoutMod" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+      const result = await dispatchToolCall({
+        toolName: "mo2_install",
+        rawArgs: { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+        rules: [],
+      });
+      const env = JSON.parse(result.content[0].text) as { ok: boolean; error: { code: string; details?: unknown } };
+
+      expect(env.ok).toBe(false);
+      expect(env.error.code).toBe("refresh_timeout");
+      expect(env.error.details).toMatchObject({ mod_name: "TimeoutMod" });
     });
   });
 

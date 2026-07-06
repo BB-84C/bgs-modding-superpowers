@@ -1521,7 +1521,7 @@ def _atomic_append_plugins_txt(plugins_txt_path, new_plugins):
     """Append enabled plugins to plugins.txt with an atomic replace."""
 
     try:
-        with open(plugins_txt_path, "r", encoding="utf-8") as fh:
+        with open(plugins_txt_path, "r", encoding="utf-8", newline="") as fh:
             existing = fh.read()
     except FileNotFoundError:
         existing = ""
@@ -1533,8 +1533,10 @@ def _atomic_append_plugins_txt(plugins_txt_path, new_plugins):
     to_add = [plugin for plugin in new_plugins if plugin.lower() not in existing_lower]
     if not to_add:
         return
-    sep = "" if (not existing or existing.endswith("\n")) else "\n"
-    new_content = existing + sep + "\n".join(f"*{plugin}" for plugin in to_add) + "\n"
+    uses_crlf = "\r\n" in existing and existing.count("\r\n") >= existing.count("\n") - existing.count("\r\n")
+    line_sep = "\r\n" if uses_crlf else "\n"
+    sep = "" if (not existing or existing.endswith(("\n", "\r\n"))) else line_sep
+    new_content = existing + sep + line_sep.join(f"*{plugin}" for plugin in to_add) + line_sep
     tmp_path = plugins_txt_path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8", newline="") as fh:
         fh.write(new_content)
@@ -1621,25 +1623,40 @@ def _handle_plugins_register_from_mod(organizer, pump, payload):
             _atomic_append_plugins_txt(plugins_txt, new_plugins)
 
             fired = {"done": False}
+            attempts = {"count": 0, "max": 2}
 
             def _on_refreshed():
                 if fired["done"]:
                     return
-                fired["done"] = True
                 try:
-                    registered = _snapshot_plugin_states(plugin_list, plugins)
                     fresh_names_lower = {name.lower() for name in plugin_list.pluginNames()}
                     settled = all(plugin.lower() in fresh_names_lower for plugin in new_plugins)
+                    if not settled and attempts["count"] < attempts["max"] - 1:
+                        attempts["count"] += 1
+                        # The refresh that just completed may have been the
+                        # pre-existing in-flight one and missed our plugins.txt
+                        # append. Re-arm this same one-shot callback and kick
+                        # one more refresh; fired stays false so the second
+                        # signal can produce the terminal result.
+                        plugin_list.onRefreshed(_on_refreshed)
+                        organizer.refresh(False)
+                        return
+
+                    fired["done"] = True
+                    registered = _snapshot_plugin_states(plugin_list, plugins)
                     holder["result"] = {
                         "mod_name": mod_name,
                         "plugins_registered": registered,
                         "plugins_added": new_plugins,
                         "refresh_settled": settled,
+                        "refresh_attempts": attempts["count"] + 1,
                     }
                 except Exception as exc:
+                    fired["done"] = True
                     holder["error"] = ("refresh_callback_error", str(exc), {"mod_name": mod_name})
                 finally:
-                    completed.set()
+                    if fired["done"]:
+                        completed.set()
 
             # onRefreshed is persistent and has no Python-visible disconnect;
             # the one-shot flag prevents later refreshes from mutating this
@@ -1662,13 +1679,13 @@ def _handle_plugins_register_from_mod(organizer, pump, payload):
             "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
         }
 
-    if not completed.wait(timeout=10.0):
+    if not completed.wait(timeout=20.0):
         return {
             "ok": False,
             "result": None,
             "error": {
                 "code": ErrorCode.REFRESH_TIMEOUT,
-                "message": f"IPluginList.onRefreshed did not fire within 10s for mod '{mod_name}'",
+                "message": f"IPluginList.onRefreshed did not fire within 20s for mod '{mod_name}'",
             },
         }
 
