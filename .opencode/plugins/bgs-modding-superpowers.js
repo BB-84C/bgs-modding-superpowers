@@ -4,7 +4,10 @@
 //   1. config.skills.paths: append <plugin>/skills so OpenCode discovers our SKILL.md files
 //   2. config.mcp.xedit + config.mcp.bgs_kb + config.mcp.mo2:
 //                           register the bundled MCP stdio servers
-//                           (node tools/<server>/dist/index.js)
+//                           with layout-aware dist resolution:
+//                           dev checkout -> tools/<server>/dist/index.js when built
+//                           git-spec clone -> plugins/bgs-modding-superpowers mirror
+//                           portable tree -> bundled tools/<server>/dist/index.js
 //   3. first-user-message bootstrap: inject the using-bgs-modding-superpowers SKILL body
 //                                    into the first user message so the host agent loads
 //                                    the bootstrap on every session start
@@ -23,13 +26,52 @@ const __dirname = path.dirname(__filename);
 const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
 
 const SKILLS_DIR = path.join(PLUGIN_ROOT, 'skills');
-const XEDIT_MCP_ENTRY = path.join(PLUGIN_ROOT, 'tools', 'xedit-mcp', 'dist', 'index.js');
-const BGS_KB_MCP_ENTRY = path.join(PLUGIN_ROOT, 'tools', 'bgs-kb-mcp', 'dist', 'index.js');
-const MO2_MCP_ENTRY = path.join(PLUGIN_ROOT, 'tools', 'mo2-mcp', 'dist', 'index.js');
 const BOOTSTRAP_SKILL = path.join(SKILLS_DIR, 'using-bgs-modding-superpowers', 'SKILL.md');
 
 // Sentinel used to detect already-injected bootstrap so we don't double-inject across reloads.
 const BOOTSTRAP_MARKER = 'EXTREMELY_IMPORTANT_BGS_MODDING_SUPERPOWERS';
+
+function getMcpEntryCandidates(pluginRoot, toolName) {
+  const sourceRoot = path.join(pluginRoot, 'tools', toolName);
+  const sourceEntry = path.join(sourceRoot, 'dist', 'index.js');
+  const sourceNodeModules = path.join(sourceRoot, 'node_modules');
+  const portableEntry = path.join(
+    pluginRoot,
+    'plugins',
+    'bgs-modding-superpowers',
+    'tools',
+    toolName,
+    'dist',
+    'index.js',
+  );
+  return { sourceEntry, sourceNodeModules, portableEntry };
+}
+
+export function resolveMcpEntry(pluginRoot, toolName) {
+  const { sourceEntry, sourceNodeModules, portableEntry } = getMcpEntryCandidates(pluginRoot, toolName);
+
+  if (fs.existsSync(sourceEntry) && fs.existsSync(sourceNodeModules)) {
+    return sourceEntry;
+  }
+  if (fs.existsSync(portableEntry)) {
+    console.error(`[bgs-modding-superpowers] ${toolName}: using portable-tree MCP entry ${portableEntry}`);
+    return portableEntry;
+  }
+  if (fs.existsSync(sourceEntry)) {
+    console.error(`[bgs-modding-superpowers] ${toolName}: using source-tree MCP entry without node_modules ${sourceEntry}`);
+    return sourceEntry;
+  }
+  return null;
+}
+
+function logMissingMcpEntry(toolName, pluginRoot) {
+  const { sourceEntry, sourceNodeModules, portableEntry } = getMcpEntryCandidates(pluginRoot, toolName);
+  console.error(
+    `[bgs-modding-superpowers] ${toolName}: MCP server NOT registered; no usable entry found. ` +
+      `Checked source entry=${sourceEntry}; source node_modules=${sourceNodeModules}; portable mirror=${portableEntry}. ` +
+      'Run npm install and rebuild the MCP server in a dev checkout, or reinstall bgs-modding-superpowers.',
+  );
+}
 
 function readBootstrap() {
   try {
@@ -70,33 +112,48 @@ export const BgsModdingSuperpowersPlugin = async () => {
       //     Subsequent calls are fast (the toolset is cached for the server's
       //     lifetime). The default 5s timeout would always trip on first call.
       config.mcp ??= {};
-      config.mcp.xedit ??= {
-        type: 'local',
-        command: ['node', XEDIT_MCP_ENTRY],
-        enabled: true,
-        environment: {},
-        timeout: 240000,
-      };
-      config.mcp.bgs_kb ??= {
-        type: 'local',
-        command: ['node', BGS_KB_MCP_ENTRY],
-        enabled: true,
-        environment: {},
-        timeout: 240000,
-      };
+      const xeditMcpEntry = resolveMcpEntry(PLUGIN_ROOT, 'xedit-mcp');
+      const bgsKbMcpEntry = resolveMcpEntry(PLUGIN_ROOT, 'bgs-kb-mcp');
+      const mo2McpEntry = resolveMcpEntry(PLUGIN_ROOT, 'mo2-mcp');
+      if (xeditMcpEntry) {
+        config.mcp.xedit ??= {
+          type: 'local',
+          command: ['node', xeditMcpEntry],
+          enabled: true,
+          environment: {},
+          timeout: 240000,
+        };
+      } else {
+        logMissingMcpEntry('xedit-mcp', PLUGIN_ROOT);
+      }
+      if (bgsKbMcpEntry) {
+        config.mcp.bgs_kb ??= {
+          type: 'local',
+          command: ['node', bgsKbMcpEntry],
+          enabled: true,
+          environment: {},
+          timeout: 240000,
+        };
+      } else {
+        logMissingMcpEntry('bgs-kb-mcp', PLUGIN_ROOT);
+      }
       // mo2-mcp: lazy-bind MCP server (v1.2-pre refactor landed). Server starts
       // clean with no BGS_MO2_ROOT requirement; agent binds to an MO2 instance
       // by calling mo2_session({ mo2Root, profile? }). If BGS_MO2_ROOT is set
       // in the parent env, main() does an eager auto-bind before writing the
       // ready log. environment: {} passes through the parent env transparently
       // (no hardcoded paths in the plugin file).
-      config.mcp.mo2 ??= {
-        type: 'local',
-        command: ['node', MO2_MCP_ENTRY],
-        enabled: true,
-        environment: {},
-        timeout: 240000,
-      };
+      if (mo2McpEntry) {
+        config.mcp.mo2 ??= {
+          type: 'local',
+          command: ['node', mo2McpEntry],
+          enabled: true,
+          environment: {},
+          timeout: 240000,
+        };
+      } else {
+        logMissingMcpEntry('mo2-mcp', PLUGIN_ROOT);
+      }
     },
 
     // (d) Inject the bootstrap skill body into the first user message of each session.
