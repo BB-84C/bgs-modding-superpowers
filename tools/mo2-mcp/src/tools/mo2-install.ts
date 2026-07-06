@@ -416,23 +416,42 @@ const handler: PlanApplyHandler = {
       if (!resp.ok) throw new Error(resp.error?.message ?? "mods.set_priority failed");
     }
 
-    // 5. BUG-14 BUG-E: register fresh-install plugins in plugins.txt.
-    // Before this fix, every mo2_install completed "successfully" but
-    // the mod's plugins stayed inactive — the agent had to do a separate
-    // enumeration + N×toggle_plugin calls to actually activate them.
-    const pluginsTxtPath = join(profileDir, "plugins.txt");
-    const pluginsRegistered = await registerPluginsInPluginsTxt(finalDestPath, pluginsTxtPath);
-
-    // 6. If live broker is up, ask MO2 to re-scan so the freshly-written
-    // plugins.txt rows become active in MO2's in-memory plugin list.
-    // Best-effort: ignore failures (the file write already took, and
-    // MO2 will see it on next user-driven refresh either way).
-    if (pluginsRegistered.length > 0 && bound.pipeClient) {
-      try {
-        await bound.pipeClient.call("organizer.refresh", { save_changes: false });
-      } catch {
-        // swallowed: see comment above
+    // 5. Register fresh-install plugins.
+    //
+    // Preferred path (live broker + method available): call
+    // plugins.register_from_mod, which atomically writes plugins.txt AND awaits
+    // IPluginList.onRefreshed before returning. This eliminates the issue #24
+    // fire-and-forget refresh race; a subsequent mo2_send_plugin_to can safely
+    // see the freshly-installed plugin in MO2's in-memory IPluginList.
+    //
+    // Fallback (offline OR stale broker): keep the previous TS-direct write.
+    let pluginsRegistered: string[] = [];
+    let registrationMode: "broker" | "ts_fallback" | "offline" = "offline";
+    if (bound.pipeClient) {
+      const resp = await bound.pipeClient.call("plugins.register_from_mod", { mod_name: modName });
+      if (resp.ok && resp.result && Array.isArray((resp.result as { plugins_added?: unknown }).plugins_added)) {
+        pluginsRegistered = (resp.result as { plugins_added: string[] }).plugins_added;
+        registrationMode = "broker";
+      } else if (!resp.ok && resp.error?.code === "method_not_found") {
+        // Stale broker (memory rule 23): fall back to TS write + fire-and-forget refresh.
+        console.error("[mo2-mcp] plugins.register_from_mod not available on deployed broker; falling back to TS write + fire-and-forget refresh. Redeploy: scripts/install-mo2-control-plane.ps1");
+        const pluginsTxtPath = join(profileDir, "plugins.txt");
+        pluginsRegistered = await registerPluginsInPluginsTxt(finalDestPath, pluginsTxtPath);
+        if (pluginsRegistered.length > 0) {
+          try {
+            await bound.pipeClient.call("organizer.refresh", { save_changes: false });
+          } catch {
+            // swallowed: compatibility fallback only
+          }
+        }
+        registrationMode = "ts_fallback";
+      } else {
+        throw new Error(`plugins.register_from_mod failed: ${resp.error?.message ?? "unknown"}`);
       }
+    } else {
+      const pluginsTxtPath = join(profileDir, "plugins.txt");
+      pluginsRegistered = await registerPluginsInPluginsTxt(finalDestPath, pluginsTxtPath);
+      registrationMode = "offline";
     }
 
     // 7. Invalidate sidecar World cache so subsequent asset reads see the new mod.
@@ -456,6 +475,7 @@ const handler: PlanApplyHandler = {
       fomod_used: useFomodChoices,
       installation_file: basename(archivePath),
       plugins_registered: pluginsRegistered,
+      registration_mode: registrationMode,
       final_priority: finalPriority,
       conflicts_preview: conflictsPreview,
       _meta: RESPONSE_META,

@@ -247,7 +247,7 @@ describe("mo2_install", () => {
     const apply = (await tool.handler(
       { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
       ctx,
-    )) as { ok: boolean; result: { dest_path: string; final_priority: number; _meta: Record<string, string>; snapshot_id?: string } };
+    )) as { ok: boolean; result: { dest_path: string; final_priority: number; _meta: Record<string, string>; snapshot_id?: string; registration_mode: string } };
     expect(apply.ok).toBe(true);
     expect(existsSync(join(root, "mods", "NewSimple", "test.esp"))).toBe(true);
     expect(existsSync(join(root, "mods", "NewSimple", "meta.ini"))).toBe(true);
@@ -268,6 +268,7 @@ describe("mo2_install", () => {
     expect(modlist).toContain("+NewSimple");
     expect(modlist.split(/\r?\n/)[0]).toBe("+NewSimple");
     expect(apply.result.final_priority).toBe(1);
+    expect(apply.result.registration_mode).toBe("offline");
     expect(apply.result._meta.priority_convention).toBe("mobase_full_space_higher_wins");
 
     expect(apply.result.snapshot_id).toMatch(/^[0-9a-f-]+$/);
@@ -306,7 +307,17 @@ describe("mo2_install", () => {
           await mkdir(absolutePath, { recursive: true });
           return { ok: true, result: { name: "LiveMod", absolute_path: absolutePath }, error: null };
         }
-        if (method === "organizer.refresh") return { ok: true, result: { refreshed: true }, error: null };
+        if (method === "plugins.register_from_mod") {
+          return {
+            ok: true,
+            result: {
+              plugins_added: ["live.esp"],
+              plugins_registered: [{ name: "live.esp", priority: 1, state: "2" }],
+              refresh_settled: true,
+            },
+            error: null,
+          };
+        }
         if (method === "mods.list") return { ok: true, result: { mods: [{ name: "LiveMod", priority: 1 }] }, error: null };
         if (method === "plugins.missing_masters") return {
           ok: true,
@@ -329,10 +340,12 @@ describe("mo2_install", () => {
     const apply = (await tool.handler(
       { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
       ctx,
-    )) as { ok: boolean; result: { dest_path: string; snapshot_id?: string; pluginWarnings?: unknown } };
+    )) as { ok: boolean; result: { dest_path: string; snapshot_id?: string; pluginWarnings?: unknown; plugins_registered: string[]; registration_mode: string } };
 
     expect(apply.ok).toBe(true);
     expect(apply.result.dest_path).toBe(join(root, "mods", "LiveMod"));
+    expect(apply.result.plugins_registered).toEqual(["live.esp"]);
+    expect(apply.result.registration_mode).toBe("broker");
     expect(existsSync(join(root, "mods", "LiveMod", "live.esp"))).toBe(true);
     expect(existsSync(join(root, "mods", "LiveMod", "meta.ini"))).toBe(true);
     const meta = await readFile(join(root, "mods", "LiveMod", "meta.ini"), "utf8");
@@ -350,7 +363,7 @@ describe("mo2_install", () => {
       "profile.active", // buildPlan guard
       "profile.active", // applyMutation guard
       "installation.create_mod_from_directory",
-      "organizer.refresh", // post-plugins.txt refresh (BUG-14 BUG-E)
+      "plugins.register_from_mod", // issue #24: waits for IPluginList.onRefreshed
       "mods.list", // final_priority readback
       "system.log_apply",
       "plugins.missing_masters",
@@ -482,8 +495,8 @@ describe("mo2_install", () => {
           return { ok: true, result: { name: "LiveInteger", absolute_path: absolutePath }, error: null };
         }
         if (method === "mods.set_priority") return { ok: true, result: { name: "LiveInteger", actual_priority: (params as { priority: number }).priority }, error: null };
+        if (method === "plugins.register_from_mod") return { ok: true, result: { plugins_added: ["LiveInteger.esp"], refresh_settled: true }, error: null };
         if (method === "mods.list") return { ok: true, result: { mods: [{ name: "LiveInteger", priority: 1 }] }, error: null };
-        if (method === "organizer.refresh") return { ok: true, result: { refreshed: true }, error: null };
         if (method === "plugins.missing_masters") return { ok: true, result: { warnings: [], scanned_count: 1, enabled_count: 1 }, error: null };
         throw new Error(`unmocked broker: ${method}`);
       },
@@ -760,7 +773,7 @@ describe("mo2_install", () => {
       expect(pluginsTxt).toContain("*RegisterMe.esp");
     });
 
-    it("BUG-E: live broker path calls organizer.refresh after writing plugins.txt", async () => {
+    it("BUG-24: live broker path delegates plugin registration to plugins.register_from_mod", async () => {
       const { root, ctx } = await _fixture((_root) => ({
         call: async (method, params) => {
           if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
@@ -788,8 +801,16 @@ describe("mo2_install", () => {
             await mkdir(absolutePath, { recursive: true });
             return { ok: true, result: { name: "LivePluginMod", absolute_path: absolutePath }, error: null };
           }
-          if (method === "organizer.refresh")
-            return { ok: true, result: { refreshed: true }, error: null };
+          if (method === "plugins.register_from_mod")
+            return {
+              ok: true,
+              result: {
+                plugins_added: ["LivePlugin.esp"],
+                plugins_registered: [{ name: "LivePlugin.esp", priority: 1, state: "2" }],
+                refresh_settled: true,
+              },
+              error: null,
+            };
           throw new Error(`unmocked broker: ${method}`);
         },
         close: () => {},
@@ -805,13 +826,113 @@ describe("mo2_install", () => {
       const apply = (await tool.handler(
         { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
         ctx,
-      )) as { ok: boolean; result: { plugins_registered: string[] } };
+      )) as { ok: boolean; result: { plugins_registered: string[]; registration_mode: string } };
 
       expect(apply.ok).toBe(true);
       expect(apply.result.plugins_registered).toEqual(["LivePlugin.esp"]);
-      // organizer.refresh fired after plugins.txt was rewritten so MO2's
-      // in-memory plugin list re-reads the file.
+      expect(apply.result.registration_mode).toBe("broker");
+      expect(brokerCalls).toContain("plugins.register_from_mod");
+      expect(brokerCalls).not.toContain("organizer.refresh");
+    });
+
+    it("BUG-24: stale broker falls back to TS plugins.txt write plus fire-and-forget refresh", async () => {
+      const { root, ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(dest, { recursive: true });
+            await writeFile(join(dest, "Fallback.esp"), "fake", "utf8");
+            return { files: ["Fallback.esp"], file_count: 1, dest, format: "zip" };
+          }
+          if (method === "world.invalidate") return { invalidated: true };
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+      const brokerCalls: string[] = [];
+      ctx.pipeClient = {
+        call: async (method: string) => {
+          brokerCalls.push(method);
+          if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+          if (method === "installation.create_mod_from_directory") {
+            const absolutePath = join(root, "mods", "FallbackMod");
+            await mkdir(absolutePath, { recursive: true });
+            return { ok: true, result: { name: "FallbackMod", absolute_path: absolutePath }, error: null };
+          }
+          if (method === "plugins.register_from_mod") return { ok: false, result: null, error: { code: "method_not_found", message: "Unsupported method" } };
+          if (method === "organizer.refresh") return { ok: true, result: { refreshed: true }, error: null };
+          if (method === "mods.list") return { ok: true, result: { mods: [{ name: "FallbackMod", priority: 1 }] }, error: null };
+          if (method === "plugins.missing_masters") return { ok: true, result: { warnings: [], scanned_count: 1, enabled_count: 1 }, error: null };
+          throw new Error(`unmocked broker: ${method}`);
+        },
+        close: () => {},
+        discoverAndConnect: async () => {},
+        isConnected: () => true,
+      } as unknown as ToolContext["pipeClient"];
+
+      const tool = getTool("mo2_install")!;
+      const plan = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/fallback.zip", mod_name: "FallbackMod" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+      const apply = (await tool.handler(
+        { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+      )) as { ok: boolean; result: { plugins_registered: string[]; registration_mode: string } };
+
+      expect(apply.ok).toBe(true);
+      expect(apply.result.plugins_registered).toEqual(["Fallback.esp"]);
+      expect(apply.result.registration_mode).toBe("ts_fallback");
+      expect(brokerCalls).toContain("plugins.register_from_mod");
       expect(brokerCalls).toContain("organizer.refresh");
+      expect(await readFile(join(root, "profiles", "Default", "plugins.txt"), "utf8")).toContain("*Fallback.esp");
+    });
+
+    it("BUG-24: non-stale broker registration errors are surfaced", async () => {
+      const { root, ctx } = await _fixture((_root) => ({
+        call: async (method, params) => {
+          if (method === "fomod.parse_choices") throw new Error("not_a_fomod");
+          if (method === "archive.extract_all") {
+            const dest = (params as { dest: string }).dest;
+            await mkdir(dest, { recursive: true });
+            await writeFile(join(dest, "Broken.esp"), "fake", "utf8");
+            return { files: ["Broken.esp"], file_count: 1, dest, format: "zip" };
+          }
+          throw new Error(`unmocked: ${method}`);
+        },
+        isReady: () => true,
+        start: async () => {},
+        stop: async () => {},
+      }));
+      ctx.pipeClient = {
+        call: async (method: string) => {
+          if (method === "profile.active") return { ok: true, result: { name: "Default" }, error: null };
+          if (method === "installation.create_mod_from_directory") {
+            const absolutePath = join(root, "mods", "BrokenMod");
+            await mkdir(absolutePath, { recursive: true });
+            return { ok: true, result: { name: "BrokenMod", absolute_path: absolutePath }, error: null };
+          }
+          if (method === "plugins.register_from_mod") return { ok: false, result: null, error: { code: "refresh_timeout", message: "did not settle" } };
+          throw new Error(`unmocked broker: ${method}`);
+        },
+        close: () => {},
+        discoverAndConnect: async () => {},
+        isConnected: () => true,
+      } as unknown as ToolContext["pipeClient"];
+
+      const tool = getTool("mo2_install")!;
+      const plan = (await tool.handler(
+        { mode: "plan", archive_path: "/tmp/broken.zip", mod_name: "BrokenMod" },
+        ctx,
+      )) as { ok: boolean; result: { planId: string; lease_token: string } };
+
+      await expect(tool.handler(
+        { mode: "apply", plan_id: plan.result.planId, lease_token: plan.result.lease_token },
+        ctx,
+      )).rejects.toThrow(/plugins\.register_from_mod failed: did not settle/);
     });
   });
 

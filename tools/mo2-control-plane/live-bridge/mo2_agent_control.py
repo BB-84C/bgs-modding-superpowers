@@ -330,6 +330,7 @@ PLUGINS_SET_STATE_METHOD = "plugins.set_state"
 PLUGINS_SET_PRIORITY_METHOD = "plugins.set_priority"
 PLUGINS_SET_LOAD_ORDER_METHOD = "plugins.set_load_order"
 PLUGINS_MISSING_MASTERS_METHOD = "plugins.missing_masters"
+PLUGINS_REGISTER_FROM_MOD_METHOD = "plugins.register_from_mod"
 PROFILE_LIST_METHOD = "profile.list"
 PROFILE_ACTIVE_METHOD = "profile.active"
 PROFILE_INITIALIZE_METHOD = "profile.initialize"
@@ -1494,6 +1495,191 @@ def _handle_plugins_list(organizer, payload):
         )
 
     return {"ok": True, "result": {"plugins": plugins}, "error": None}
+
+
+_PLUGIN_EXTS = (".esm", ".esp", ".esl")
+
+
+def _enumerate_mod_plugin_files(mod_root):
+    """Enumerate plugin filenames at a mod root and direct Data/ child."""
+
+    found = set()
+    for candidate_dir in (mod_root, os.path.join(mod_root, "Data")):
+        if not os.path.isdir(candidate_dir):
+            continue
+        try:
+            for entry in os.listdir(candidate_dir):
+                path = os.path.join(candidate_dir, entry)
+                if os.path.isfile(path) and entry.lower().endswith(_PLUGIN_EXTS):
+                    found.add(entry)
+        except OSError:
+            continue
+    return sorted(found)
+
+
+def _atomic_append_plugins_txt(plugins_txt_path, new_plugins):
+    """Append enabled plugins to plugins.txt with an atomic replace."""
+
+    try:
+        with open(plugins_txt_path, "r", encoding="utf-8") as fh:
+            existing = fh.read()
+    except FileNotFoundError:
+        existing = ""
+    existing_lower = {
+        line.lstrip("*").strip().lower()
+        for line in existing.splitlines()
+        if line and not line.startswith("#")
+    }
+    to_add = [plugin for plugin in new_plugins if plugin.lower() not in existing_lower]
+    if not to_add:
+        return
+    sep = "" if (not existing or existing.endswith("\n")) else "\n"
+    new_content = existing + sep + "\n".join(f"*{plugin}" for plugin in to_add) + "\n"
+    tmp_path = plugins_txt_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(new_content)
+        fh.flush()
+        try:
+            os.fsync(fh.fileno())
+        except OSError:
+            pass
+    os.replace(tmp_path, plugins_txt_path)
+
+
+def _snapshot_plugin_states(plugin_list, plugin_names):
+    """Return state readback for requested plugins that exist in IPluginList."""
+
+    known_lower = {name.lower(): name for name in plugin_list.pluginNames()}
+    out = []
+    for wanted in plugin_names:
+        canonical = known_lower.get(wanted.lower())
+        if canonical is None:
+            continue
+        try:
+            priority = plugin_list.priority(canonical)
+            state = plugin_list.state(canonical)
+            state_name = state.name if hasattr(state, "name") else str(int(state))
+            entry = {"name": canonical, "priority": priority, "state": state_name}
+            try:
+                entry["is_master"] = bool(plugin_list.hasMasterExtension(canonical))
+            except Exception:
+                pass
+            out.append(entry)
+        except Exception:
+            continue
+    return out
+
+
+def _handle_plugins_register_from_mod(organizer, pump, payload):
+    """Register a mod's plugin files, then wait for IPluginList.onRefreshed."""
+
+    mod_name = payload.get("mod_name")
+    if not isinstance(mod_name, str) or not mod_name.strip():
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.INVALID_PARAMS, "message": "mod_name: non-empty str"},
+        }
+    mod_name = mod_name.strip()
+
+    completed = threading.Event()
+    holder = {"result": None, "error": None}
+
+    def _setup_on_main():
+        try:
+            mod_list = organizer.modList()
+            mod = mod_list.getMod(mod_name)
+            if mod is None:
+                holder["error"] = (
+                    ErrorCode.MOD_NOT_FOUND,
+                    f"mod '{mod_name}' not found in IModList",
+                    {"mod_name": mod_name},
+                )
+                completed.set()
+                return ("kickoff_error",)
+
+            mod_root = mod.absolutePath()
+            plugins = _enumerate_mod_plugin_files(mod_root)
+
+            plugin_list = organizer.pluginList()
+            existing_lower = {name.lower() for name in plugin_list.pluginNames()}
+            new_plugins = [plugin for plugin in plugins if plugin.lower() not in existing_lower]
+
+            if not new_plugins:
+                registered = _snapshot_plugin_states(plugin_list, plugins)
+                holder["result"] = {
+                    "mod_name": mod_name,
+                    "plugins_registered": registered,
+                    "plugins_added": [],
+                    "refresh_settled": True,
+                }
+                completed.set()
+                return ("kickoff_no_change",)
+
+            profile_dir = organizer.profilePath()
+            plugins_txt = os.path.join(profile_dir, "plugins.txt")
+            _atomic_append_plugins_txt(plugins_txt, new_plugins)
+
+            fired = {"done": False}
+
+            def _on_refreshed():
+                if fired["done"]:
+                    return
+                fired["done"] = True
+                try:
+                    registered = _snapshot_plugin_states(plugin_list, plugins)
+                    fresh_names_lower = {name.lower() for name in plugin_list.pluginNames()}
+                    settled = all(plugin.lower() in fresh_names_lower for plugin in new_plugins)
+                    holder["result"] = {
+                        "mod_name": mod_name,
+                        "plugins_registered": registered,
+                        "plugins_added": new_plugins,
+                        "refresh_settled": settled,
+                    }
+                except Exception as exc:
+                    holder["error"] = ("refresh_callback_error", str(exc), {"mod_name": mod_name})
+                finally:
+                    completed.set()
+
+            # onRefreshed is persistent and has no Python-visible disconnect;
+            # the one-shot flag prevents later refreshes from mutating this
+            # request's holder. Do not use organizer.onNextRefresh here: that
+            # fires before refreshESPList() rebuilds IPluginList.
+            plugin_list.onRefreshed(_on_refreshed)
+            organizer.refresh(False)
+            return ("kickoff_ok",)
+        except Exception as exc:
+            holder["error"] = ("setup_error", str(exc), {"mod_name": mod_name})
+            completed.set()
+            return ("kickoff_exception",)
+
+    try:
+        pump.invoke_blocking(_setup_on_main, timeout_s=5)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "result": None,
+            "error": {"code": ErrorCode.MAIN_THREAD_UNAVAILABLE, "message": str(exc)},
+        }
+
+    if not completed.wait(timeout=10.0):
+        return {
+            "ok": False,
+            "result": None,
+            "error": {
+                "code": ErrorCode.REFRESH_TIMEOUT,
+                "message": f"IPluginList.onRefreshed did not fire within 10s for mod '{mod_name}'",
+            },
+        }
+
+    if holder["error"] is not None:
+        err = holder["error"]
+        code = err[0]
+        msg = err[1]
+        details = err[2] if len(err) > 2 else None
+        return {"ok": False, "result": None, "error": {"code": code, "message": msg, "details": details}}
+
+    return {"ok": True, "result": holder["result"], "error": None}
 
 
 def _handle_plugins_set_state(organizer, pump, payload):
@@ -2933,6 +3119,11 @@ def build_command_handlers(
         request.get("payload", {}),
     )
     handlers[PLUGINS_MISSING_MASTERS_METHOD] = lambda request: _handle_plugins_missing_masters(
+        organizer,
+        main_thread_pump,
+        request.get("payload", {}),
+    )
+    handlers[PLUGINS_REGISTER_FROM_MOD_METHOD] = lambda request: _handle_plugins_register_from_mod(
         organizer,
         main_thread_pump,
         request.get("payload", {}),
