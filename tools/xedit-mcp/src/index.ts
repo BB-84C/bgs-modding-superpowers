@@ -473,7 +473,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "xedit_find_records_by_pattern",
     description:
-      "Requires the daemon to be ready. Wraps records.apply_filter with the r6 filter args (supports.applyFilterExtensions, contract 0.14 + 0.20 multi-pattern). At least one filter predicate is required: parentFormId, signatures, or any of *Regex / *Pattern. For multi-pattern OR, pass either a single regex string or a JSON array of strings; *Pattern and *Regex for the same logical name (editorId / displayName) are mutually exclusive.",
+      "Requires the daemon to be ready. Wraps records.apply_filter with the r6/r7 filter args (supports.applyFilterExtensions, contract 0.14 + 0.20 multi-pattern + 0.21 pagination: offset/nextOffset, maxLimit 100, optional MCP-side drainAll). At least one filter predicate is required: parentFormId, signatures, or any of *Regex / *Pattern. For multi-pattern OR, pass either a single regex string or a JSON array of strings; *Pattern and *Regex for the same logical name (editorId / displayName) are mutually exclusive.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -530,13 +530,17 @@ export const TOOL_DEFINITIONS = [
         limit: {
           type: "integer" as const,
           minimum: 1,
-          maximum: 10000,
-          description: "Maximum matches to return (server-side cap applies).",
+          maximum: 100,
+          description: "Maximum matches per page (1..100). Contract 0.21 rejects limit > 100 as invalid_request.",
         },
         offset: {
           type: "integer" as const,
           minimum: 0,
-          description: "Skip this many matches before returning results (pagination).",
+          description: "Skip this many MATCHED records before returning results (contract 0.21 pagination; offset counts matched records, not raw record indices). Response surfaces nextOffset while truncated=true.",
+        },
+        drainAll: {
+          type: "boolean" as const,
+          description: "If true, the MCP server follows nextOffset pages server-side until truncated=false, aggregating matches. Hard cap 20 pages / 2000 matches (drainCapped=true + nextOffset returned when hit). Default false.",
         },
       },
       additionalProperties: false,

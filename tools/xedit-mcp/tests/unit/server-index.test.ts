@@ -61,7 +61,7 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
 
   test("xedit_start declares the launch override properties without required (all overrides are optional)", () => {
     const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_start")!;
-    const schema = tool.inputSchema as {
+    const schema = tool.inputSchema as unknown as {
       properties: Record<string, unknown>;
       required?: string[];
     };
@@ -93,7 +93,7 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
 
   test("xedit_find_record declares both modes' properties with minLength guards and no top-level oneOf/anyOf/allOf/enum/not", () => {
     const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_find_record")!;
-    const schema = tool.inputSchema as Record<string, unknown> & {
+    const schema = tool.inputSchema as unknown as Record<string, unknown> & {
       properties: Record<string, { type: string; minLength?: number; pattern?: string }>;
       required?: string[];
     };
@@ -131,7 +131,7 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
 
   test("xedit_read_record requires file + formId", () => {
     const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_read_record")!;
-    const schema = tool.inputSchema as {
+    const schema = tool.inputSchema as unknown as {
       properties: Record<string, unknown>;
       required: string[];
     };
@@ -142,7 +142,7 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
 
   test("xedit_inspect_conflicts requires file + formId", () => {
     const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_inspect_conflicts")!;
-    const schema = tool.inputSchema as {
+    const schema = tool.inputSchema as unknown as {
       properties: Record<string, unknown>;
       required: string[];
     };
@@ -152,7 +152,7 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
 
   test("xedit_inspect_conflicts_deep requires file + formId and accepts optional includeReferences boolean", () => {
     const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_inspect_conflicts_deep")!;
-    const schema = tool.inputSchema as {
+    const schema = tool.inputSchema as unknown as {
       properties: Record<string, { type: string; pattern?: string; minLength?: number }>;
       required: string[];
     };
@@ -174,6 +174,7 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
       "baseEditorIdRegex",
       "displayNameRegex",
       "displayNamePattern",
+      "drainAll",
       "editorIdPattern",
       "editorIdRegex",
       "file",
@@ -220,7 +221,7 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
 
   test("xedit_navigate_ancestry declares both modes flat and lets the handler route", () => {
     const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_navigate_ancestry")!;
-    const schema = tool.inputSchema as {
+    const schema = tool.inputSchema as unknown as {
       properties: Record<string, { type: string; minLength?: number; pattern?: string }>;
       required?: string[];
     };
