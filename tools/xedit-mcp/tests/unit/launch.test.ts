@@ -112,4 +112,43 @@ describe("launchDaemon readiness-timeout cleanup", () => {
     expect(launchSpawn).toBeDefined();
     expect(launchSpawn!.args).not.toContain("--i-know-what-im-doing");
   });
+
+  it("does not pass --no-starfield-redpill by default", async () => {
+    const { launchDaemon } = await import("../../src/launch.js");
+
+    await expect(
+      launchDaemon({
+        clientScript: "D:/awesome-bgs-mod-master/tools/mo2-vfs-launcher/xedit-client.ps1",
+        launcherPath: "D:/Starfield MO2/tools/xEdit/SF1Edit64.exe",
+        gameMode: "Starfield",
+        moProfile: "Default",
+        readyTimeoutMs: 0,
+      }),
+    ).rejects.toThrow(/Daemon not ready within 0 ms/);
+
+    const launchSpawn = spawnCalls.find((c) => c.args.includes("launch"));
+    expect(launchSpawn).toBeDefined();
+    expect(launchSpawn!.args).not.toContain("--no-starfield-redpill");
+  });
+
+  it("forwards starfieldRedPill false as --no-starfield-redpill 1", async () => {
+    const { launchDaemon } = await import("../../src/launch.js");
+
+    await expect(
+      launchDaemon({
+        clientScript: "D:/awesome-bgs-mod-master/tools/mo2-vfs-launcher/xedit-client.ps1",
+        launcherPath: "D:/Starfield MO2/tools/xEdit/SF1Edit64.exe",
+        gameMode: "Starfield",
+        moProfile: "Default",
+        starfieldRedPill: false,
+        readyTimeoutMs: 0,
+      }),
+    ).rejects.toThrow(/Daemon not ready within 0 ms/);
+
+    const launchSpawn = spawnCalls.find((c) => c.args.includes("launch"));
+    expect(launchSpawn).toBeDefined();
+    const idx = launchSpawn!.args.indexOf("--no-starfield-redpill");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(launchSpawn!.args[idx + 1]).toBe("1");
+  });
 });

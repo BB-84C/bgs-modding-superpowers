@@ -63,6 +63,11 @@ export interface LaunchOptions {
    * Verify post-launch via `xedit_session.data.consentEnabled === true`.
    */
   iKnowWhatImDoing?: boolean;
+  /**
+   * Starfield only: default true. When false, opts out of the launcher's default
+   * upstream save-unlock trio (-ItJustWorksTM -ThisIsFine -GiveMeTheRedPill).
+   */
+  starfieldRedPill?: boolean;
   /** Total wait budget for daemon-ready + plugins-loaded; defaults to 180 seconds. */
   readyTimeoutMs?: number;
   /** PowerShell executable; defaults to "pwsh". */
@@ -141,6 +146,9 @@ export async function launchDaemon(opts: LaunchOptions): Promise<LaunchedDaemon>
       // xedit-client.launch.ps1 AllowedNames + the Invoke-XeditClientProcessLaunch
       // ArgumentList branch that mirrors the `-automation-serve` append pattern.
       launchArgs.push("--i-know-what-im-doing", "1");
+    }
+    if (opts.starfieldRedPill === false) {
+      launchArgs.push("--no-starfield-redpill", "1");
     }
     const launchOut = await runPwshCapture(pwsh, launchArgs);
 
