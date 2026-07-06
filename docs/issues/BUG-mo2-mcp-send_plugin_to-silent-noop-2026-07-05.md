@@ -33,3 +33,21 @@
 ## Workaround used
 
 Accepted end-of-list position for the defaults patch (functionally equivalent: loads after masters, wins its 3 overrides). For mandatory moves: retry once; if still no-op, fall back to MO2 GUI drag or offline rewrite with MO2 closed.
+
+## Resolution (2026-07-06)
+
+Root cause was MO2's plugins.txt persistence race, not xEdit/VFS locking or a new-plugin registration gap. Source audit against MO2 master showed:
+
+- `IPluginList::setPriority` mutates plugin order in memory and updates the plugin pane through model `dataChanged` signals, but `pluginlist.h` documents that this does **not immediately cause anything to be written to disc**.
+- `PluginList::writePluginsList` is wired through `DelayedFileWriterBase::write`; `delayedfilewriter.h` defaults that write delay to 200 ms.
+- `OrganizerCore::refresh(saveChanges=True)` saves the modlist via `writeModlistNow`, but does not force-flush plugins.txt. Its DirectoryRefresher completion path runs `refreshESPList(force=true)`, causing `PluginList::refresh` to re-read plugins.txt from disk.
+
+The old broker called `organizer.refresh()` immediately after `plugin_list.setPriority`. If the refresh/rescan beat the 200 ms delayed writer, stale plugins.txt state was loaded over the fresh in-memory priority, and the delayed writer later flushed the reverted order back to disk. MO2's own GUI drag/drop path does not call `refresh()` for plugin moves; the setPriority/dataChanged cascade is the GUI refresh.
+
+Fix shape:
+
+- `plugins.set_priority`: removed the racy `organizer.refresh()` call, added same-closure readback, and returns `priority_not_applied` with `{name, requested_priority, before_priority, final_priority}` if mobase refuses the move. Successful responses now report `gui_refreshed: true` and `persist: "deferred-writer-200ms"` to make the disk-flush contract explicit.
+- `mods.set_priority`: kept `organizer.refresh()` because modlist refresh does flush via `writeModlistNow`, but moved readback after refresh and now emits the same `priority_not_applied` error if post-refresh state differs from the requested priority.
+- `mo2_send_plugin_to`: `new_priority` now echoes the broker-verified `actual_priority` instead of the TS target, broker errors include their code in the thrown message, and live success performs best-effort plugins.txt polling for the expected relative order (`disk_flush_confirmed`).
+
+Remaining known window: an **external** `organizer.refresh()` within roughly 200 ms of a plugin move can still revert the change before MO2's delayed plugins.txt writer fires. There is no public mobase API to force-flush plugins.txt (`IPluginList` has no save/flush; the C++ `OrganizerCore::savePluginList` is not exposed), so callers must tolerate the deferred persistence window unless MO2 adds an upstream flush API.

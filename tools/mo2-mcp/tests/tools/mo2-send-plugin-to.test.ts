@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -7,6 +7,9 @@ import { PlanCache } from "../../src/plan-apply.js";
 import { SnapshotManager } from "../../src/snapshot.js";
 import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
+import type * as SendPluginToModule from "../../src/tools/mo2-send-plugin-to.js";
+
+let sendPluginToModule: typeof SendPluginToModule;
 
 async function _fixture(
   pluginLines: string[] = ["*Base.esm", "*Anchor.esm", "*Source.esp", "*Last.esp"],
@@ -56,6 +59,9 @@ function _pipeClient(
     { name: "Source.esp", priority: 2 },
     { name: "Last.esp", priority: 3 },
   ],
+  options: {
+    setPriorityResult?: (params: unknown) => { ok: boolean; result?: unknown; error?: { code: string; message: string } | null };
+  } = {},
 ): ToolContext["pipeClient"] {
   return {
     call: async (method: string, params: unknown) => {
@@ -69,7 +75,8 @@ function _pipeClient(
         };
       }
       if (method === "plugins.set_priority") {
-        return { ok: true, result: { actual_priority: (params as { priority: number }).priority }, error: null };
+        if (options.setPriorityResult) return options.setPriorityResult(params) as never;
+        return { ok: true, result: { actual_priority: (params as { priority: number }).priority, noop: true }, error: null };
       }
       throw new Error(`unexpected broker method ${method}`);
     },
@@ -90,7 +97,11 @@ async function _plan(args: Record<string, unknown>, ctx: ToolContext): Promise<{
 describe("mo2_send_plugin_to", () => {
   beforeAll(async () => {
     _clearToolsForTests();
-    await import("../../src/tools/mo2-send-plugin-to.js");
+    sendPluginToModule = await import("../../src/tools/mo2-send-plugin-to.js");
+  });
+
+  afterEach(() => {
+    sendPluginToModule.__setPluginsTxtFlushPollingForTests(1500, 100);
   });
 
   it("registers as T3", () => {
@@ -301,13 +312,101 @@ describe("mo2_send_plugin_to", () => {
         result: { _meta: Record<string, string> };
       };
 
-      expect(apply.result._meta).toEqual({
+      expect(apply.result._meta).toMatchObject({
         priority_convention: "mobase_full_space_higher_wins",
         plugins_txt_file_order: "forward_matches_gui",
         gui_direction_hint:
           "priority is mobase IPluginList space; foreign officials occupy a leading prefix; higher_priority_wins",
         priority_space: "mobase",
       });
+      expect(apply.result._meta.plugins_txt_persistence).toContain("deferred writer");
+    });
+
+    it("apply response new_priority echoes broker-verified actual_priority", async () => {
+      const brokerPlugins = [
+        { name: "Base.esm", priority: 12 },
+        { name: "Anchor.esm", priority: 13 },
+        { name: "Source.esp", priority: 14 },
+        { name: "Last.esp", priority: 15 },
+      ];
+      const { ctx } = await _fixture();
+      const calls: Array<{ method: string; params: unknown }> = [];
+      ctx.pipeClient = _pipeClient(calls, brokerPlugins, {
+        setPriorityResult: () => ({ ok: true, result: { requested_priority: 14, actual_priority: 99 }, error: null }),
+      });
+      const tool = getTool("mo2_send_plugin_to")!;
+      const plan = await _plan({ target_mode: "wins_over", anchor: "Anchor.esm" }, ctx);
+
+      const apply = await tool.handler({ mode: "apply", plan_id: plan.result.plan_id, lease_token: plan.result.lease_token }, ctx) as {
+        ok: boolean;
+        result: { new_priority: number; actual_priority: number };
+      };
+
+      expect(apply.ok).toBe(true);
+      expect(apply.result.actual_priority).toBe(99);
+      expect(apply.result.new_priority).toBe(99);
+    });
+
+    it("surfaces broker priority_not_applied code when live set_priority is refused", async () => {
+      const { ctx } = await _fixture();
+      const calls: Array<{ method: string; params: unknown }> = [];
+      ctx.pipeClient = _pipeClient(calls, undefined, {
+        setPriorityResult: () => ({
+          ok: false,
+          result: null,
+          error: { code: "priority_not_applied", message: "final priority stayed at 2" },
+        }),
+      });
+      const tool = getTool("mo2_send_plugin_to")!;
+      const plan = await _plan({ target_mode: "gui_bottom" }, ctx);
+
+      await expect(
+        tool.handler({ mode: "apply", plan_id: plan.result.plan_id, lease_token: plan.result.lease_token }, ctx),
+      ).rejects.toThrow(/plugins\.set_priority failed \[priority_not_applied\]: final priority stayed at 2/);
+    });
+
+    it("sets disk_flush_confirmed true when plugins.txt reaches the expected relative order", async () => {
+      const { root, ctx } = await _fixture();
+      const calls: Array<{ method: string; params: unknown }> = [];
+      ctx.pipeClient = _pipeClient(calls, undefined, {
+        setPriorityResult: () => {
+          void writeFile(
+            join(root, "profiles", "Default", "plugins.txt"),
+            ["*Base.esm", "*Source.esp", "*Anchor.esm", "*Last.esp"].join("\n") + "\n",
+            "utf8",
+          );
+          return { ok: true, result: { actual_priority: 0, noop: false }, error: null };
+        },
+      });
+      const tool = getTool("mo2_send_plugin_to")!;
+      const plan = await _plan({ target_mode: "loses_to", anchor: "Anchor.esm" }, ctx);
+
+      const apply = await tool.handler({ mode: "apply", plan_id: plan.result.plan_id, lease_token: plan.result.lease_token }, ctx) as {
+        ok: boolean;
+        result: { disk_flush_confirmed: boolean };
+      };
+
+      expect(apply.ok).toBe(true);
+      expect(apply.result.disk_flush_confirmed).toBe(true);
+    });
+
+    it("sets disk_flush_confirmed false without failing when plugins.txt does not flush in time", async () => {
+      sendPluginToModule.__setPluginsTxtFlushPollingForTests(10, 1);
+      const { ctx } = await _fixture();
+      const calls: Array<{ method: string; params: unknown }> = [];
+      ctx.pipeClient = _pipeClient(calls, undefined, {
+        setPriorityResult: (params) => ({ ok: true, result: { actual_priority: (params as { priority: number }).priority, noop: false }, error: null }),
+      });
+      const tool = getTool("mo2_send_plugin_to")!;
+      const plan = await _plan({ target_mode: "loses_to", anchor: "Anchor.esm" }, ctx);
+
+      const apply = await tool.handler({ mode: "apply", plan_id: plan.result.plan_id, lease_token: plan.result.lease_token }, ctx) as {
+        ok: boolean;
+        result: { disk_flush_confirmed: boolean };
+      };
+
+      expect(apply.ok).toBe(true);
+      expect(apply.result.disk_flush_confirmed).toBe(false);
     });
   });
 
