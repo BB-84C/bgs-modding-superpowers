@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getTool, _clearToolsForTests } from "../../src/tool-registry.js";
@@ -8,6 +8,7 @@ import { SnapshotManager } from "../../src/snapshot.js";
 import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 import type * as SendPluginToModule from "../../src/tools/mo2-send-plugin-to.js";
+import { dispatchToolCall } from "../../src/dispatch.js";
 
 let sendPluginToModule: typeof SendPluginToModule;
 
@@ -60,7 +61,7 @@ function _pipeClient(
     { name: "Last.esp", priority: 3 },
   ],
   options: {
-    setPriorityResult?: (params: unknown) => { ok: boolean; result?: unknown; error?: { code: string; message: string } | null };
+    setPriorityResult?: (params: unknown) => { ok: boolean; result?: unknown; error?: { code: string; message: string; details?: unknown } | null } | Promise<{ ok: boolean; result?: unknown; error?: { code: string; message: string; details?: unknown } | null }>;
   } = {},
 ): ToolContext["pipeClient"] {
   return {
@@ -365,6 +366,35 @@ describe("mo2_send_plugin_to", () => {
       ).rejects.toThrow(/plugins\.set_priority failed \[priority_not_applied\]: final priority stayed at 2/);
     });
 
+    it("dispatch envelope preserves broker priority_not_applied code and details", async () => {
+      const { ctx } = await _fixture();
+      const calls: Array<{ method: string; params: unknown }> = [];
+      ctx.pipeClient = _pipeClient(calls, undefined, {
+        setPriorityResult: () => ({
+          ok: false,
+          result: null,
+          error: {
+            code: "priority_not_applied",
+            message: "final priority stayed at 2",
+            details: { name: "Source.esp", requested_priority: 3, final_priority: 2 },
+          },
+        }),
+      });
+      const plan = await _plan({ target_mode: "gui_bottom" }, ctx);
+
+      const result = await dispatchToolCall({
+        toolName: "mo2_send_plugin_to",
+        rawArgs: { mode: "apply", plan_id: plan.result.plan_id, lease_token: plan.result.lease_token },
+        ctx,
+        rules: [],
+      });
+      const env = JSON.parse(result.content[0].text) as { ok: boolean; error: { code: string; details?: unknown } };
+
+      expect(env.ok).toBe(false);
+      expect(env.error.code).toBe("priority_not_applied");
+      expect(env.error.details).toMatchObject({ name: "Source.esp", requested_priority: 3, final_priority: 2 });
+    });
+
     it("sets disk_flush_confirmed true when plugins.txt reaches the expected relative order", async () => {
       const { root, ctx } = await _fixture();
       const calls: Array<{ method: string; params: unknown }> = [];
@@ -407,6 +437,28 @@ describe("mo2_send_plugin_to", () => {
 
       expect(apply.ok).toBe(true);
       expect(apply.result.disk_flush_confirmed).toBe(false);
+    });
+
+    it("keeps apply successful when plugins.txt is transiently unreadable during flush polling", async () => {
+      sendPluginToModule.__setPluginsTxtFlushPollingForTests(10, 1);
+      const { root, ctx } = await _fixture();
+      const calls: Array<{ method: string; params: unknown }> = [];
+      ctx.pipeClient = _pipeClient(calls, undefined, {
+        setPriorityResult: async (params) => {
+          await rm(join(root, "profiles", "Default", "plugins.txt"));
+          return { ok: true, result: { actual_priority: (params as { priority: number }).priority, noop: false }, error: null };
+        },
+      });
+      const tool = getTool("mo2_send_plugin_to")!;
+      const plan = await _plan({ target_mode: "loses_to", anchor: "Anchor.esm" }, ctx);
+
+      const apply = await tool.handler({ mode: "apply", plan_id: plan.result.plan_id, lease_token: plan.result.lease_token }, ctx) as {
+        ok: boolean;
+        result: { disk_flush_confirmed: boolean | null };
+      };
+
+      expect(apply.ok).toBe(true);
+      expect([false, null]).toContain(apply.result.disk_flush_confirmed);
     });
   });
 

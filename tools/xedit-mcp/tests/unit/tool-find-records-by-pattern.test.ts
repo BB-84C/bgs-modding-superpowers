@@ -284,10 +284,12 @@ describe("xedit_find_records_by_pattern tool", () => {
       matches: Array<Record<string, unknown>>;
       truncated: boolean;
       nextOffset?: number;
+      offset?: number;
       pagesFetched?: number;
       regexSlotsExhausted?: boolean;
     };
     expect(data.matches.map((m) => m.formId)).toEqual(["01000001", "01000002", "01000003"]);
+    expect(data.offset).toBe(0);
     expect(data.pagesFetched).toBe(3);
     expect(data.truncated).toBe(false);
     expect(data.nextOffset).toBeUndefined();

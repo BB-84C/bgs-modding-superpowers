@@ -18,7 +18,7 @@ import { enrichBrokerError } from "./broker-error.js";
 export interface BrokerResponse {
   ok: boolean;
   result?: unknown;
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; details?: unknown };
 }
 
 export class PipeClient {
