@@ -1,5 +1,6 @@
 export const MCP_ERROR_CODES = {
     INVALID_REQUEST: "invalid_request",
+    INVALID_ARGUMENTS: "invalid_arguments",
     STATE_VIOLATION: "state_violation",
     DAEMON_ERROR: "daemon_error",
     INTERNAL_ERROR: "internal_error",

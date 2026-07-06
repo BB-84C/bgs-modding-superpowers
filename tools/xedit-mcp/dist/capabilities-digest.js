@@ -1,11 +1,13 @@
 /**
- * TES5Edit-contrib r6 (automation contract 0.20) is additive over the older
+ * TES5Edit-contrib r7 (automation contract 0.21) is additive over the older
  * digest surface. The live daemon reports the details via system.capabilities;
  * this digest only surfaces agent-facing command names and key args.
  *
  * New r6 supports.* anchors tracked here:
  * - supports.childGroupNavigation (0.13)
- * - supports.applyFilterExtensions (0.14; 0.20 adds regex + multiPattern sub-blocks)
+ * - supports.applyFilterExtensions (0.14; 0.20 adds regex + multiPattern sub-blocks;
+ *   0.21 adds pagination sub-block: cursorField nextOffset, maxLimit 100,
+ *   limitOverCapRejected, offsetSemantics matched-records-not-indices)
  * - supports.referencesRecursive (0.15)
  * - supports.conflictStatusChildGroup (0.15; response-only result.childGroup)
  * - supports.createParentSpec (0.16; records.create parent={file, formId, subGroup?, coords?})
@@ -14,7 +16,7 @@
  * - supports.reverseNavigation (0.19)
  */
 export const CAPABILITIES_DIGEST = {
-    contractVersionExpected: "0.20",
+    contractVersionExpected: "0.21",
     groups: [
         {
             name: "system",
