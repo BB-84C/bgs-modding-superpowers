@@ -63,6 +63,12 @@ const RESPONSE_META_OFFLINE = {
     gui_direction_hint: "priority_0_at_gui_top_loads_first_loses; priority_(N-1)_at_gui_bottom_loads_last_wins",
     priority_space: "plugins_txt_index",
 };
+let pluginsTxtFlushPollTimeoutMs = 1500;
+let pluginsTxtFlushPollIntervalMs = 100;
+export function __setPluginsTxtFlushPollingForTests(timeoutMs, intervalMs) {
+    pluginsTxtFlushPollTimeoutMs = timeoutMs;
+    pluginsTxtFlushPollIntervalMs = intervalMs;
+}
 /**
  * LIVE-mode priority view. Filters broker's full plugin list down to the
  * plugins.txt entries (foreign officials excluded) so user-facing min/max
@@ -154,6 +160,61 @@ function _rewritePluginsTxtAtPriority(text, pluginName, targetPriority) {
     pluginLines.splice(insertIdx, 0, sourceLine);
     return `${[...commentLines, ...pluginLines].join("\n")}\n`;
 }
+function _pluginsTxtOrder(text) {
+    return text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && !line.startsWith("#"))
+        .map((line) => line.replace(/^\*/, "").trim());
+}
+function _relativeOrderSatisfied(text, pluginName, targetMode, anchor) {
+    const order = _pluginsTxtOrder(text);
+    const sourceIdx = order.indexOf(pluginName);
+    if (sourceIdx < 0)
+        return false;
+    switch (targetMode) {
+        case "wins_over": {
+            if (!anchor)
+                return false;
+            const anchorIdx = order.indexOf(anchor);
+            return anchorIdx >= 0 && sourceIdx > anchorIdx;
+        }
+        case "loses_to": {
+            if (!anchor)
+                return false;
+            const anchorIdx = order.indexOf(anchor);
+            return anchorIdx >= 0 && sourceIdx < anchorIdx;
+        }
+        case "gui_bottom":
+            return sourceIdx === order.length - 1;
+        case "gui_top":
+            return sourceIdx === 0;
+        case "raw_priority":
+            return null;
+        default:
+            return false;
+    }
+}
+function _sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function _confirmPluginsTxtFlush(pluginsPath, beforeText, args, timeoutMs = pluginsTxtFlushPollTimeoutMs, intervalMs = pluginsTxtFlushPollIntervalMs) {
+    const pluginName = args.name;
+    const targetMode = args.target_mode;
+    const anchor = args.anchor;
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+        const current = await readFile(pluginsPath, "utf8");
+        const relative = _relativeOrderSatisfied(current, pluginName, targetMode, anchor);
+        if (relative === true)
+            return true;
+        if (relative === null && current !== beforeText)
+            return true;
+        if (Date.now() >= deadline)
+            return relative === null ? null : false;
+        await _sleep(intervalMs);
+    }
+}
 const handler = {
     toolName: "mo2_send_plugin_to",
     async buildPlan(args, ctx) {
@@ -185,18 +246,34 @@ const handler = {
         const { priority: targetPri, useBroker } = await _computeTargetPriority(args, ctx, profile);
         if (bound.pipeClient && useBroker) {
             await assertActiveProfile(ctx, profile);
+            const pluginsPath = join(resolveProfileDir(ctx, profile), "plugins.txt");
+            const beforePluginsTxt = await readFile(pluginsPath, "utf8");
             const resp = await bound.pipeClient.call("plugins.set_priority", {
                 name: args.name,
                 priority: targetPri,
             });
-            if (!resp.ok)
-                throw new Error(resp.error?.message ?? "plugins.set_priority failed");
+            if (!resp.ok) {
+                const code = resp.error?.code ?? "unknown";
+                const message = resp.error?.message ?? "plugins.set_priority failed";
+                throw new Error(`plugins.set_priority failed [${code}]: ${message}`);
+            }
+            const brokerResult = resp.result ?? {};
+            const actualPriority = typeof brokerResult.actual_priority === "number"
+                ? brokerResult.actual_priority
+                : targetPri;
+            const diskFlushConfirmed = brokerResult.noop === true
+                ? true
+                : await _confirmPluginsTxtFlush(pluginsPath, beforePluginsTxt, args);
             await logApplyEvent(handler.toolName, `moved plugin "${args.name}" mode=${args.target_mode} anchor="${args.anchor ?? "none"}"`, bound, plan.planId, profile);
             return {
-                ...resp.result,
-                new_priority: targetPri,
+                ...brokerResult,
+                new_priority: actualPriority,
                 target_mode: args.target_mode,
-                _meta: RESPONSE_META_BROKER,
+                disk_flush_confirmed: diskFlushConfirmed,
+                _meta: {
+                    ...RESPONSE_META_BROKER,
+                    plugins_txt_persistence: "MO2 writes plugins.txt through its deferred writer; disk_flush_confirmed is best-effort readback",
+                },
             };
         }
         const pluginsPath = join(resolveProfileDir(ctx, profile), "plugins.txt");

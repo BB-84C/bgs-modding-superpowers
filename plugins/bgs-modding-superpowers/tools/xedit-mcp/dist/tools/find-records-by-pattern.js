@@ -5,8 +5,9 @@ import { validateArgs } from "../pipeline/validate.js";
 import { precheck } from "../pipeline/state-precheck.js";
 import { runRules } from "../pipeline/rules.js";
 import { emitAudit } from "../audit-line.js";
-// r6 supports.applyFilterExtensions (contract 0.14; 0.20 added regex + multiPattern
-// sub-blocks). This tool wraps records.apply_filter with the new filter args so
+// r6/r7 supports.applyFilterExtensions (contract 0.14; 0.20 added regex +
+// multiPattern sub-blocks; 0.21 adds offset/nextOffset pagination with maxLimit
+// 100). This tool wraps records.apply_filter with the new filter args so
 // the agent can express "all REFRs inside CELL X whose EditorID matches
 // ^(Iron|Steel)" as one typed call instead of constructing the JSON by hand
 // through xedit_call.
@@ -30,8 +31,16 @@ const Args = z
     baseDisplayNameRegex: RegexOrArray,
     editorIdPattern: RegexOrArray,
     displayNamePattern: RegexOrArray,
-    limit: z.number().int().positive().max(10000).optional(),
+    limit: z
+        .number()
+        .int()
+        .positive()
+        .max(100, {
+        message: "limit must be 1..100 (daemon contract 0.21 rejects limit > 100 as invalid_request)",
+    })
+        .optional(),
     offset: z.number().int().nonnegative().optional(),
+    drainAll: z.boolean().optional(),
 })
     .refine((data) => {
     // At least one filter predicate must be supplied. "limit" / "offset" /
@@ -84,6 +93,11 @@ function wrapFileAsFiles(args) {
     }
     return args;
 }
+function stripMcpOnlyArgs(args) {
+    const out = { ...args };
+    delete out.drainAll;
+    return out;
+}
 export function makeFindRecordsByPatternHandler(opts) {
     return async (args) => {
         const ctx = opts.getContext();
@@ -94,6 +108,25 @@ export function makeFindRecordsByPatternHandler(opts) {
                 code: MCP_ERROR_CODES.STATE_VIOLATION,
                 hint: "Call xedit_session first.",
             });
+        }
+        if (typeof args.limit === "number" && Number.isInteger(args.limit) && args.limit > 100) {
+            const env = refuse({
+                tool: "xedit_find_records_by_pattern",
+                summary: "Argument validation failed",
+                code: MCP_ERROR_CODES.INVALID_ARGUMENTS,
+                hint: "limit must be 1..100 (daemon contract 0.21 rejects limit > 100 as invalid_request)",
+                detail: {
+                    issues: [
+                        {
+                            path: "limit",
+                            expected: "limit must be 1..100 (daemon contract 0.21 rejects limit > 100 as invalid_request)",
+                            code: "too_big",
+                        },
+                    ],
+                },
+            });
+            await emitAudit({ audit: opts.audit, tool: "xedit_find_records_by_pattern", args, env, ctx });
+            return env;
         }
         const v = validateArgs(Args, args, { tool: "xedit_find_records_by_pattern" });
         if (v) {
@@ -122,7 +155,102 @@ export function makeFindRecordsByPatternHandler(opts) {
             });
             return r.refusal;
         }
-        const daemonArgs = wrapFileAsFiles(stripParentFormIdPrefix(args));
+        const parsedArgs = Args.parse(args);
+        const daemonArgsBase = wrapFileAsFiles(stripParentFormIdPrefix(stripMcpOnlyArgs(args)));
+        const drainAll = parsedArgs.drainAll === true;
+        if (drainAll) {
+            const pageLimit = parsedArgs.limit ?? 100;
+            let pageOffset = parsedArgs.offset ?? 0;
+            let pagesFetched = 0;
+            let drainCapped = false;
+            let finalNextOffset;
+            let regexSlotsExhausted = false;
+            let lastLimit;
+            let lastOffset;
+            const matches = [];
+            const maxPages = 20;
+            const maxMatches = 2000;
+            while (true) {
+                const pageArgs = {
+                    ...daemonArgsBase,
+                    limit: pageLimit,
+                    ...(pageOffset === 0 && parsedArgs.offset === undefined ? {} : { offset: pageOffset }),
+                };
+                const native = await opts.adapter.call({
+                    command: "records.apply_filter",
+                    args: pageArgs,
+                });
+                if (!native.ok) {
+                    const env = refuse({
+                        tool: "xedit_find_records_by_pattern",
+                        summary: `records.apply_filter failed: ${native.error.code}`,
+                        code: MCP_ERROR_CODES.DAEMON_ERROR,
+                        hint: native.error.message,
+                        detail: { daemonCode: native.error.code, daemonDetails: native.error.details },
+                    });
+                    await emitAudit({ audit: opts.audit, tool: "xedit_find_records_by_pattern", args, env, ctx });
+                    return env;
+                }
+                const page = normalizeResult(native.result);
+                pagesFetched += 1;
+                regexSlotsExhausted = regexSlotsExhausted || page.regexSlotsExhausted === true;
+                lastLimit = page.limit;
+                lastOffset = page.offset;
+                for (const match of page.matches) {
+                    if (matches.length >= maxMatches)
+                        break;
+                    matches.push(match);
+                }
+                finalNextOffset = page.nextOffset;
+                if (page.truncated !== true) {
+                    finalNextOffset = undefined;
+                    break;
+                }
+                if (pagesFetched >= maxPages || matches.length >= maxMatches) {
+                    drainCapped = true;
+                    break;
+                }
+                if (typeof page.nextOffset !== "number") {
+                    drainCapped = true;
+                    break;
+                }
+                pageOffset = page.nextOffset;
+            }
+            const data = {
+                matches,
+                matchCount: matches.length,
+                truncated: drainCapped,
+                regexSlotsExhausted,
+                pagesFetched,
+            };
+            if (typeof lastOffset === "number")
+                data.offset = lastOffset;
+            if (typeof lastLimit === "number")
+                data.limit = lastLimit;
+            if (drainCapped) {
+                data.drainCapped = true;
+                data.drainCapNote = "drainAll stopped at the hard safety cap (20 pages / 2000 matches); continue manually from nextOffset.";
+                if (typeof finalNextOffset === "number")
+                    data.nextOffset = finalNextOffset;
+            }
+            const env = okEnv({
+                tool: "xedit_find_records_by_pattern",
+                summary: `apply_filter drained ${matches.length} match${matches.length === 1 ? "" : "es"} across ${pagesFetched} page${pagesFetched === 1 ? "" : "s"}`,
+                status: "completed",
+                data,
+                warnings: r.warnings,
+            });
+            await emitAudit({
+                audit: opts.audit,
+                tool: "xedit_find_records_by_pattern",
+                args,
+                env,
+                ctx,
+                ruleHits: r.ruleHits.length ? r.ruleHits : undefined,
+            });
+            return env;
+        }
+        const daemonArgs = daemonArgsBase;
         const native = await opts.adapter.call({
             command: "records.apply_filter",
             args: daemonArgs,
@@ -142,22 +270,19 @@ export function makeFindRecordsByPatternHandler(opts) {
         //   { matches: [{file, formId, signature, editorId?, displayName?}, ...],
         //     matchCount, truncated?, regexSlotsExhausted? }
         // Older shape used `hits`. Accept both.
-        const result = (native.result ?? {});
-        const rawMatches = Array.isArray(result.matches)
-            ? result.matches
-            : Array.isArray(result.hits)
-                ? result.hits
-                : [];
-        const matches = rawMatches.map(normalizeMatch);
+        const result = normalizeResult(native.result);
         const env = okEnv({
             tool: "xedit_find_records_by_pattern",
-            summary: `apply_filter returned ${matches.length} match${matches.length === 1 ? "" : "es"}`,
+            summary: `apply_filter returned ${result.matches.length} match${result.matches.length === 1 ? "" : "es"}`,
             status: "completed",
             data: {
-                matches,
-                matchCount: typeof result.matchCount === "number" ? result.matchCount : matches.length,
+                matches: result.matches,
+                matchCount: typeof result.matchCount === "number" ? result.matchCount : result.matches.length,
                 truncated: result.truncated === true,
                 regexSlotsExhausted: result.regexSlotsExhausted === true,
+                ...(typeof result.offset === "number" ? { offset: result.offset } : {}),
+                ...(typeof result.limit === "number" ? { limit: result.limit } : {}),
+                ...(typeof result.nextOffset === "number" ? { nextOffset: result.nextOffset } : {}),
             },
             warnings: r.warnings,
         });
@@ -170,6 +295,23 @@ export function makeFindRecordsByPatternHandler(opts) {
             ruleHits: r.ruleHits.length ? r.ruleHits : undefined,
         });
         return env;
+    };
+}
+function normalizeResult(resultInput) {
+    const result = (resultInput ?? {});
+    const rawMatches = Array.isArray(result.matches)
+        ? result.matches
+        : Array.isArray(result.hits)
+            ? result.hits
+            : [];
+    return {
+        matches: rawMatches.map(normalizeMatch),
+        matchCount: result.matchCount,
+        truncated: result.truncated,
+        regexSlotsExhausted: result.regexSlotsExhausted,
+        offset: result.offset,
+        limit: result.limit,
+        nextOffset: result.nextOffset,
     };
 }
 /**

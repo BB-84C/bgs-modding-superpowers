@@ -344,7 +344,7 @@ function Invoke-XeditClientProcessLaunch {
 
     $processId = $null
     try {
-        $options = ConvertTo-XeditClientOptionMap -Arguments $Arguments -AllowedNames @('--launcher-path', '--game-mode', '--plugins-file', '--mo-profile', '--load-mode', '--plugin', '--data-path', '--mo2-root', '--i-know-what-im-doing')
+        $options = ConvertTo-XeditClientOptionMap -Arguments $Arguments -AllowedNames @('--launcher-path', '--game-mode', '--plugins-file', '--mo-profile', '--load-mode', '--plugin', '--data-path', '--mo2-root', '--i-know-what-im-doing', '--no-starfield-redpill')
         if ($null -eq (Get-XeditClientRequiredOptionValues -Options $options -Names @('--launcher-path', '--game-mode'))) { return 1 }
         $unsupportedLegacyOptions = @(Get-XeditClientUnsupportedLegacyLaunchOptions -Options $options)
         if ($unsupportedLegacyOptions.Count -gt 0) { Write-Host "Legacy options are no longer supported: $($unsupportedLegacyOptions -join ', ')"; return 1 }
@@ -401,6 +401,15 @@ function Invoke-XeditClientProcessLaunch {
         if ($options.ContainsKey('--i-know-what-im-doing') -and [string]$options['--i-know-what-im-doing'] -eq '1') {
             $normalizedLauncherCommand.ArgumentList = @($normalizedLauncherCommand.ArgumentList + @('-IKnowWhatImDoing'))
             $nativeTargetArgumentList = @(ConvertTo-XeditClientFlatStringArray -Values @($nativeTargetArgumentList + @('-IKnowWhatImDoing')))
+        }
+
+        # Starfield save unlock: upstream xEdit 4.1.5k commit 1fcec21b3 gates
+        # saving small/medium/localized ESMs unless all three RedPill switches are
+        # present. Default them on for Starfield; --no-starfield-redpill 1 opts out.
+        if ([string]$options['--game-mode'] -eq 'Starfield' -and -not ($options.ContainsKey('--no-starfield-redpill') -and [string]$options['--no-starfield-redpill'] -eq '1')) {
+            $redPillArgs = @('-ItJustWorksTM', '-ThisIsFine', '-GiveMeTheRedPill')
+            $normalizedLauncherCommand.ArgumentList = @($normalizedLauncherCommand.ArgumentList + $redPillArgs)
+            $nativeTargetArgumentList = @(ConvertTo-XeditClientFlatStringArray -Values @($nativeTargetArgumentList + $redPillArgs))
         }
 
         $mo2LaunchRequest = $null

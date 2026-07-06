@@ -136,7 +136,7 @@ export function buildServerToolset(opts: ServerToolsetOptions): ServerToolset {
 //     BGS_XEDIT_GAME_MODE      xEdit game mode string, e.g. "Fallout4"
 //     BGS_MO2_PROFILE          optional, defaults to "Default"
 //   Per-call overrides (xedit_start args, win over env vars):
-//     moRoot, launcherPath, gameMode, dataPath, pluginsFile, moProfile
+//     moRoot, launcherPath, gameMode, dataPath, pluginsFile, moProfile, starfieldRedPill
 //   Auto-detect fallback (dev workflow only):
 //     <plugin-root>/tools/mo2-vfs-launcher/xedit-client.ps1
 //     <plugin-root>/.artifacts/mo2/tools/xEdit/xEdit.exe — used ONLY when
@@ -158,6 +158,7 @@ interface LaunchOverrides {
   pluginsFile?: string;
   moProfile?: string;
   iKnowWhatImDoing?: boolean;
+  starfieldRedPill?: boolean;
 }
 
 function resolveLaunchOpts(overrides: LaunchOverrides = {}): ResolvedLaunchOpts | { error: string } {
@@ -179,6 +180,7 @@ function resolveLaunchOpts(overrides: LaunchOverrides = {}): ResolvedLaunchOpts 
   // the dev workflow must opt into mutations via the MCP tool arg so the
   // audit log captures the consent decision at the call site.
   const iKnowWhatImDoing = overrides.iKnowWhatImDoing === true ? true : undefined;
+  const starfieldRedPill = overrides.starfieldRedPill === false ? false : undefined;
   // launcherPath default: explicit override > env > <moRoot>/tools/xEdit/xEdit.exe
   const launcherPath = overrides.launcherPath
     ?? envLauncher
@@ -194,6 +196,7 @@ function resolveLaunchOpts(overrides: LaunchOverrides = {}): ResolvedLaunchOpts 
       dataPath,
       pluginsFile,
       iKnowWhatImDoing,
+      starfieldRedPill,
     };
   }
 
@@ -219,6 +222,7 @@ function resolveLaunchOpts(overrides: LaunchOverrides = {}): ResolvedLaunchOpts 
       dataPath,
       pluginsFile,
       iKnowWhatImDoing,
+      starfieldRedPill,
     };
   } catch {
     return {
@@ -231,7 +235,7 @@ function resolveLaunchOpts(overrides: LaunchOverrides = {}): ResolvedLaunchOpts 
         "next to this MCP), BGS_XEDIT_LAUNCHER_PATH (override the xEdit.exe location), " +
         "BGS_XEDIT_GAME_MODE (e.g. 'Fallout4'), BGS_MO2_PROFILE (default 'Default'), " +
         "BGS_XEDIT_DATA_PATH (-D: flag, MO2 Data dir), BGS_XEDIT_PLUGINS_FILE (-P: flag). " +
-        "Or pass these as xedit_start({ moRoot, launcherPath, gameMode, dataPath, pluginsFile, moProfile }) " +
+        "Or pass these as xedit_start({ moRoot, launcherPath, gameMode, dataPath, pluginsFile, moProfile, starfieldRedPill }) " +
         "overrides at runtime.",
     };
   }
@@ -281,6 +285,11 @@ const LAUNCH_OVERRIDE_PROPERTIES = {
     type: "boolean" as const,
     description:
       "If true, launches xEdit with the -IKnowWhatImDoing flag, enabling mutating automation commands (records.create, records.copy_into, records.delete, records.mark_deleted, elements.set_value, files.create header writes, etc.). Default false; mutating intent tools (e.g. xedit_create_child_record) fast-fail with mutation_requires_iknowwhatimdoing when consent is off. Verify via xedit_session.data.consentEnabled === true after launch.",
+  },
+  starfieldRedPill: {
+    type: "boolean" as const,
+    description:
+      "Starfield only: pass the upstream save-unlock trio (-ItJustWorksTM -ThisIsFine -GiveMeTheRedPill) to xEdit. Default true — required to save small/medium/localized ESMs in SF1 mode. Set false to opt out. Side effects when on: window title shows ItJustWorks[TM] Edition; files.create no longer auto-adds Starfield.esm as master (pass initialMasters explicitly).",
   },
 };
 
@@ -473,7 +482,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "xedit_find_records_by_pattern",
     description:
-      "Requires the daemon to be ready. Wraps records.apply_filter with the r6 filter args (supports.applyFilterExtensions, contract 0.14 + 0.20 multi-pattern). At least one filter predicate is required: parentFormId, signatures, or any of *Regex / *Pattern. For multi-pattern OR, pass either a single regex string or a JSON array of strings; *Pattern and *Regex for the same logical name (editorId / displayName) are mutually exclusive.",
+      "Requires the daemon to be ready. Wraps records.apply_filter with the r6/r7 filter args (supports.applyFilterExtensions, contract 0.14 + 0.20 multi-pattern + 0.21 pagination: offset/nextOffset, maxLimit 100, optional MCP-side drainAll). At least one filter predicate is required: parentFormId, signatures, or any of *Regex / *Pattern. For multi-pattern OR, pass either a single regex string or a JSON array of strings; *Pattern and *Regex for the same logical name (editorId / displayName) are mutually exclusive.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -530,13 +539,17 @@ export const TOOL_DEFINITIONS = [
         limit: {
           type: "integer" as const,
           minimum: 1,
-          maximum: 10000,
-          description: "Maximum matches to return (server-side cap applies).",
+          maximum: 100,
+          description: "Maximum matches per page (1..100). Contract 0.21 rejects limit > 100 as invalid_request.",
         },
         offset: {
           type: "integer" as const,
           minimum: 0,
-          description: "Skip this many matches before returning results (pagination).",
+          description: "Skip this many MATCHED records before returning results (contract 0.21 pagination; offset counts matched records, not raw record indices). Response surfaces nextOffset while truncated=true.",
+        },
+        drainAll: {
+          type: "boolean" as const,
+          description: "If true, the MCP server follows nextOffset pages server-side until truncated=false, aggregating matches. Hard cap 20 pages / 2000 matches (drainCapped=true + nextOffset returned when hit). Default false.",
         },
       },
       additionalProperties: false,
@@ -877,6 +890,7 @@ export async function main(): Promise<void> {
         dataPath: typeof args.dataPath === "string" ? args.dataPath : undefined,
         pluginsFile: typeof args.pluginsFile === "string" ? args.pluginsFile : undefined,
         iKnowWhatImDoing: args.iKnowWhatImDoing === true ? true : undefined,
+        starfieldRedPill: args.starfieldRedPill === false ? false : undefined,
         moProfile: typeof args.moProfile === "string" ? args.moProfile : undefined,
       };
       const kick = kickoffLaunch(overrides);
@@ -995,6 +1009,7 @@ export async function main(): Promise<void> {
         dataPath: typeof args.dataPath === "string" ? args.dataPath : undefined,
         pluginsFile: typeof args.pluginsFile === "string" ? args.pluginsFile : undefined,
         iKnowWhatImDoing: args.iKnowWhatImDoing === true ? true : undefined,
+        starfieldRedPill: args.starfieldRedPill === false ? false : undefined,
         moProfile: typeof args.moProfile === "string" ? args.moProfile : undefined,
       };
 

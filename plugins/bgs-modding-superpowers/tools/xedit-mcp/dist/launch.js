@@ -69,6 +69,9 @@ export async function launchDaemon(opts) {
             // ArgumentList branch that mirrors the `-automation-serve` append pattern.
             launchArgs.push("--i-know-what-im-doing", "1");
         }
+        if (opts.starfieldRedPill === false) {
+            launchArgs.push("--no-starfield-redpill", "1");
+        }
         const launchOut = await runPwshCapture(pwsh, launchArgs);
         pid = parseLaunchPid(launchOut);
         if (!pid) {

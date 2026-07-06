@@ -59,6 +59,7 @@ class ErrorCode:
     INTERNAL_ERROR = "internal_error"
     MOD_NOT_FOUND = "mod_not_found"
     PRIORITY_OUT_OF_RANGE = "priority_out_of_range"
+    PRIORITY_NOT_APPLIED = "priority_not_applied"
     PLUGIN_NOT_FOUND = "plugin_not_found"
     REFRESH_TIMEOUT = "refresh_timeout"
     MAIN_THREAD_UNAVAILABLE = "main_thread_unavailable"
@@ -988,7 +989,7 @@ def _handle_mods_set_priority(organizer, pump, payload):
     """Reorder a mod via main-thread setPriority + readback.
 
     oracle §2.1: setPriority can silently no-op when master/non-master
-    inversion would be required. Readback exposes this via noop=true.
+    inversion would be required. Post-refresh readback exposes this as an error.
     """
 
     name = payload.get("name")
@@ -1030,19 +1031,36 @@ def _handle_mods_set_priority(organizer, pump, payload):
 
         before = mod_list.priority(name)
         mod_list.setPriority(name, priority)
-        actual = mod_list.priority(name)
+        # mods.set_priority is intentionally asymmetric with plugins.set_priority:
+        # OrganizerCore::refresh(saveChanges=True) flushes the MODLIST via
+        # writeModlistNow before rescanning, so the refresh is the durability and
+        # GUI-freshness boundary for mod order. Plugin order is different; see
+        # _handle_plugins_set_priority for why refresh is forbidden there.
         try:
             organizer.refresh()
             refreshed = True
         except Exception:
             refreshed = False
+        actual = mod_list.priority(name)
+        if actual != priority:
+            return (
+                "error",
+                ErrorCode.PRIORITY_NOT_APPLIED,
+                f"priority {priority} was not applied for mod '{name}' (final {actual})",
+                {
+                    "name": name,
+                    "requested_priority": priority,
+                    "before_priority": before,
+                    "final_priority": actual,
+                },
+            )
         return (
             "ok",
             {
                 "name": name,
                 "requested_priority": priority,
                 "actual_priority": actual,
-                "noop": (actual == before) and (before != priority),
+                "noop": actual == before,
                 "gui_refreshed": refreshed,
             },
         )
@@ -1057,10 +1075,13 @@ def _handle_mods_set_priority(organizer, pump, payload):
         }
 
     if outcome[0] == "error":
+        error = {"code": outcome[1], "message": outcome[2]}
+        if len(outcome) > 3:
+            error["details"] = outcome[3]
         return {
             "ok": False,
             "result": None,
-            "error": {"code": outcome[1], "message": outcome[2]},
+            "error": error,
         }
 
     return {"ok": True, "result": outcome[1], "error": None}
@@ -1532,7 +1553,7 @@ def _handle_plugins_set_state(organizer, pump, payload):
 
 
 def _handle_plugins_set_priority(organizer, pump, payload):
-    """Set plugin priority via main-thread setPriority + silent-noop readback."""
+    """Set plugin priority via main-thread setPriority + verified readback."""
 
     name = payload.get("name")
     priority = payload.get("priority")
@@ -1555,20 +1576,40 @@ def _handle_plugins_set_priority(organizer, pump, payload):
             return ("error", ErrorCode.PLUGIN_NOT_FOUND, name)
         before = plugin_list.priority(name)
         plugin_list.setPriority(name, priority)
-        after = plugin_list.priority(name)
-        try:
-            organizer.refresh()
-            refreshed = True
-        except Exception:
-            refreshed = False
+        final = plugin_list.priority(name)
+        if final != priority:
+            return (
+                "error",
+                ErrorCode.PRIORITY_NOT_APPLIED,
+                f"priority {priority} was not applied for plugin '{name}' (final {final})",
+                {
+                    "name": name,
+                    "requested_priority": priority,
+                    "before_priority": before,
+                    "final_priority": final,
+                },
+            )
+
+        # DO NOT call organizer.refresh() here. IPluginList::setPriority updates
+        # the plugin pane itself via PluginList model dataChanged signals, while
+        # plugins.txt persistence is queued through MO2's ~200ms
+        # DelayedFileWriter. OrganizerCore::refresh(saveChanges=True) only saves
+        # modlist.txt immediately; its async DirectoryRefresher later re-runs
+        # refreshESPList(force=true), which re-reads plugins.txt from disk. If
+        # that rescan beats the delayed plugins.txt writer, stale disk state
+        # overwrites the fresh in-memory priority and the delayed writer flushes
+        # the reverted order. This was issue #22's silent no-op race.
         return (
             "ok",
             {
                 "name": name,
                 "requested_priority": priority,
-                "actual_priority": after,
-                "noop": after == before and before != priority,
-                "gui_refreshed": refreshed,
+                "actual_priority": final,
+                "noop": final == before,
+                # GUI freshness comes from setPriority's own dataChanged cascade;
+                # it is not evidence of a synchronous plugins.txt disk flush.
+                "gui_refreshed": True,
+                "persist": "deferred-writer-200ms",
             },
         )
 
@@ -1582,10 +1623,13 @@ def _handle_plugins_set_priority(organizer, pump, payload):
         }
 
     if outcome[0] == "error":
+        error = {"code": outcome[1], "message": outcome[2]}
+        if len(outcome) > 3:
+            error["details"] = outcome[3]
         return {
             "ok": False,
             "result": None,
-            "error": {"code": outcome[1], "message": outcome[2]},
+            "error": error,
         }
     return {"ok": True, "result": outcome[1], "error": None}
 
@@ -1609,18 +1653,25 @@ def _handle_plugins_set_load_order(organizer, pump, payload):
             return ("error", ErrorCode.PLUGIN_NOT_FOUND, f"unknown plugins in load_order: {unknown}")
 
         plugin_list.setLoadOrder(order)
-        effective = sorted(plugin_list.pluginNames(), key=lambda name: plugin_list.priority(name))
         try:
             organizer.refresh()
             refreshed = True
         except Exception:
             refreshed = False
+        # TODO(issue #22): setLoadOrder shares the plugins.txt DelayedFileWriter
+        # race family with setPriority. Keep the historical refresh behavior for
+        # now because setLoadOrder normalization semantics are broader, but remove
+        # refresh here too if live evidence shows the same revert pattern.
+        effective = sorted(plugin_list.pluginNames(), key=lambda name: plugin_list.priority(name))
+        requested_set = set(order)
+        effective_subset = [name for name in effective if name in requested_set]
         return (
             "ok",
             {
                 "requested_explicit": list(order),
                 "effective_order": effective,
                 "implicitly_appended_count": len(effective) - len(order),
+                "applied": effective_subset == list(order),
                 "gui_refreshed": refreshed,
             },
         )

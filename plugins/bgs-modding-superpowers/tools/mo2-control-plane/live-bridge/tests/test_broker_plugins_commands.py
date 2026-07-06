@@ -198,14 +198,16 @@ def test_plugins_set_priority_success(monkeypatch):
     assert result["ok"] is True
     readback = result["result"]
     assert readback["name"] == "B.esp"
+    assert readback["requested_priority"] == 1
     assert readback["actual_priority"] == 1
     assert readback["noop"] is False
     assert readback["gui_refreshed"] is True
-    organizer.refresh.assert_called_once_with()
+    assert readback["persist"] == "deferred-writer-200ms"
+    organizer.refresh.assert_not_called()
 
 
-def test_plugins_set_priority_silent_noop_detected(monkeypatch):
-    """Per librarian-alpha §A3: setPriority can silently noop on master-inversion."""
+def test_plugins_set_priority_refused_move_returns_priority_not_applied(monkeypatch):
+    """mobase may return from setPriority without moving; broker must not report ok."""
 
     bridge = _load_bridge(monkeypatch)
 
@@ -221,10 +223,37 @@ def test_plugins_set_priority_silent_noop_detected(monkeypatch):
 
     result = bridge._handle_plugins_set_priority(organizer, pump, {"name": "B.esp", "priority": 5})
 
+    assert result["ok"] is False
+    assert result["error"]["code"] == "priority_not_applied"
+    assert result["error"]["details"] == {
+        "name": "B.esp",
+        "requested_priority": 5,
+        "before_priority": 0,
+        "final_priority": 0,
+    }
+    organizer.refresh.assert_not_called()
+
+
+def test_plugins_set_priority_already_at_requested_priority_is_ok_noop(monkeypatch):
+    bridge = _load_bridge(monkeypatch)
+
+    plugin_list = MagicMock()
+    plugin_list.pluginNames.return_value = ["A.esm", "B.esp"]
+    plugin_list.priority.return_value = 5
+    plugin_list.setPriority = MagicMock()
+
+    organizer = MagicMock()
+    organizer.pluginList.return_value = plugin_list
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, timeout_s=10: fn()
+
+    result = bridge._handle_plugins_set_priority(organizer, pump, {"name": "B.esp", "priority": 5})
+
     assert result["ok"] is True
     assert result["result"]["noop"] is True
-    assert result["result"]["gui_refreshed"] is True
-    organizer.refresh.assert_called_once_with()
+    assert result["result"]["actual_priority"] == 5
+    assert result["result"]["persist"] == "deferred-writer-200ms"
+    organizer.refresh.assert_not_called()
 
 
 def test_plugins_set_priority_plugin_not_found(monkeypatch):
@@ -275,6 +304,7 @@ def test_plugins_set_load_order_success(monkeypatch):
     assert readback["requested_explicit"] == ["B.esp", "A.esp"]
     assert readback["effective_order"][:2] == ["B.esp", "A.esp"]
     assert readback["implicitly_appended_count"] == 1
+    assert readback["applied"] is True
     assert readback["gui_refreshed"] is True
     organizer.refresh.assert_called_once_with()
 
