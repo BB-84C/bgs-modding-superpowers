@@ -1,5 +1,7 @@
 # Repo Bootstrap (internal)
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 Notes for setting up the local dev environment for `bgs-modding-superpowers`.
 
 ## What this doc replaces
@@ -18,7 +20,7 @@ The pre-reshape `agents/repo-bootstrap/AGENT.md` (deleted) described a "repo-boo
 | `.worktrees/` | Worktree convention — when a feature branch needs a separate working tree. | No |
 | `tests/` | PowerShell test suites for the MO2 control plane and VFS launcher. | Yes |
 | `docs/internal/` | Plans, specs, design notes, future-skills design notes, hook + MCP specs. | Yes |
-| `tools/` | All shippable runtime code (xedit-mcp, mo2-vfs-launcher, mo2-control-plane, xedit-hook-bridge). | Yes |
+| `tools/` | Shippable runtime code (xedit-mcp, mo2-vfs-launcher, mo2-control-plane) plus the retired `xedit-hook-bridge` historical artifact. | Yes |
 | `skills/` | Shippable Superpowers-shaped skills. | Yes |
 | `hooks/`, `scripts/`, `.{claude,codex}-plugin/`, `.opencode/plugins/`, `.mcp.json`, `package.json`, `.version-bump.json` | Multi-harness plugin scaffolding. | Yes |
 

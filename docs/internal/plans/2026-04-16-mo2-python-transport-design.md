@@ -1,5 +1,7 @@
 # MO2 Python Transport And Launch Slice Design
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 ## Goal
 
 Define the next real MO2 control-plane slice: replace file-bootstrap as the command transport with a real local IPC channel implemented in the Python plugin, and add the smallest real `launch.start/status/wait/stop` family on top of that transport.

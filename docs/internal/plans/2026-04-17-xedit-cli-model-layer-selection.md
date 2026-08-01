@@ -1,5 +1,7 @@
 # xedit-cli Model-Layer Selection Experiment Plan
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Prove whether xEdit's own internal module-selection model (`AllModules`, `SelectFlag`, `SimulateLoad`) can reliably express agent-facing `only` and `exclude` semantics in the real MO2 sandbox.

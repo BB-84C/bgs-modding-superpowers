@@ -1,5 +1,7 @@
 # MO2 Python Transport And Launch Slice Implementation Plan
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add a real local IPC transport to the Python MO2 plugin and use it to implement the smallest real `system.*` and `launch.*` command family against the live `.artifacts/mo2/` sandbox.

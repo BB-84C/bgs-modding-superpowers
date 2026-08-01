@@ -1,5 +1,7 @@
 # mo2-vfs-launcher Implementation Plan
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Build a reusable MO2-started launcher that preserves inherited usvfs semantics, writes stable launch state, includes a real VFS probe, and adds the minimum `xedit-cli` handoff needed to use it.

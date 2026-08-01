@@ -1,5 +1,7 @@
 # xEdit Skills + Harness MCP — Batch 1 (Vertical Slice) Implementation Plan
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Stand up the xEdit harness-MCP and the hub-and-spoke skills layer end-to-end for the **conflict-audit** workflow (W2), proving the 7-stage pipeline pattern against the live MO2-backed daemon so that batches 2–4 can replicate the template.

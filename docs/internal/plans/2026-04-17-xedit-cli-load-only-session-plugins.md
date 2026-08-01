@@ -1,5 +1,7 @@
 # xedit-cli Load-Only Session Plugins Implementation Plan
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Replace the current `all` / `only` / `exclude` launch semantics with a single load path that always materializes a session-scoped `plugins.txt`, passes it to xEdit through `-P:`, and uses the hook bridge only to auto-confirm `Module Selection` and emit diagnostics.

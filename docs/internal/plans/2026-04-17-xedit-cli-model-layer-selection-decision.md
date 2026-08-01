@@ -1,5 +1,7 @@
 # xedit-cli Model-Layer Selection Decision
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 ## Conclusion
 
 Real `.artifacts\mo2` evidence now supports an explicit outcome for Task 5:

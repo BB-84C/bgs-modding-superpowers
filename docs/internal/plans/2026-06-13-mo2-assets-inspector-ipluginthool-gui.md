@@ -1,5 +1,7 @@
 # MO2 Assets Inspector IPluginTool GUI Implementation Plan (Plan B)
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build an MO2-loaded `mobase.IPluginTool` plugin that opens an in-MO2 window mirroring MO2's existing per-mod Conflicts tab, but extended to include BA2/BSA archive contents and the 6-bucket loose-vs-archive resolution. The GUI is the human-audit surface for the same conflict data the `mo2-assets` CLI from Plan A exposes to agents — both must agree on every verdict.

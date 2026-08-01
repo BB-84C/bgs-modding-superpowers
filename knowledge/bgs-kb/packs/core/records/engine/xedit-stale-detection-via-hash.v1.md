@@ -79,16 +79,10 @@ This rule deliberately does not prescribe a single threshold. The signal is hash
 
 For agentic decision-making, default to "surface the hash mismatch + mtime gap and let the orchestrator/user decide" rather than auto-upgrading on any mismatch.
 
-## What about the HookBridge.dll
+## Retired HookBridge.dll
 
-Same SHA-256 method, against the plugin-tree source:
-
-```powershell
-$mo2Dll  = "<MO2_Root>\tools\xEdit\xEditHookBridge.dll"
-$refDll  = "<plugin>\tools\xedit-hook-bridge\dist\xEditHookBridge.dll"
-```
-
-The HookBridge ships with this plugin (NOT the xEdit fork), so its reference source is always the plugin tree — never the contrib build dir. Hash mismatch → run `install-xedit-hook-bridge.ps1`. Same-hash → no action.
+`xEditHookBridge.dll` is retained only as a historical artifact. Do not
+compare, copy, or deploy it; use the native `xEdit.exe -automation-serve` path.
 
 ## Anti-patterns
 

@@ -41,7 +41,7 @@ Path (BB84's machine): `D:\TES5Edit-contrib\Build\`. Other developer machines wi
 What it produces:
 - `xEdit.exe` (32-bit)
 - `xEdit64.exe` (64-bit)
-- Possibly a fresh `xEditHookBridge.dll` if the developer is also iterating on the hook bridge
+- The retired `xEditHookBridge.dll` is not part of the contrib build or deployment path
 
 What ships:
 - The current HEAD of the contrib fork's branch.

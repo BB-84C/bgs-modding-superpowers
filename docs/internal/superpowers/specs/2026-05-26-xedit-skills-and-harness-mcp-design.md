@@ -1,5 +1,7 @@
 # xEdit Agent Skills + Harness MCP — Design
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 - **Date**: 2026-05-26
 - **Status**: Draft — pending user review
 - **Supersedes**: nothing (new); builds on `2026-05-13-xedit-native-adoption-design.md`

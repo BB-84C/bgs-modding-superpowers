@@ -1,5 +1,7 @@
 # MO2 Assets Engine + CLI Implementation Plan (Plan A)
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a Python engine + offline CLI that reads MO2 profile state (modlist.txt, plugins.txt), enumerates loose-file + BA2/BSA archive contents, and computes the same 6-bucket loose-vs-archive conflict resolution that MO2's internal `ModInfoWithConflictInfo::doConflictCheck()` does. Phase 1 of the archive/loose-file reasoning helpers track.

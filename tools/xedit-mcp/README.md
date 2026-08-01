@@ -1,5 +1,7 @@
 # xedit-mcp
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. The `.artifacts/mo2` integration instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 The bundled MCP server that the `bgs-modding-superpowers` plugin uses to drive xEdit programmatically. Ships as part of the plugin; end users do not invoke it directly.
 
 This package wraps the agent-friendly xEdit fork at [BB-84C/TES5Edit](https://github.com/BB-84C/TES5Edit) with a 7-stage harness pipeline so every tool call goes through validate -> state-check -> rule registry -> forward -> envelope -> audit. The harness exists so the agent gets predictable, auditable, hint-rich refusals when something is wrong and shaped, audited responses when something works.
@@ -32,7 +34,7 @@ End users never run `xedit-mcp` directly. The MCP receives stdio requests from t
 
 - Node 22+ on the user's machine.
 - MO2 with the `bgs-modding-superpowers` control plane installed (see the plugin's `setting-up-bgs-modding-environment` skill).
-- xEdit binary co-located with `xEditHookBridge.dll` under the user's MO2 (also handled by `setting-up-bgs-modding-environment`).
+- xEdit binary installed under the user's MO2 and launched through the native `-automation-serve` path (handled by `setting-up-bgs-modding-environment`). The retired `xEditHookBridge.dll` is not required.
 
 ## Architecture (7-stage pipeline)
 

@@ -1,5 +1,7 @@
 # MO2 GUI Blocker Auto-Handling Implementation Plan
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Eliminate the two known MO2 GUI blockers by disabling `lock_gui` in the sandbox configuration and adding a whitelisted in-process dialog watcher inside the `Mo2AgentControl` live bridge.

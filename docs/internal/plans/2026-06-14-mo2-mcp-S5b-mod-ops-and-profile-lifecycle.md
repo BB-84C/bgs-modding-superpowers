@@ -1,5 +1,7 @@
 # S5b — Complex T3 Part 2: Mod Ops + Profile Lifecycle + Final Acceptance (Tasks S5.8-S5.14)
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: `superpowers:subagent-driven-development` or `superpowers:executing-plans`. Continues from S5a.
 
 **Goal:** Land the last 6 T3 tools (`mo2_reinstall_mod`, `mo2_remove_mod`, `mo2_set_file_hidden`, `mo2_create_profile`, `mo2_clone_profile`, `mo2_rename_profile`) + final v1 acceptance gate. After this stage: **34 tools live**, ready for vendor distribution.

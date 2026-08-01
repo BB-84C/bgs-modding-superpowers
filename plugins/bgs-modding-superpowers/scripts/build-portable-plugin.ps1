@@ -25,7 +25,7 @@
     skills/                 (every shipped SKILL.md tree)
     tools/xedit-mcp/        (dist/ + src/ + package.json + README.md)
     tools/bgs-kb-mcp/       (dist/ + src/ + package.json + README.md + bundled core KB pack)
-    tools/xedit-hook-bridge/dist/   (xEditHookBridge.dll only)
+     tools/xedit-hook-bridge/dist/   (retired xEditHookBridge.dll retained for history)
     tools/mo2-vfs-launcher/         (PowerShell launcher surface)
     tools/mo2-control-plane/        (broker + live-bridge Python plugin)
     tools/bgs-archive/              (Rust BA2/BSA CLI source + docs)
@@ -286,7 +286,7 @@ Copy-McpPackage -PackageName "xedit-mcp"
 Copy-McpPackage -PackageName "bgs-kb-mcp"
 Copy-McpPackage -PackageName "mo2-mcp"
 
-# ---- 5. tools/xedit-hook-bridge (dist DLL only) ----------------------------
+# ---- 5. retired tools/xedit-hook-bridge artifact ---------------------------
 Copy-Tree -From "tools/xedit-hook-bridge/dist" -To "tools/xedit-hook-bridge/dist"
 
 # ---- 6. tools/mo2-vfs-launcher + tools/mo2-control-plane -------------------

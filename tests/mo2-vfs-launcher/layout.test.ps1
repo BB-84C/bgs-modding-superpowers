@@ -12,8 +12,16 @@ foreach ($path in @(
     if (-not (Test-Path (Join-Path $repoRoot $path))) { throw "Missing expected xedit outer-client path: $path" }
 }
 
-foreach ($path in @('tools/xedit-cli', 'tools/xedit-hook-bridge', 'tests/xedit-cli')) {
+foreach ($path in @('tools/xedit-cli', 'tests/xedit-cli')) {
     if (Test-Path (Join-Path $repoRoot $path)) { throw "Legacy path should be removed: $path" }
+}
+
+foreach ($path in @(
+    'tools/xedit-hook-bridge/dist/xEditHookBridge.dll',
+    'tools/xedit-hook-bridge/RECOVERY.md',
+    'scripts/install-xedit-hook-bridge.ps1'
+)) {
+    if (-not (Test-Path (Join-Path $repoRoot $path))) { throw "Missing retired hook-bridge artifact: $path" }
 }
 
 Write-Host 'mo2-vfs-launcher layout checks passed.'

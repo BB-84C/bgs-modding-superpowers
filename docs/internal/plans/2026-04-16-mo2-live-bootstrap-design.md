@@ -1,5 +1,7 @@
 # MO2 Live Bootstrap Slice Design
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 ## Goal
 
 Define the first real MO2 integration slice for the control plane: prove that a plugin/bridge can be loaded by the real MO2 instance at `.artifacts/mo2/`, publish fresh runtime evidence from inside the MO2 process, and let the broker return real `system.ping` and `system.capabilities` results from that evidence.

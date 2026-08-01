@@ -1,5 +1,7 @@
 # Contributing to `bgs-modding-superpowers`
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 Thanks for the interest. This doc is for contributors opening pull requests against this repo. End users should read [README.md](README.md) and [`.opencode/INSTALL.md`](.opencode/INSTALL.md) instead.
 
 ## Clone + bootstrap
@@ -36,7 +38,7 @@ The repo carries a dedicated MO2 sandbox under `.artifacts/mo2/` (gitignored —
 | `tools/xedit-mcp/` | TypeScript MCP server. Pre-built `dist/` is tracked; `prepare` rebuilds on install. |
 | `tools/mo2-vfs-launcher/` | PowerShell outer client for the xEdit MCP. Runtime dependency. |
 | `tools/mo2-control-plane/` | C++ MO2 plugin DLL source, Python loader, broker. |
-| `tools/xedit-hook-bridge/dist/` | Pre-built Delphi DLL (`xEditHookBridge.dll`). `.pas` source lives in the sister xEdit fork [BB-84C/TES5Edit](https://github.com/BB-84C/TES5Edit). |
+| `tools/xedit-hook-bridge/dist/` | Retired Delphi DLL retained for history only; do not deploy or rebuild it. Native `xEdit.exe -automation-serve` is canonical. |
 | `.claude-plugin/`, `.codex-plugin/`, `.opencode/plugins/` | Per-harness manifests + OpenCode plugin wiring. All four manifests share `.mcp.json` for the MCP declaration. |
 | `hooks/` | Claude Code / Codex session-start hook chain. |
 | `scripts/` | Version bumping + (P6+) installer scripts. |

@@ -120,7 +120,6 @@ Write-Host ""
 Write-Host "Next:"
 Write-Host "  1. Register xEdit.exe as an MO2 tool if not already" -ForegroundColor Cyan
 Write-Host "     (Tools menu -> Executables -> Add, point at the path above)."
-Write-Host "  2. Deploy the xEdit hook bridge (ships with this plugin):" -ForegroundColor Cyan
-Write-Host "     .\scripts\install-xedit-hook-bridge.ps1 -MO2Root `"$resolvedRoot`""
+Write-Host "  2. Launch through the native xEdit -automation-serve path via xedit-client.ps1." -ForegroundColor Cyan
 Write-Host ""
 Write-Host "[OK] xEdit $tag ready." -ForegroundColor Green

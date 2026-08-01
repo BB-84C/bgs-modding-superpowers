@@ -1,5 +1,7 @@
 # S1b — Broker Organizer/Installation Commands + Python Sidecar (Tasks 16-30)
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans`. Steps use checkbox (`- [ ]`) syntax. Continues from `2026-06-14-mo2-mcp-S1a-broker-extension.md`.
 
 **Goal:** Finish broker extension (profile / organizer / executables / installation domains) and build the Python sidecar package (`tools/mo2-mcp-sidecar/`) that the S2 TypeScript MCP server will spawn as a long-lived JSON-RPC subprocess.

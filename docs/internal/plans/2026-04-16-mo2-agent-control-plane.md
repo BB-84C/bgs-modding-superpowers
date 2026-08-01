@@ -1,5 +1,7 @@
 # MO2 Agent Control Plane Implementation Plan
 
+> **Harness status (2026-07-29):** The local prototype harness was destroyed by an unattributed operation and will not be rebuilt. All `.artifacts/mo2` paths and instructions below are **DEFUNCT**. Testing now uses externally-configured Starfield or Fallout 4 MO2 instances; machine-specific details and the forensic record are private.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Build the first MO2 automation scaffold: a plugin-kernel source tree, a broker CLI scaffold, a versioned local RPC contract, session/artifact handling, and the first launch-family primitives that can later host `mo2-vfs-launcher` and other agent-facing tools.
