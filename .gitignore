@@ -43,6 +43,7 @@ AGENTS.md
 # script writes at /plugins/marketplace.json (portable-distribution shape) is
 # NOT our canonical marketplace manifest and stays ignored.
 /plugins/marketplace.json
+**/.bgs-portable-build
 
 # BGS KB pack build artifact; source records + manifest.json are committed.
 /knowledge/bgs-kb/packs/*/kb.sqlite

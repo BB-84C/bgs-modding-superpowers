@@ -1,4 +1,4 @@
-#requires -Version 5.1
+#requires -Version 7.0
 <#
 .SYNOPSIS
   Stage KB release artifacts: rebuild source-record packs, zip each pack, write manifest-index.json.
@@ -62,12 +62,13 @@
 .NOTES
   Requirements:
     - Node 22+ (the bgs-kb-mcp CLI ships built; no install needed)
-    - PowerShell 5.1+ on Windows; Compress-Archive available
+    - PowerShell 7+ on Windows; Compress-Archive available
     - For the final publish step: `gh` (GitHub CLI), authenticated.
 #>
 
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact='High')]
 param(
+  [ValidateNotNullOrEmpty()]
   [string]$OutputDir = "dist/kb-release",
 
   [string]$ReleaseTag,
@@ -81,15 +82,22 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) { $ConfirmPreference = 'None' }
 
 # Resolve repo root from this script's location ------------------------------
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+. (Join-Path $PSScriptRoot "lib/Assert-SafeDeleteTarget.ps1")
 $PacksRoot = Join-Path $RepoRoot "knowledge/bgs-kb/packs"
 $CliPath = Join-Path $RepoRoot "tools/bgs-kb-mcp/dist/cli.js"
 
 if (-not [IO.Path]::IsPathRooted($OutputDir)) {
   $OutputDir = Join-Path $RepoRoot $OutputDir
 }
+$OutputDir = [IO.Path]::GetFullPath($OutputDir)
+$BuildContainmentRoot = $RepoRoot
+$OutputSafety = Assert-SafeDeleteTarget -Target $OutputDir -RepoRoot $RepoRoot -ContainmentRoot $BuildContainmentRoot
+$OutputInsideRepo = Test-BgsPathStrictlyInside -Candidate $OutputSafety.ResolvedPath -Root $OutputSafety.ResolvedRepoRoot
+$GeneratedMarker = ".bgs-kb-release-build"
 
 # Verify prereqs --------------------------------------------------------------
 foreach ($p in @($PacksRoot, $CliPath)) {
@@ -174,12 +182,24 @@ foreach ($packSpec in $PACKS) {
 # Stage 2: prepare output dir ------------------------------------------------
 Write-Host "[build-kb-release] === STAGE 2: prepare $OutputDir ==="
 if (Test-Path -LiteralPath $OutputDir) {
+  if (-not $OutputInsideRepo -and -not (Test-BgsGeneratedMarker -Target $OutputDir -MarkerName $GeneratedMarker)) {
+    throw "Refusing to delete external output '$OutputDir': no $GeneratedMarker marker. Existing external trees cannot be adopted by this script."
+  }
   if ($Force) {
     Write-Host "[build-kb-release] removing existing $OutputDir"
-    Remove-Item -LiteralPath $OutputDir -Recurse -Force
+    $OutputSafety = Assert-SafeDeleteTarget -Target $OutputDir -RepoRoot $RepoRoot -ContainmentRoot $BuildContainmentRoot
+    Write-SafeDeletePreview -Target $OutputDir
+    if ($PSCmdlet.ShouldProcess($OutputDir, "Remove KB release output directory tree")) {
+      Remove-Item -LiteralPath $OutputDir -Recurse -Force
+    } else {
+      return
+    }
   } else {
     throw "$OutputDir already exists. Pass -Force to overwrite, or pick a different -OutputDir."
   }
+}
+if (-not $PSCmdlet.ShouldProcess($OutputDir, "Create KB release output directory")) {
+  return
 }
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 
@@ -211,11 +231,22 @@ foreach ($packSpec in $PACKS) {
   # Compress-Archive zips the contents into a path-rooted at $packDir.
   # We want the zip's root to contain `<packDir-basename>/...` so consumers
   # can extract directly and end up with a single top-level pack directory.
-  $tmpStage = Join-Path $env:TEMP "kb-release-stage-$([guid]::NewGuid().ToString('n'))"
+  $tempRoot = [System.IO.Path]::GetTempPath()
+  $tmpStage = Join-Path $tempRoot "kb-release-stage-$([guid]::NewGuid().ToString('n'))"
   New-Item -ItemType Directory -Path $tmpStage -Force | Out-Null
+  $tmpMarker = ".bgs-kb-release-stage"
   $tmpPackParent = Join-Path $tmpStage $pkgId
   Copy-Item -LiteralPath $packDir -Destination $tmpPackParent -Recurse -Force
   Compress-Archive -Path "$tmpPackParent" -DestinationPath $assetPath -Force
+  Write-BgsGeneratedMarker -Target $tmpStage -MarkerName $tmpMarker -Content "generatedBy=build-kb-release; createdAtUtc=$((Get-Date).ToUniversalTime().ToString('o'))"
+  $null = Assert-SafeDeleteTarget -Target $tmpStage -RepoRoot $RepoRoot -ContainmentRoot $tempRoot
+  if (-not (Test-BgsGeneratedMarker -Target $tmpStage -MarkerName $tmpMarker)) {
+    throw "Refusing to delete '$tmpStage': no $tmpMarker marker."
+  }
+  Write-SafeDeletePreview -Target $tmpStage
+  if (-not $PSCmdlet.ShouldProcess($tmpStage, "Remove self-generated KB release staging directory")) {
+    return
+  }
   Remove-Item -LiteralPath $tmpStage -Recurse -Force
 
   $sha = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToLower()
@@ -246,6 +277,10 @@ $index = [ordered]@{
 $indexJson = ($index | ConvertTo-Json -Depth 10).Replace("`r`n", "`n")
 $indexPath = Join-Path $OutputDir "manifest-index.json"
 [IO.File]::WriteAllText($indexPath, $indexJson + "`n", [Text.UTF8Encoding]::new($false))
+
+# Do not mark a partial release directory as script-generated. A failed build
+# stays unmarked and external output is therefore fail-closed on a later run.
+Write-BgsGeneratedMarker -Target $OutputDir -MarkerName $GeneratedMarker -Content "generatedBy=build-kb-release; createdAtUtc=$((Get-Date).ToUniversalTime().ToString('o'))"
 
 # Stage 5: summary + suggested gh command -----------------------------------
 Write-Host ""

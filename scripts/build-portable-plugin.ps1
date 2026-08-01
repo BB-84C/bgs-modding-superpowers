@@ -1,4 +1,4 @@
-#requires -Version 5.1
+#requires -Version 7.0
 <#
 .SYNOPSIS
   Materialize a portable plugins/<name>/ tree for downstream packaging.
@@ -25,7 +25,7 @@
     skills/                 (every shipped SKILL.md tree)
     tools/xedit-mcp/        (dist/ + src/ + package.json + README.md)
     tools/bgs-kb-mcp/       (dist/ + src/ + package.json + README.md + bundled core KB pack)
-    tools/xedit-hook-bridge/dist/   (xEditHookBridge.dll only)
+     tools/xedit-hook-bridge/dist/   (retired xEditHookBridge.dll retained for history)
     tools/mo2-vfs-launcher/         (PowerShell launcher surface)
     tools/mo2-control-plane/        (broker + live-bridge Python plugin)
     tools/bgs-archive/              (Rust BA2/BSA CLI source + docs)
@@ -86,9 +86,13 @@
     tools/xedit-hook-bridge/dist/xEditHookBridge.dll
 #>
 
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact='High')]
 param(
+  [ValidateNotNullOrEmpty()]
   [string]$OutputDir = "dist/portable-plugin",
+
+  [ValidateNotNullOrEmpty()]
+  [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
   [string]$PluginName = "bgs-modding-superpowers",
 
   [ValidateSet("claude-plugin-root", "relative", "absolute")]
@@ -101,15 +105,25 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) { $ConfirmPreference = 'None' }
 
 # ---- Resolve repo root from this script's location -------------------------
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+. (Join-Path $PSScriptRoot "lib/Assert-SafeDeleteTarget.ps1")
 
 # ---- Resolve OutputDir relative to repo root if not rooted -----------------
 if (-not [IO.Path]::IsPathRooted($OutputDir)) {
   $OutputDir = Join-Path $RepoRoot $OutputDir
 }
-$PluginRoot = Join-Path $OutputDir $PluginName
+$OutputDir = [IO.Path]::GetFullPath($OutputDir)
+$PluginRoot = [IO.Path]::GetFullPath((Join-Path $OutputDir $PluginName))
+$BuildContainmentRoot = $RepoRoot
+if ([string]::Equals($OutputDir, $RepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+  throw "Refusing output directory '$OutputDir': it is the repository root."
+}
+$PluginSafety = Assert-SafeDeleteTarget -Target $PluginRoot -RepoRoot $RepoRoot -ContainmentRoot $BuildContainmentRoot
+$PluginInsideRepo = Test-BgsPathStrictlyInside -Candidate $PluginSafety.ResolvedPath -Root $PluginSafety.ResolvedRepoRoot
+$GeneratedMarker = ".bgs-portable-build"
 
 Write-Host "[build-portable-plugin] repo root:  $RepoRoot"
 Write-Host "[build-portable-plugin] output dir: $OutputDir"
@@ -132,12 +146,24 @@ foreach ($rel in $RequiredArtifacts) {
 
 # ---- Prepare output ---------------------------------------------------------
 if (Test-Path -LiteralPath $PluginRoot) {
+  if (-not $PluginInsideRepo -and -not (Test-BgsGeneratedMarker -Target $PluginRoot -MarkerName $GeneratedMarker)) {
+    throw "Refusing to delete external output '$PluginRoot': no $GeneratedMarker marker. Existing external trees cannot be adopted by this script."
+  }
   if ($Force) {
     Write-Host "[build-portable-plugin] removing existing $PluginRoot"
-    Remove-Item -LiteralPath $PluginRoot -Recurse -Force
+    $PluginSafety = Assert-SafeDeleteTarget -Target $PluginRoot -RepoRoot $RepoRoot -ContainmentRoot $BuildContainmentRoot
+    Write-SafeDeletePreview -Target $PluginRoot
+    if ($PSCmdlet.ShouldProcess($PluginRoot, "Remove portable plugin output directory tree")) {
+      Remove-Item -LiteralPath $PluginRoot -Recurse -Force
+    } else {
+      return
+    }
   } else {
     throw "$PluginRoot already exists. Pass -Force to overwrite."
   }
+}
+if (-not $PSCmdlet.ShouldProcess($PluginRoot, "Create portable plugin output directory")) {
+  return
 }
 New-Item -ItemType Directory -Path $PluginRoot -Force | Out-Null
 
@@ -286,7 +312,7 @@ Copy-McpPackage -PackageName "xedit-mcp"
 Copy-McpPackage -PackageName "bgs-kb-mcp"
 Copy-McpPackage -PackageName "mo2-mcp"
 
-# ---- 5. tools/xedit-hook-bridge (dist DLL only) ----------------------------
+# ---- 5. retired tools/xedit-hook-bridge artifact ---------------------------
 Copy-Tree -From "tools/xedit-hook-bridge/dist" -To "tools/xedit-hook-bridge/dist"
 
 # ---- 6. tools/mo2-vfs-launcher + tools/mo2-control-plane -------------------
@@ -548,6 +574,10 @@ if ($EmitMarketplace) {
   [IO.File]::WriteAllText($mpPath, $mpJson + "`n", [Text.UTF8Encoding]::new($false))
   Write-Host "[build-portable-plugin] wrote marketplace: $mpPath"
 }
+
+# A failed build remains unmarked and therefore cannot be deleted as generated
+# external output on a later run. Mark only the fully materialized tree.
+Write-BgsGeneratedMarker -Target $PluginRoot -MarkerName $GeneratedMarker -Content "generatedBy=build-portable-plugin; createdAtUtc=$((Get-Date).ToUniversalTime().ToString('o')); pluginName=$PluginName; mcpPathStrategy=$McpPathStrategy"
 
 # ---- 11. Summary ------------------------------------------------------------
 $fileCount = (Get-ChildItem -LiteralPath $PluginRoot -Recurse -File).Count
