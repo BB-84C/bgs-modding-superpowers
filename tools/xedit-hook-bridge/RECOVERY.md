@@ -1,0 +1,1 @@
+Recovered from git history after the 2026-07-29 loss. This component is superseded by the native `xeAutomation*` implementation in `D:\TES5Edit-contrib`; the tracked `dist` DLL is retained for reference only.

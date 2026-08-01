@@ -1,32 +1,49 @@
+#
+# RETIRED 2026-08-01
+#
+# This installer is superseded by native xeAutomation* in D:\TES5Edit-contrib
+# through xEdit.exe -automation-serve. It is retained only as a historical
+# artifact; see tools\xedit-hook-bridge\RECOVERY.md. Normal use must not deploy
+# xEditHookBridge.dll.
+#
 <#
 .SYNOPSIS
-Deploys xEditHookBridge.dll (shipped by bgs-modding-superpowers) next to the
-user's xEdit.exe under MO2.
+Historical installer for xEditHookBridge.dll.
 
 .DESCRIPTION
-xEditHookBridge.dll is the GUI-blocker hook DLL owned by bgs-modding-superpowers
-(NOT by the xEdit fork). It must be co-located with xEdit.exe at runtime so the
-xEdit automation daemon can find and load it.
-
-Run scripts/fetch-xedit-release.ps1 first to land xEdit.exe at
-<MO2Root>/tools/xEdit/; then run this script to drop the hook bridge alongside.
+The historical deployment behavior below is reachable only with
+-IUnderstandThisIsRetired. Normal xEdit automation uses xEdit.exe
+-automation-serve and must not deploy this DLL.
 
 .PARAMETER MO2Root
 Absolute path to the user's MO2 install root.
 
 .PARAMETER Force
-Overwrite an existing xEditHookBridge.dll at the target.
+Historical override for an existing target; requires -IUnderstandThisIsRetired.
+
+.PARAMETER IUnderstandThisIsRetired
+Explicitly permits the historical deployment behavior for archaeology only.
 
 .EXAMPLE
-.\scripts\install-xedit-hook-bridge.ps1 -MO2Root "D:\ModOrganizer2"
+ .\scripts\install-xedit-hook-bridge.ps1 -MO2Root "D:\ModOrganizer2" -IUnderstandThisIsRetired
 #>
 param(
-    [Parameter(Mandatory = $true)]
     [string]$MO2Root,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$IUnderstandThisIsRetired
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $IUnderstandThisIsRetired) {
+    Write-Host "xEditHookBridge.dll deployment is retired. Use the native xEdit -automation-serve path instead."
+    Write-Host "Historical reference: tools\xedit-hook-bridge\RECOVERY.md"
+    return
+}
+
+if ([string]::IsNullOrWhiteSpace($MO2Root)) {
+    throw "-MO2Root is required when using -IUnderstandThisIsRetired."
+}
 
 # --- Validate -------------------------------------------------------------
 
