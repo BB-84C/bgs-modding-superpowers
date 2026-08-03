@@ -11,7 +11,7 @@ async function writeConfigFixture(root: string, fixtureName: string): Promise<vo
 
 describe("loadConfig", () => {
   it("reads BGS_MO2_ROOT and .mo2-mcp.json", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    const root = await createTrackedTempDir("mo2-test-");
     await writeFile(
       join(root, ".mo2-mcp.json"),
       JSON.stringify({
@@ -31,7 +31,7 @@ describe("loadConfig", () => {
   });
 
   it("defaults to metadata-editable when .mo2-mcp.json missing", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    const root = await createTrackedTempDir("mo2-test-");
     const cfg = await loadConfig({ mo2Root: root });
     expect(cfg.permissionCeiling).toBe("metadata-editable");
     expect(cfg.allowedProfiles).toEqual(["Default"]);
@@ -39,7 +39,7 @@ describe("loadConfig", () => {
   });
 
   it("reads read-only permission ceiling from fixture content", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    const root = await createTrackedTempDir("mo2-test-");
     await writeConfigFixture(root, "mo2-mcp-readonly.json");
 
     const cfg = await loadConfig({ mo2Root: root });
@@ -47,7 +47,7 @@ describe("loadConfig", () => {
   });
 
   it("reads metadata-editable permission ceiling from fixture content", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    const root = await createTrackedTempDir("mo2-test-");
     await writeConfigFixture(root, "mo2-mcp-metadata-editable.json");
 
     const cfg = await loadConfig({ mo2Root: root });
@@ -55,7 +55,7 @@ describe("loadConfig", () => {
   });
 
   it("reads full-control permission ceiling from config content", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    const root = await createTrackedTempDir("mo2-test-");
     await writeFile(
       join(root, ".mo2-mcp.json"),
       JSON.stringify({ permission_ceiling: "full-control" }),
@@ -66,7 +66,7 @@ describe("loadConfig", () => {
   });
 
   it("reads user-configured deny patterns", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    const root = await createTrackedTempDir("mo2-test-");
     await writeFile(
       join(root, ".mo2-mcp.json"),
       JSON.stringify({ deny: ["Stock Game/Fallout 4/Data", "DoNotTouch"] }),
@@ -82,7 +82,7 @@ describe("loadConfig", () => {
   });
 
   it("accepts read-only ceiling", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    const root = await createTrackedTempDir("mo2-test-");
     await writeFile(
       join(root, ".mo2-mcp.json"),
       JSON.stringify({ permission_ceiling: "read-only" }),
@@ -93,7 +93,7 @@ describe("loadConfig", () => {
   });
 
   it("BGS_MO2_PERMISSION_CEILING overrides .mo2-mcp.json", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    const root = await createTrackedTempDir("mo2-test-");
     await writeFile(
       join(root, ".mo2-mcp.json"),
       JSON.stringify({ permission_ceiling: "metadata-editable" }),
@@ -110,7 +110,7 @@ describe("loadConfig", () => {
   });
 
   it("rejects invalid ceiling value", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    const root = await createTrackedTempDir("mo2-test-");
     await writeFile(
       join(root, ".mo2-mcp.json"),
       JSON.stringify({ permission_ceiling: "no-such-tier" }),
@@ -120,7 +120,7 @@ describe("loadConfig", () => {
   });
 
   it("rejects unknown config fields (strict schema)", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mo2-test-"));
+    const root = await createTrackedTempDir("mo2-test-");
     await writeFile(
       join(root, ".mo2-mcp.json"),
       JSON.stringify({ permission_ceiling: "read-only", unknown_field: 42 }),

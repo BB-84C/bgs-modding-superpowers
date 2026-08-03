@@ -9,7 +9,7 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function _fixture(): Promise<{ root: string; ctx: ToolContext }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-is-"));
+  const root = await createTrackedTempDir("mo2-is-");
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(
     join(root, "ModOrganizer.ini"),

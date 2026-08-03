@@ -41,20 +41,24 @@ function Read-JsonLogEntries {
     return $entries
 }
 
+$previousFakeResponsePath = $env:MO2_CONTROL_PLANE_FAKE_RESPONSE_PATH
+$previousFakeKernelPath = $env:MO2_CONTROL_PLANE_FAKE_KERNEL_PATH
+$previousFakeKernelLogPath = $env:MO2_CONTROL_PLANE_FAKE_KERNEL_LOG_PATH
 $env:MO2_CONTROL_PLANE_FAKE_RESPONSE_PATH = $fakeKernelResponsePath
 $env:MO2_CONTROL_PLANE_FAKE_KERNEL_PATH = $fakeKernelPath
 $env:MO2_CONTROL_PLANE_FAKE_KERNEL_LOG_PATH = $kernelLogPath
 
-$missingLaunchIdRequest = New-Mo2ControlPlaneRequest -SessionId "sess-11111111111111111111111111111111" -Command "launch.status" -Payload @{}
 try {
+    $missingLaunchIdRequest = New-Mo2ControlPlaneRequest -SessionId "sess-11111111111111111111111111111111" -Command "launch.status" -Payload @{}
+    try {
     $null = Invoke-Mo2ControlPlaneFakeKernelLaunchCommand -Request $missingLaunchIdRequest
     throw "launch helper should reject missing launch_id for non-start commands"
 }
-catch {
+    catch {
     if ($_.Exception.Message -ne "Missing launch id for launch.status") {
         throw "launch helper should fail explicitly for missing launch_id"
     }
-}
+    }
 
 $sessionOpen = Invoke-Cli -Arguments @("session", "open")
 if ($sessionOpen.ExitCode -ne 0) {
@@ -196,4 +200,13 @@ if ($realWaitState.exit_code -ne 0) {
     throw "fake-kernel launch.wait should persist the real target exit code"
 }
 
-Write-Host "MO2 launch fake-kernel flow checks passed."
+    Write-Host "MO2 launch fake-kernel flow checks passed."
+}
+finally {
+    $env:MO2_CONTROL_PLANE_FAKE_RESPONSE_PATH = $previousFakeResponsePath
+    $env:MO2_CONTROL_PLANE_FAKE_KERNEL_PATH = $previousFakeKernelPath
+    $env:MO2_CONTROL_PLANE_FAKE_KERNEL_LOG_PATH = $previousFakeKernelLogPath
+    if (Test-Path $kernelLogPath -PathType Leaf) {
+        Remove-Item -Path $kernelLogPath -Force -ErrorAction SilentlyContinue
+    }
+}

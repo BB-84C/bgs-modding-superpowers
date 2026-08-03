@@ -19,7 +19,7 @@ interface MockSidecar {
 }
 
 async function _fixture(sidecarBuilder?: (root: string) => MockSidecar): Promise<{ root: string; ctx: ToolContext }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-in-"));
+  const root = await createTrackedTempDir("mo2-in-");
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(join(root, "profiles", "Default", "modlist.txt"), "+ExistingMod\n", "utf8");
   await writeFile(join(root, "profiles", "Default", "plugins.txt"), "", "utf8");

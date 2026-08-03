@@ -16,7 +16,7 @@ const toggleSchema = z.discriminatedUnion("mode", [
 ]);
 
 async function makeCtx(sessionId = "test-session"): Promise<ToolContext> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-mcp-dispatch-"));
+  const root = await createTrackedTempDir("mo2-mcp-dispatch-");
   return {
     config: {
       mo2Root: root,

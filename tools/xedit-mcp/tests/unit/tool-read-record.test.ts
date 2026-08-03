@@ -16,7 +16,7 @@ const ctx: ToolContext = {
 };
 
 describe("xedit_read_record tool", () => {
-  const audit = createAuditLogger({ baseDir: mkdtempSync(join(tmpdir(), "xedit-mcp-read-")) });
+  const audit = createAuditLogger({ baseDir: createTrackedTempDirSync("xedit-mcp-read-") });
 
   it("returns composite read on the happy path", async () => {
     const adapter = makeMockAdapter({

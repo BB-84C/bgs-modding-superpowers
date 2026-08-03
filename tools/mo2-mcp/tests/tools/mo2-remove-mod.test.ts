@@ -31,7 +31,7 @@ async function fixture(options: { createMod?: boolean; withPipe?: boolean } = {}
   ctx: ToolContext;
   pipeCalls: MockPipeCall[];
 }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-remove-"));
+  const root = await createTrackedTempDir("mo2-remove-");
   roots.push(root);
   await mkdir(join(root, "mods"), { recursive: true });
   if (options.createMod) {

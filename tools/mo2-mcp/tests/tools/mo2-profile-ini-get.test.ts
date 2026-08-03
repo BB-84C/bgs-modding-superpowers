@@ -9,7 +9,7 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function _fixture(options: { generalLines?: string[]; profileFiles?: Record<string, string> } = {}): Promise<ToolContext> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-ig-"));
+  const root = await createTrackedTempDir("mo2-ig-");
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(
     join(root, "ModOrganizer.ini"),
@@ -114,7 +114,7 @@ describe("mo2_profile_ini_get", () => {
   });
 
   it("derives the game from gamePath when no profile-local INI reveals it", async () => {
-    const userRoot = await mkdtemp(join(tmpdir(), "mo2-docs-"));
+    const userRoot = await createTrackedTempDir("mo2-docs-");
     const gamePath = join(userRoot, "Stock Game", "Fallout 4");
     await mkdir(join(userRoot, "Documents", "My Games", "Fallout4"), { recursive: true });
     await writeFile(

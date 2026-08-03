@@ -52,7 +52,7 @@ function bindingOpts(): BindingManagerOptions {
 }
 
 async function makeCtx(): Promise<ToolContext> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-session-"));
+  const root = await createTrackedTempDir("mo2-session-");
   return {
     binding: new BindingManager(bindingOpts()),
     sessionId: "session-test",
@@ -111,7 +111,7 @@ describe("mo2_session", () => {
   });
 
   it("is audit-logged through central dispatch", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mo2-session-audit-"));
+    const root = await createTrackedTempDir("mo2-session-audit-");
     const ctx: ToolContext = {
       binding: new BindingManager(bindingOpts()),
       sessionId: "audit-session",

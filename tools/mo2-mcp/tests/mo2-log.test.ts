@@ -29,7 +29,7 @@ async function seedLogFromString(text: string, fileName = "mo2.log"): Promise<st
 
 describe("tailMo2Log", () => {
   beforeEach(async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "mo2-log-test-"));
+    tempRoot = await createTrackedTempDir("mo2-log-test-");
   });
 
   afterEach(async () => {

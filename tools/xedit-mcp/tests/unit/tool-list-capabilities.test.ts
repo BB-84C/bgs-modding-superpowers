@@ -47,7 +47,7 @@ describe("xedit_list_capabilities tool", () => {
 
   it("emits an audit line when audit logger is wired (carry-forward #2)", async () => {
     const adapter = makeMockAdapter({});
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-listcaps-audit-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-listcaps-audit-");
     const audit = createAuditLogger({ baseDir });
     const tool = xeditListCapabilitiesTool({ adapter, getContext: () => ctx, audit });
     const env = await tool({});

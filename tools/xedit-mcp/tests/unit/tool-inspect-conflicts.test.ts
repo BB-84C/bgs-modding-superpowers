@@ -17,7 +17,7 @@ const ctx: ToolContext = {
 
 describe("xedit_inspect_conflicts tool", () => {
   it("verdict=no_conflict when conflict_status reports no_conflict", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-conflict-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-conflict-");
     const audit = createAuditLogger({ baseDir });
     const adapter = makeMockAdapter({
       "records.conflict_status": () => ({ status: "no_conflict" }),
@@ -37,7 +37,7 @@ describe("xedit_inspect_conflicts tool", () => {
   });
 
   it("verdict=breaking when conflict_status reports a hard conflict label", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-conflict-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-conflict-");
     const audit = createAuditLogger({ baseDir });
     const adapter = makeMockAdapter({
       "records.conflict_status": () => ({ status: "conflict_critical" }),
@@ -57,7 +57,7 @@ describe("xedit_inspect_conflicts tool", () => {
   });
 
   it("audit line includes daemonPid + sessionId (carry-forward #2 alignment)", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-conflict-audit-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-conflict-audit-");
     const audit = createAuditLogger({ baseDir });
     const adapter = makeMockAdapter({
       "records.conflict_status": () => ({ status: "no_conflict" }),

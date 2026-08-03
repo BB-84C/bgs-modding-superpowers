@@ -16,7 +16,7 @@ async function fixture(options: { withPipe?: boolean; resolvedPath?: string | nu
   ctx: ToolContext;
   pipeCalls: Array<{ method: string; params: Record<string, unknown> }>;
 }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-hide-"));
+  const root = await createTrackedTempDir("mo2-hide-");
   roots.push(root);
   await mkdir(join(root, "mods", "Low", "Data", "textures"), { recursive: true });
   await mkdir(join(root, "mods", "High", "Data", "textures"), { recursive: true });

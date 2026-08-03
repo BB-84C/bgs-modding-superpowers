@@ -16,7 +16,7 @@ async function fixture(options: { withPipe?: boolean; profileInitThrows?: boolea
   ctx: ToolContext;
   pipeCalls: Array<{ method: string; params: Record<string, unknown> }>;
 }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-profile-create-"));
+  const root = await createTrackedTempDir("mo2-profile-create-");
   roots.push(root);
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(join(root, "profiles", "Default", "modlist.txt"), "+BaseMod\n", "utf8");

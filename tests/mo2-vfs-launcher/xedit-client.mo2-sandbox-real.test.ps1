@@ -108,10 +108,12 @@ if ($modOrganizerIni -notmatch [regex]::Escape("selected_profile=@ByteArray($pro
 
 $sandboxHarnessMutex = Enter-SandboxHarnessLock -Path $mo2ExecutablePath -TimeoutSeconds $TimeoutSeconds
 $tempRoot = Join-Path $env:TEMP ("xedit-client-mo2-sandbox-real-" + [guid]::NewGuid().ToString("N"))
+$previousSessionBasePath = $env:XEDIT_CLIENT_SESSION_BASE_PATH
 $xeditLaunchId = $null
 $xeditPid = $null
 
 try {
+    $env:XEDIT_CLIENT_SESSION_BASE_PATH = Join-Path $tempRoot 'xedit-client-sessions'
     $freshnessThreshold = $null
     if ($RestartMo2) {
         $freshnessThreshold = [DateTime]::UtcNow
@@ -171,6 +173,7 @@ try {
     Write-Host "evidence-root: $tempRoot"
 }
 finally {
+    $env:XEDIT_CLIENT_SESSION_BASE_PATH = $previousSessionBasePath
     if (-not [string]::IsNullOrWhiteSpace($xeditLaunchId)) {
         try {
             $stopResponse = Invoke-Mo2ControlPlaneClientRequest -LiveRoot $runtimeRoot -Request (New-Mo2ControlPlaneRequest -SessionId "cleanup-$xeditLaunchId" -Command "launch.stop" -Payload @{ launch_id = $xeditLaunchId })
@@ -183,6 +186,10 @@ finally {
     if ($null -ne $sandboxHarnessMutex) {
         $sandboxHarnessMutex.ReleaseMutex()
         $sandboxHarnessMutex.Dispose()
+    }
+
+    if (Test-Path $tempRoot -PathType Container) {
+        Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 

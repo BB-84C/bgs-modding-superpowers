@@ -10,7 +10,7 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function _fixture(withPipe = true): Promise<{ root: string; ctx: ToolContext }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-sep-gui-"));
+  const root = await createTrackedTempDir("mo2-sep-gui-");
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(join(root, "profiles", "Default", "modlist.txt"), ["+TopMod", "+AnchorMod", "+BottomMod", ""].join("\n"), "utf8");
   await writeFile(join(root, "profiles", "Default", "plugins.txt"), "", "utf8");

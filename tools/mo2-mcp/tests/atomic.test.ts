@@ -17,7 +17,7 @@ afterEach(() => {
 describe("atomicWriteText", () => {
   it("creates file with content + creates missing parent dirs", async () => {
     const { atomicWriteText } = await loadAtomic();
-    const dir = await mkdtemp(join(tmpdir(), "atom-"));
+    const dir = await createTrackedTempDir("atom-");
     const target = join(dir, "nested", "deep", "out.txt");
 
     await atomicWriteText(target, "hello world\n");
@@ -27,7 +27,7 @@ describe("atomicWriteText", () => {
 
   it("overwrites existing file", async () => {
     const { atomicWriteText } = await loadAtomic();
-    const dir = await mkdtemp(join(tmpdir(), "atom-"));
+    const dir = await createTrackedTempDir("atom-");
     const target = join(dir, "out.txt");
     await writeFile(target, "old", "utf8");
 
@@ -38,7 +38,7 @@ describe("atomicWriteText", () => {
 
   it("leaves no temp files behind on success", async () => {
     const { atomicWriteText } = await loadAtomic();
-    const dir = await mkdtemp(join(tmpdir(), "atom-"));
+    const dir = await createTrackedTempDir("atom-");
     const target = join(dir, "out.txt");
 
     await atomicWriteText(target, "data");
@@ -49,7 +49,7 @@ describe("atomicWriteText", () => {
   });
 
   it("preserves original content if rename fails", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "atom-"));
+    const dir = await createTrackedTempDir("atom-");
     const target = join(dir, "out.txt");
     await writeFile(target, "original", "utf8");
 
@@ -71,7 +71,7 @@ describe("atomicWriteText", () => {
 describe("atomicWriteBytes", () => {
   it("writes binary content", async () => {
     const { atomicWriteBytes } = await loadAtomic();
-    const dir = await mkdtemp(join(tmpdir(), "atom-"));
+    const dir = await createTrackedTempDir("atom-");
     const target = join(dir, "out.bin");
 
     await atomicWriteBytes(target, Buffer.from([0x00, 0x01, 0x02, 0xff]));
@@ -82,7 +82,7 @@ describe("atomicWriteBytes", () => {
 
   it("leaves no temp files behind on success", async () => {
     const { atomicWriteBytes } = await loadAtomic();
-    const dir = await mkdtemp(join(tmpdir(), "atom-"));
+    const dir = await createTrackedTempDir("atom-");
     const target = join(dir, "out.bin");
 
     await atomicWriteBytes(target, Buffer.from("binary"));

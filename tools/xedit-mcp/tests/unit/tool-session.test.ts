@@ -40,7 +40,7 @@ describe("xedit_session tool", () => {
 
   it("emits an audit line on success when audit logger is wired (carry-forward #2)", async () => {
     const adapter = makeMockAdapter(happyMocks);
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-session-audit-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-session-audit-");
     const audit = createAuditLogger({ baseDir });
     const { tool } = xeditSessionTool({
       adapter,
@@ -69,7 +69,7 @@ describe("xedit_session tool", () => {
     const adapter = {
       async call(): Promise<never> { throw new Error("daemon down"); },
     };
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-session-audit-err-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-session-audit-err-");
     const audit = createAuditLogger({ baseDir });
     const { tool } = xeditSessionTool({ adapter, sessionId: "sess-err", audit });
     const env = await tool({});

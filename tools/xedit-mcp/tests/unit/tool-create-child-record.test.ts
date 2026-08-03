@@ -30,7 +30,7 @@ const ctxNoConsent: ToolContext = {
 
 describe("xedit_create_child_record tool", () => {
   it("forwards a CELL/QUST-style child record (subGroup path)", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-ccr-sub-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-ccr-sub-");
     const audit = createAuditLogger({ baseDir });
     let forwarded: Record<string, unknown> | undefined;
     const adapter = makeMockAdapter({
@@ -66,7 +66,7 @@ describe("xedit_create_child_record tool", () => {
   });
 
   it("forwards a WRLD exterior child record (coords path)", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-ccr-coords-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-ccr-coords-");
     const audit = createAuditLogger({ baseDir });
     let forwarded: Record<string, unknown> | undefined;
     const adapter = makeMockAdapter({
@@ -97,7 +97,7 @@ describe("xedit_create_child_record tool", () => {
   });
 
   it("fast-fails with mutation_requires_iknowwhatimdoing when consent is not active", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-ccr-noconsent-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-ccr-noconsent-");
     const audit = createAuditLogger({ baseDir });
     let daemonCalled = 0;
     const adapter = makeMockAdapter({
@@ -124,7 +124,7 @@ describe("xedit_create_child_record tool", () => {
   });
 
   it("refuses when parent supplies both subGroup and coords", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-ccr-mutex-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-ccr-mutex-");
     const audit = createAuditLogger({ baseDir });
     const handler = makeCreateChildRecordHandler({
       adapter: makeMockAdapter({}),
@@ -148,7 +148,7 @@ describe("xedit_create_child_record tool", () => {
   });
 
   it("refuses on bogus signature", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-ccr-sig-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-ccr-sig-");
     const audit = createAuditLogger({ baseDir });
     const handler = makeCreateChildRecordHandler({
       adapter: makeMockAdapter({}),

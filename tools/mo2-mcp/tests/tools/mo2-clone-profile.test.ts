@@ -18,7 +18,7 @@ vi.mock("../../src/detection.js", () => ({
 const roots: string[] = [];
 
 async function fixture(options: { source?: boolean; target?: boolean } = {}): Promise<{ root: string; ctx: ToolContext }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-clone-profile-"));
+  const root = await createTrackedTempDir("mo2-clone-profile-");
   roots.push(root);
   const profilesRoot = join(root, "profiles");
   await mkdir(profilesRoot, { recursive: true });

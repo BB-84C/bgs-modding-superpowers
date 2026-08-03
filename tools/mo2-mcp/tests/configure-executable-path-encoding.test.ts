@@ -74,7 +74,7 @@ describe("_serializeValue path-key forward-slash normalization", () => {
 
 describe("_rewriteCustomExecutables + readMoIni round-trip", () => {
   it("backslash binary written → readMoIni reads back forward-slash form (parses safely)", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mo-cfg-exec-"));
+    const dir = await createTrackedTempDir("mo-cfg-exec-");
     const iniPath = join(dir, "ModOrganizer.ini");
     try {
       const initial = "[General]\ngame=fallout4\n\n[OtherSection]\nfoo=bar\n";
@@ -118,7 +118,7 @@ describe("_rewriteCustomExecutables + readMoIni round-trip", () => {
   });
 
   it("arguments containing embedded Windows path literal round-trip verbatim", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mo-cfg-exec-args-"));
+    const dir = await createTrackedTempDir("mo-cfg-exec-args-");
     const iniPath = join(dir, "ModOrganizer.ini");
     try {
       const initial = "[General]\ngame=fallout4\n";

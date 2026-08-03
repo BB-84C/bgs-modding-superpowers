@@ -11,7 +11,7 @@ import type { ToolContext } from "../../src/types.js";
 async function _buildCtx(
   sidecarMock?: (method: string, params: unknown) => Promise<unknown>,
 ): Promise<ToolContext> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-ac-"));
+  const root = await createTrackedTempDir("mo2-ac-");
   const ctx: ToolContext = {
     config: {
       mo2Root: root,

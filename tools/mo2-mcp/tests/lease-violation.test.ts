@@ -73,7 +73,7 @@ interface LeaseTestEnv {
 async function setupLeaseTest(
   modlistContent: string = SAMPLE_MODLIST,
 ): Promise<LeaseTestEnv> {
-  const root = await mkdtemp(join(tmpdir(), "lease-violation-"));
+  const root = await createTrackedTempDir("lease-violation-");
   const target = join(root, "modlist.txt");
   await writeFile(target, modlistContent, "utf8");
 

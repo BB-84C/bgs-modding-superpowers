@@ -82,7 +82,7 @@ describe("PlanCache", () => {
 
 describe("runPlanMode + runApplyMode", () => {
   it("takes snapshot during apply after lease verification, not during plan", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pa-"));
+    const root = await createTrackedTempDir("pa-");
     const target = join(root, "data.txt");
     await writeFile(target, "before\n", "utf8");
 
@@ -137,7 +137,7 @@ describe("runPlanMode + runApplyMode", () => {
   });
 
   it("full plan → apply round-trip mutates the file", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pa-"));
+    const root = await createTrackedTempDir("pa-");
     const target = join(root, "data.txt");
     await writeFile(target, "before\n", "utf8");
 
@@ -184,7 +184,7 @@ describe("runPlanMode + runApplyMode", () => {
   });
 
   it("apply fails with lease_violation when file mutated between plan and apply", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pa-"));
+    const root = await createTrackedTempDir("pa-");
     const target = join(root, "data.txt");
     await writeFile(target, "original\n", "utf8");
 
@@ -252,7 +252,7 @@ describe("runPlanMode + runApplyMode", () => {
   });
 
   it("apply fails with lease_token_mismatch when token differs", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pa-"));
+    const root = await createTrackedTempDir("pa-");
     const target = join(root, "data.txt");
     await writeFile(target, "x", "utf8");
 
@@ -288,7 +288,7 @@ describe("runPlanMode + runApplyMode", () => {
   });
 
   it("releases the target lock when applyMutation throws after snapshot", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pa-"));
+    const root = await createTrackedTempDir("pa-");
     const target = join(root, "data.txt");
     await writeFile(target, "x", "utf8");
     const ctx = {
@@ -345,7 +345,7 @@ describe("runPlanMode + runApplyMode", () => {
   });
 
   it("plan fails with lease_held when another live process holds the target lock", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pa-"));
+    const root = await createTrackedTempDir("pa-");
     const target = join(root, "data.txt");
     await writeFile(target, "x", "utf8");
     const ctx = {
@@ -404,7 +404,7 @@ describe("runPlanMode + runApplyMode", () => {
 
 describe("routeToPlanApply (PLAN-PATCH P-B3)", () => {
   it("routes mode: plan to runPlanMode", async () => {
-    const root = await mkdtemp(join(tmpdir(), "pa-"));
+    const root = await createTrackedTempDir("pa-");
     const target = join(root, "data.txt");
     await writeFile(target, "x", "utf8");
     const cache = new PlanCache();

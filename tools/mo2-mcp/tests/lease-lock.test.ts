@@ -13,7 +13,7 @@ import {
 } from "../src/lease-lock.js";
 
 async function tempMo2Root(): Promise<string> {
-  return mkdtemp(join(tmpdir(), "lease-lock-"));
+  return createTrackedTempDir("lease-lock-");
 }
 
 function metadata(overrides: Partial<LeaseLockMetadata> = {}): LeaseLockMetadata {

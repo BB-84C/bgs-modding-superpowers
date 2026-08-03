@@ -30,7 +30,7 @@ async function ctxWithStaleBrokerAndIni(opts: {
   /** When set, returns this error code/message instead of method_not_found. */
   brokerError?: { code: string; message: string };
 }): Promise<{ ctx: ToolContext; root: string }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-staleb-"));
+  const root = await createTrackedTempDir("mo2-staleb-");
   if (opts.iniProfile) {
     const profileLine = opts.iniProfileByteArray
       ? `selected_profile=@ByteArray(${opts.iniProfile})`

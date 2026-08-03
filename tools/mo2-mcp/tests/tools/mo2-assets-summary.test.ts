@@ -9,7 +9,7 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function _buildCtx(withSidecar: boolean): Promise<ToolContext> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-as-"));
+  const root = await createTrackedTempDir("mo2-as-");
   const ctx: ToolContext = {
     config: {
       mo2Root: root,

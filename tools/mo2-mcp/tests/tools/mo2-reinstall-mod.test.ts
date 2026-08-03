@@ -37,7 +37,7 @@ async function fixture(options: {
   ctx: ToolContext;
   pipeCalls: MockPipeCall[];
 }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-reinstall-"));
+  const root = await createTrackedTempDir("mo2-reinstall-");
   roots.push(root);
   await mkdir(join(root, "mods", "InstalledMod"), { recursive: true });
   await writeFile(join(root, "mods", "InstalledMod", "file.txt"), "payload", "utf8");
@@ -168,7 +168,7 @@ describe("mo2_reinstall_mod", () => {
   // garbage like `C:\downloads\F:\path\to.7z` and trigger a false
   // archive_not_in_downloads error. Now path.isAbsolute-gated.
   it("BUG-22: plan with absolute installationFile resolves to the absolute path verbatim", async () => {
-    const root = await mkdtemp(join(tmpdir(), "mo2-reinstall-abs-"));
+    const root = await createTrackedTempDir("mo2-reinstall-abs-");
     roots.push(root);
     const absArchive = join(root, "external-stash", "Unique NPCs - FOMOD 2.0-21248-2-0.7z");
     const { root: mo2Root, ctx } = await fixture({

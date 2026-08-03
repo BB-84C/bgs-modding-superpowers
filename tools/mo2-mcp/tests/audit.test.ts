@@ -6,7 +6,7 @@ import { AuditLogger, hashArgs } from "../src/audit.js";
 
 describe("AuditLogger", () => {
   it("creates audit dir + appends JSONL records", async () => {
-    const root = await mkdtemp(join(tmpdir(), "audit-"));
+    const root = await createTrackedTempDir("audit-");
     const auditRoot = join(root, "subdir-not-yet-existing");
     const logger = new AuditLogger(auditRoot, "sess-abc");
 
@@ -32,7 +32,7 @@ describe("AuditLogger", () => {
   });
 
   it("appends multiple records to same file", async () => {
-    const root = await mkdtemp(join(tmpdir(), "audit-"));
+    const root = await createTrackedTempDir("audit-");
     const logger = new AuditLogger(root, "sess-1");
     const now = new Date().toISOString();
 
@@ -77,7 +77,7 @@ describe("AuditLogger", () => {
   });
 
   it("uses different files for different sessions", async () => {
-    const root = await mkdtemp(join(tmpdir(), "audit-"));
+    const root = await createTrackedTempDir("audit-");
     const a = new AuditLogger(root, "sess-A");
     const b = new AuditLogger(root, "sess-B");
     const now = new Date().toISOString();

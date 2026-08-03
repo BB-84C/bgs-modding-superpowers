@@ -67,7 +67,7 @@ function _det(processRunning: boolean, pid?: number): DetectionResult {
 }
 
 async function _fixture(allowedProfiles = ["Default", "ProfileB"]): Promise<{ root: string; ctx: ToolContext }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-switch-"));
+  const root = await createTrackedTempDir("mo2-switch-");
   for (const profile of ["Default", "ProfileB"]) {
     await mkdir(join(root, "profiles", profile), { recursive: true });
     await writeFile(join(root, "profiles", profile, "modlist.txt"), "", "utf8");

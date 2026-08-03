@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 async function _fixtureMo2Root(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-smoke-"));
+  const root = await createTrackedTempDir("mo2-smoke-");
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(join(root, "profiles", "Default", "modlist.txt"), "", "utf8");
   await writeFile(join(root, "profiles", "Default", "plugins.txt"), "", "utf8");

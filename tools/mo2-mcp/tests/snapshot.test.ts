@@ -12,7 +12,7 @@ async function exists(path: string): Promise<boolean> {
 
 describe("SnapshotManager.snapshot", () => {
   it("creates snapshot dir + manifest + copies files", async () => {
-    const root = await mkdtemp(join(tmpdir(), "snap-"));
+    const root = await createTrackedTempDir("snap-");
     const snapRoot = join(root, ".mo2-mcp", "snapshots");
     const mgr = new SnapshotManager(snapRoot, "sess-1");
 
@@ -41,7 +41,7 @@ describe("SnapshotManager.snapshot", () => {
   });
 
   it("snapshots multiple files into one record", async () => {
-    const root = await mkdtemp(join(tmpdir(), "snap-"));
+    const root = await createTrackedTempDir("snap-");
     const mgr = new SnapshotManager(root, "sess-1");
 
     const a = join(root, "a.txt");
@@ -54,7 +54,7 @@ describe("SnapshotManager.snapshot", () => {
   });
 
   it("records missing-file entries as absent sources", async () => {
-    const root = await mkdtemp(join(tmpdir(), "snap-"));
+    const root = await createTrackedTempDir("snap-");
     const mgr = new SnapshotManager(root, "sess-1");
 
     const record = await mgr.snapshot("test", [join(root, "does-not-exist.txt")]);
@@ -65,7 +65,7 @@ describe("SnapshotManager.snapshot", () => {
   });
 
   it("snapshots existing directories recursively", async () => {
-    const root = await mkdtemp(join(tmpdir(), "snap-"));
+    const root = await createTrackedTempDir("snap-");
     const mgr = new SnapshotManager(root, "sess-1");
     const dir = join(root, "mods", "Dir Mod");
     await mkdir(join(dir, "Data", "Scripts"), { recursive: true });
@@ -80,7 +80,7 @@ describe("SnapshotManager.snapshot", () => {
 
 describe("SnapshotManager.restore", () => {
   it("restores file content from snapshot", async () => {
-    const root = await mkdtemp(join(tmpdir(), "snap-"));
+    const root = await createTrackedTempDir("snap-");
     const mgr = new SnapshotManager(join(root, ".mo2-mcp", "snapshots"), "sess-1");
 
     const target = join(root, "data.txt");
@@ -96,7 +96,7 @@ describe("SnapshotManager.restore", () => {
   });
 
   it("deletes source file when snapshot recorded it as non-existent", async () => {
-    const root = await mkdtemp(join(tmpdir(), "snap-"));
+    const root = await createTrackedTempDir("snap-");
     const mgr = new SnapshotManager(join(root, ".mo2-mcp", "snapshots"), "sess-1");
 
     const target = join(root, "to-create.txt");
@@ -110,7 +110,7 @@ describe("SnapshotManager.restore", () => {
   });
 
   it("removes a newly-created directory when snapshot recorded it as absent", async () => {
-    const root = await mkdtemp(join(tmpdir(), "snap-"));
+    const root = await createTrackedTempDir("snap-");
     const mgr = new SnapshotManager(join(root, ".mo2-mcp", "snapshots"), "sess-1");
 
     const target = join(root, "profiles", "New Profile");
@@ -125,7 +125,7 @@ describe("SnapshotManager.restore", () => {
   });
 
   it("restores an existing directory by replacing the mutated tree", async () => {
-    const root = await mkdtemp(join(tmpdir(), "snap-"));
+    const root = await createTrackedTempDir("snap-");
     const mgr = new SnapshotManager(join(root, ".mo2-mcp", "snapshots"), "sess-1");
 
     const target = join(root, "mods", "Existing Dir");
@@ -145,7 +145,7 @@ describe("SnapshotManager.restore", () => {
   });
 
   it("throws snapshot_not_found for unknown snapshotId", async () => {
-    const root = await mkdtemp(join(tmpdir(), "snap-"));
+    const root = await createTrackedTempDir("snap-");
     const mgr = new SnapshotManager(join(root, ".mo2-mcp", "snapshots"), "sess-1");
 
     await expect(mgr.restore("nonexistent-uuid")).rejects.toThrow(/snapshot_not_found/);

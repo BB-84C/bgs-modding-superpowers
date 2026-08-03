@@ -9,7 +9,7 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function _setup(options: { gamePath?: string; createXEdit?: boolean } = {}): Promise<{ root: string; ctx: ToolContext; gamePath: string }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-mc-"));
+  const root = await createTrackedTempDir("mo2-mc-");
   const gamePath = options.gamePath ?? join(root, "Games", "Fallout 4");
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(join(root, "profiles", "Default", "modlist.txt"), "", "utf8");
@@ -77,7 +77,7 @@ describe("mo2_machine_contract", () => {
   });
 
   it("returns static MO2, game, Stock Game, and xEdit paths", async () => {
-    const stockGamePath = join(await mkdtemp(join(tmpdir(), "mo2-stock-game-")), "Stock Game", "Fallout 4");
+    const stockGamePath = join(await createTrackedTempDir("mo2-stock-game-"), "Stock Game", "Fallout 4");
     const { ctx, root, gamePath } = await _setup({ gamePath: stockGamePath, createXEdit: true });
     const tool = getTool("mo2_machine_contract")!;
 
@@ -99,7 +99,7 @@ describe("mo2_machine_contract", () => {
   });
 
   it("returns null Stock Game and xEdit paths when the layout and executable are absent", async () => {
-    const gamePath = join(await mkdtemp(join(tmpdir(), "mo2-game-")), "Steam", "Fallout 4");
+    const gamePath = join(await createTrackedTempDir("mo2-game-"), "Steam", "Fallout 4");
     const { ctx } = await _setup({ gamePath });
     const tool = getTool("mo2_machine_contract")!;
 

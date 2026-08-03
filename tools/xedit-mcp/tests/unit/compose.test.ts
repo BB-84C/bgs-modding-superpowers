@@ -31,7 +31,7 @@ const spec: ToolSpec = {
 };
 
 describe("pipeline.compose.runTool", () => {
-  const auditDir = mkdtempSync(join(tmpdir(), "xedit-mcp-compose-"));
+  const auditDir = createTrackedTempDirSync("xedit-mcp-compose-");
   const audit = createAuditLogger({ baseDir: auditDir });
   const registry = defaultRegistry();
 
@@ -107,7 +107,7 @@ describe("pipeline.compose.runTool", () => {
     const throwingAdapter = {
       async call(): Promise<never> { throw new Error("boom"); },
     };
-    const errDir = mkdtempSync(join(tmpdir(), "xedit-mcp-compose-err-"));
+    const errDir = createTrackedTempDirSync("xedit-mcp-compose-err-");
     const errAudit = createAuditLogger({ baseDir: errDir });
     const env = await runTool(spec, {
       args: { file: "Patch.esp", formId: "0x012345" },

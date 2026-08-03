@@ -69,7 +69,7 @@ function boundBindingOpts(root: string): BindingManagerOptions {
 }
 
 async function makeBoundCtx(): Promise<ToolContext> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-bug10-"));
+  const root = await createTrackedTempDir("mo2-bug10-");
   const binding = new BindingManager(boundBindingOpts(root));
   await binding.bind({ mo2Root: root, profile: "Default" });
   return {

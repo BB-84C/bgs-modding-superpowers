@@ -17,7 +17,7 @@ const ctx: ToolContext = {
 
 describe("xedit_navigate_ancestry tool", () => {
   it("formId mode: forces includeParents:true and flattens relations.parents", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-na-fid-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-na-fid-");
     const audit = createAuditLogger({ baseDir });
     let getArgs: Record<string, unknown> | undefined;
     let edidCalls = 0;
@@ -62,7 +62,7 @@ describe("xedit_navigate_ancestry tool", () => {
   });
 
   it("editorId mode: routes to records.find_by_editor_id with includeParents:true", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-na-edid-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-na-edid-");
     const audit = createAuditLogger({ baseDir });
     let edidArgs: Record<string, unknown> | undefined;
     let getCalls = 0;
@@ -110,7 +110,7 @@ describe("xedit_navigate_ancestry tool", () => {
   });
 
   it("refuses when neither mode validates", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-na-bad-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-na-bad-");
     const audit = createAuditLogger({ baseDir });
     const handler = makeNavigateAncestryHandler({
       adapter: makeMockAdapter({}),
@@ -127,7 +127,7 @@ describe("xedit_navigate_ancestry tool", () => {
   it("handles placeholder file + zero formId + valid editorId by routing to editorId mode", async () => {
     // Mirrors find-record's placeholder-aware behaviour so weak callers still
     // land in the right mode instead of hitting LOAD001 on a placeholder file.
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-na-placeholder-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-na-placeholder-");
     const audit = createAuditLogger({ baseDir });
     let edidCalled = 0;
     const adapter = makeMockAdapter({
@@ -155,7 +155,7 @@ describe("xedit_navigate_ancestry tool", () => {
   });
 
   it("LOAD001 fires when file not in load order", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-na-load-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-na-load-");
     const audit = createAuditLogger({ baseDir });
     const handler = makeNavigateAncestryHandler({
       adapter: makeMockAdapter({ "records.get": () => ({}) }),

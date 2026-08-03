@@ -21,7 +21,7 @@ import type { ToolContext } from "../src/types.js";
 import type { Config } from "../src/config.js";
 
 function makeMo2Tmpdir(): string {
-  const root = mkdtempSync(join(tmpdir(), "mo2-fomod-state-"));
+  const root = createTrackedTempDirSync("mo2-fomod-state-");
   // minimal ModOrganizer.ini
   writeFileSync(
     join(root, "ModOrganizer.ini"),
@@ -83,7 +83,7 @@ describe("gatherMo2FomodState", () => {
   });
 
   it("returns an empty plugin list when the profile dir is missing", async () => {
-    const root = mkdtempSync(join(tmpdir(), "mo2-fomod-state-noprof-"));
+    const root = createTrackedTempDirSync("mo2-fomod-state-noprof-");
     try {
       writeFileSync(
         join(root, "ModOrganizer.ini"),
@@ -102,7 +102,7 @@ describe("gatherMo2FomodState", () => {
   });
 
   it("returns an empty state when ModOrganizer.ini is missing", async () => {
-    const root = mkdtempSync(join(tmpdir(), "mo2-fomod-state-noini-"));
+    const root = createTrackedTempDirSync("mo2-fomod-state-noini-");
     try {
       const profileDir = join(root, "profiles", "Default");
       mkdirSync(profileDir, { recursive: true });

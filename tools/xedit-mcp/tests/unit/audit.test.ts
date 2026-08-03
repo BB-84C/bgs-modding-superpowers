@@ -7,7 +7,7 @@ import { createAuditLogger } from "../../src/audit.js";
 describe("audit logger", () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "xedit-mcp-audit-"));
+    dir = createTrackedTempDirSync("xedit-mcp-audit-");
   });
 
   it("writes one JSONL line per record under YYYY-MM-DD.jsonl", async () => {
@@ -44,7 +44,7 @@ describe("audit logger", () => {
     // Make baseDir point at an existing FILE so mkdir-recursive fails with ENOTDIR
     // (and even if mkdir somehow succeeds, appendFile to file/<day>.jsonl fails).
     // This is cross-platform: a path component that exists as a file cannot be a directory parent on either Windows or POSIX.
-    const parent = mkdtempSync(join(tmpdir(), "xedit-mcp-audit-bad-"));
+    const parent = createTrackedTempDirSync("xedit-mcp-audit-bad-");
     const fileAsDir = join(parent, "not-a-dir.txt");
     writeFileSync(fileAsDir, "");
 

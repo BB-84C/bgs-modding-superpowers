@@ -37,11 +37,14 @@ function Invoke-ProcessLaunchWithOutput {
     return [pscustomobject]@{ Result = $result; Output = $output }
 }
 
-$session = New-XeditClientSessionContext -PluginLines @('*Example.esm', '*Patch.esp')
 $projectRoot = Get-XeditClientProjectRoot
 $tempSandboxRoot = Join-Path $env:TEMP ('xedit-client-mo2-adapter-' + [guid]::NewGuid().ToString('N'))
+$previousSessionBasePath = $env:XEDIT_CLIENT_SESSION_BASE_PATH
+$session = $null
 
 try {
+    $env:XEDIT_CLIENT_SESSION_BASE_PATH = Join-Path $tempSandboxRoot 'xedit-client-sessions'
+    $session = New-XeditClientSessionContext -PluginLines @('*Example.esm', '*Patch.esp')
     $expectedPwshPath = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $expectedLauncherScriptPath = Join-Path $repoRoot 'tools\mo2-vfs-launcher\mo2-vfs-launcher.ps1'
     $expectedSessionPluginsArgument = ('-P:' + $session.SessionPluginsFilePath)
@@ -184,7 +187,7 @@ hdtTES5EditUTF8_loader.exe FO4Edit.exe
     }
 
     $beforeSessions = @{}
-    Get-ChildItem (Join-Path $env:TEMP 'xedit-client-sessions') -Directory -ErrorAction SilentlyContinue | ForEach-Object { $beforeSessions[$_.FullName] = $true }
+    Get-ChildItem $env:XEDIT_CLIENT_SESSION_BASE_PATH -Directory -ErrorAction SilentlyContinue | ForEach-Object { $beforeSessions[$_.FullName] = $true }
 
     $launchInvocation = Invoke-ProcessLaunchWithOutput -Arguments @('--launcher-path', 'D:\launcher\runFO4EditCN.bat', '--game-mode', 'Fallout4', '--plugins-file', $callerPluginsPath, '--mo-profile', 'Default')
 
@@ -201,7 +204,7 @@ hdtTES5EditUTF8_loader.exe FO4Edit.exe
     Assert-True -Condition (-not $launchInvocation.Output.Contains('hook-session-path:')) -Message 'launch output should not expose removed hook-session fields'
     Assert-True -Condition (-not $launchInvocation.Output.Contains('hook-dll-path:')) -Message 'launch output should not expose removed hook-session fields'
 
-    $newSession = Get-ChildItem (Join-Path $env:TEMP 'xedit-client-sessions') -Directory -ErrorAction SilentlyContinue | Where-Object { -not $beforeSessions.ContainsKey($_.FullName) } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    $newSession = Get-ChildItem $env:XEDIT_CLIENT_SESSION_BASE_PATH -Directory -ErrorAction SilentlyContinue | Where-Object { -not $beforeSessions.ContainsKey($_.FullName) } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     Assert-True -Condition ($null -ne $newSession) -Message 'Invoke-XeditClientProcessLaunch should create a new client session directory'
     $requestFilePath = Join-Path $newSession.FullName 'mo2-launch-request.json'
     $responseFilePath = Join-Path $newSession.FullName 'mo2-launch-response.json'
@@ -364,6 +367,7 @@ hdtTES5EditUTF8_loader.exe FO4Edit.exe
     Assert-True -Condition ($script:StoppedPidsAfterReadinessFailure -contains 54321) -Message 'MO2 readiness failure should stop the launched xEdit pid before returning failure'
 }
 finally {
+    $env:XEDIT_CLIENT_SESSION_BASE_PATH = $previousSessionBasePath
     if ($session -and (Test-Path $session.SessionPath -PathType Container)) { Remove-Item -Path $session.SessionPath -Recurse -Force }
     if ($tempSandboxRoot -and (Test-Path $tempSandboxRoot -PathType Container)) { Remove-Item -Path $tempSandboxRoot -Recurse -Force }
 }

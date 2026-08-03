@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
     environment: "node",
+    setupFiles: ["tests/tracked-temp.setup.ts"],
     passWithNoTests: true,
   },
 });

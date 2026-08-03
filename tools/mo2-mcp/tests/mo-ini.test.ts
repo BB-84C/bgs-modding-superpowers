@@ -6,7 +6,7 @@ import { readMoIni, decodeIniValue, resolveGameKey, resolveGameName } from "../s
 
 describe("readMoIni", () => {
   it("parses General + Settings + customExecutables", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mo-ini-"));
+    const dir = await createTrackedTempDir("mo-ini-");
     const iniPath = join(dir, "ModOrganizer.ini");
     await writeFile(
       iniPath,
@@ -57,7 +57,7 @@ size=2
   });
 
   it("preserves section ranges for verbatim rewrite", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mo-ini-"));
+    const dir = await createTrackedTempDir("mo-ini-");
     const iniPath = join(dir, "ModOrganizer.ini");
     await writeFile(
       iniPath,
@@ -86,7 +86,7 @@ unrelated=value
   });
 
   it("handles empty customExecutables section", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mo-ini-"));
+    const dir = await createTrackedTempDir("mo-ini-");
     const iniPath = join(dir, "ModOrganizer.ini");
     await writeFile(
       iniPath,
@@ -104,7 +104,7 @@ size=0
   });
 
   it("handles missing customExecutables section", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mo-ini-"));
+    const dir = await createTrackedTempDir("mo-ini-");
     const iniPath = join(dir, "ModOrganizer.ini");
     await writeFile(
       iniPath,
@@ -119,7 +119,7 @@ game=fallout4
   });
 
   it("reads General.selected_profile from underscore key", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "mo-ini-"));
+    const dir = await createTrackedTempDir("mo-ini-");
     const iniPath = join(dir, "ModOrganizer.ini");
     await writeFile(
       iniPath,
@@ -138,7 +138,7 @@ selected_profile=Modding
     // Regression: real Starfield install observed 2026-06-24 stored
     // `selected_profile=@ByteArray(BB84\xe8\x87\xaa\xe7\x94\xa8\x32)` which
     // decodes to `BB84自用2` (UTF-8 bytes E8 87 AA = 自, E7 94 A8 = 用).
-    const dir = await mkdtemp(join(tmpdir(), "mo-ini-"));
+    const dir = await createTrackedTempDir("mo-ini-");
     const iniPath = join(dir, "ModOrganizer.ini");
     await writeFile(
       iniPath,

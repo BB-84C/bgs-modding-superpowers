@@ -9,7 +9,7 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function _buildCtx(): Promise<ToolContext> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-pl-"));
+  const root = await createTrackedTempDir("mo2-pl-");
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(join(root, "profiles", "Default", "modlist.txt"), "", "utf8");
   await writeFile(

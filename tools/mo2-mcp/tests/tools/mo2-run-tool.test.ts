@@ -19,7 +19,7 @@ vi.mock("node:child_process", () => ({
 }));
 
 async function _fixture(): Promise<{ root: string; ctx: ToolContext }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-run-"));
+  const root = await createTrackedTempDir("mo2-run-");
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(join(root, "profiles", "Default", "modlist.txt"), "", "utf8");
   await writeFile(join(root, "profiles", "Default", "plugins.txt"), "", "utf8");

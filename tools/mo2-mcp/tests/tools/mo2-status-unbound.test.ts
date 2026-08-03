@@ -10,7 +10,7 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function makeUnboundCtx(): Promise<ToolContext> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-status-unbound-"));
+  const root = await createTrackedTempDir("mo2-status-unbound-");
   return {
     binding: new BindingManager({ log: () => {} }),
     sessionId: "unbound-status",

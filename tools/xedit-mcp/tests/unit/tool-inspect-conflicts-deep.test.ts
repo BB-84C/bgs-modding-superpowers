@@ -17,7 +17,7 @@ const ctx: ToolContext = {
 
 describe("xedit_inspect_conflicts_deep tool", () => {
   it("surfaces the r6 childGroup sub-block in data.childGroup", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-deep-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-deep-");
     const audit = createAuditLogger({ baseDir });
     const childGroup = {
       all: "conflict_partitioned",
@@ -47,7 +47,7 @@ describe("xedit_inspect_conflicts_deep tool", () => {
   });
 
   it("chains records.references {recursive:true} when includeReferences=true", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-deep-refs-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-deep-refs-");
     const audit = createAuditLogger({ baseDir });
     let referencesCalled = 0;
     let referencesRecursive: unknown = undefined;
@@ -80,7 +80,7 @@ describe("xedit_inspect_conflicts_deep tool", () => {
   });
 
   it("LOAD001 fires when file not in load order", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-deep-load-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-deep-load-");
     const audit = createAuditLogger({ baseDir });
     const adapter = makeMockAdapter({});
     const handler = makeInspectConflictsDeepHandler({
@@ -96,7 +96,7 @@ describe("xedit_inspect_conflicts_deep tool", () => {
   });
 
   it("refuses on invalid formId", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-deep-bad-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-deep-bad-");
     const audit = createAuditLogger({ baseDir });
     const handler = makeInspectConflictsDeepHandler({
       adapter: makeMockAdapter({}),

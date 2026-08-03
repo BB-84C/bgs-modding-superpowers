@@ -96,6 +96,8 @@ function Get-MatchingLogLine {
 
 $tempRoot = Join-Path $env:TEMP ('xedit-client-process-lifecycle-' + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $tempRoot -Force
+$previousSessionBasePath = $env:XEDIT_CLIENT_SESSION_BASE_PATH
+$env:XEDIT_CLIENT_SESSION_BASE_PATH = Join-Path $tempRoot 'xedit-client-sessions'
 $launchedPid = $null
 $wrapperPid = $null
 $metadataPid = $null
@@ -181,6 +183,7 @@ try {
     if ($badStatus.ExitCode -eq 0 -or $badStatus.Output -notmatch [regex]::Escape("Process is not an xEdit instance: $nonXeditPid")) { throw 'process status should reject a live pid that is not xEdit' }
 }
 finally {
+    $env:XEDIT_CLIENT_SESSION_BASE_PATH = $previousSessionBasePath
     Remove-Item Env:XEDIT_CLIENT_TEST_ARG_LOG -ErrorAction SilentlyContinue
     Remove-Item Env:XEDIT_CLI_TEST_ARG_LOG -ErrorAction SilentlyContinue
     foreach ($pidToStop in @($launchedPid, $wrapperPid, $metadataPid, $nonXeditPid)) {

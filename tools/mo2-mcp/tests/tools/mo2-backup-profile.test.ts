@@ -9,7 +9,7 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function _fixture(): Promise<{ root: string; ctx: ToolContext }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-bp-"));
+  const root = await createTrackedTempDir("mo2-bp-");
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(join(root, "profiles", "Default", "modlist.txt"), "+ModA\n", "utf8");
   await writeFile(join(root, "profiles", "Default", "plugins.txt"), "*Fallout4.esm\n", "utf8");

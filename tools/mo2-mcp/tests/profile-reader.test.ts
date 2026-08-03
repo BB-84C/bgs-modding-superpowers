@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { readProfile } from "../src/profile-reader.js";
 
 async function fixture(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "profile-"));
+  const root = await createTrackedTempDir("profile-");
   const profileDir = join(root, "Default");
   await mkdir(profileDir, { recursive: true });
   return profileDir;

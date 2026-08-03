@@ -56,7 +56,7 @@ function _section(text: string, name: string): string {
 }
 
 async function _fixture(iniText = BASE_INI): Promise<{ root: string; ctx: ToolContext; iniPath: string }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-exe-"));
+  const root = await createTrackedTempDir("mo2-exe-");
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(join(root, "profiles", "Default", "modlist.txt"), "", "utf8");
   await writeFile(join(root, "profiles", "Default", "plugins.txt"), "", "utf8");

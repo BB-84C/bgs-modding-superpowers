@@ -11,7 +11,7 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function _fixture(): Promise<ToolContext> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-aq-"));
+  const root = await createTrackedTempDir("mo2-aq-");
   const auditRoot = join(root, ".mo2-mcp", "audit");
   await mkdir(auditRoot, { recursive: true });
 

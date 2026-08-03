@@ -13,7 +13,7 @@ async function setupRoot(opts: {
   selectedProfile?: string;
   allowedProfiles?: string[];
 } = {}): Promise<{ root: string; ctx: ToolContext }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-status-profile-"));
+  const root = await createTrackedTempDir("mo2-status-profile-");
   for (const profile of opts.profiles ?? []) {
     await mkdir(join(root, "profiles", profile), { recursive: true });
     await writeFile(join(root, "profiles", profile, "modlist.txt"), "+ModA\n-ModB\n", "utf8");

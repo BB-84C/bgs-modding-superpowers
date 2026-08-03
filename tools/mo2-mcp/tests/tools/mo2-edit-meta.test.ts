@@ -26,7 +26,7 @@ interface FixtureCtx extends ToolContext {
 async function _fixture(opts: {
   pipeBehavior?: "absent" | "method_not_found" | "ok" | "real_error";
 } = {}): Promise<{ root: string; ctx: FixtureCtx }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-em-"));
+  const root = await createTrackedTempDir("mo2-em-");
   await writeFile(
     join(root, "ModOrganizer.ini"),
     "[General]\ngame=fallout4\n[Settings]\nbase_directory=" + root + "\n",

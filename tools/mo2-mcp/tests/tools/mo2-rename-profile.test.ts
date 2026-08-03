@@ -22,7 +22,7 @@ async function fixture(options: { selectedLine?: string; targetExists?: boolean;
   ctx: ToolContext;
   iniText: string;
 }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-rename-profile-"));
+  const root = await createTrackedTempDir("mo2-rename-profile-");
   roots.push(root);
   await mkdir(join(root, "profiles"), { recursive: true });
   if (options.oldExists ?? true) {

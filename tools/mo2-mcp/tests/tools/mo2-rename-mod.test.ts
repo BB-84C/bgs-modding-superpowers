@@ -10,7 +10,7 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function _fixture(withPipe = false): Promise<{ root: string; ctx: ToolContext }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-rename-"));
+  const root = await createTrackedTempDir("mo2-rename-");
   await mkdir(join(root, "mods", "OldMod"), { recursive: true });
   await writeFile(join(root, "mods", "OldMod", "file.txt"), "payload", "utf8");
   await mkdir(join(root, "profiles", "Default"), { recursive: true });

@@ -44,21 +44,40 @@ Assert-Throws -Action {
     Resolve-XeditClientPluginLinesFromValues -PluginLines @("", "   ")
 } -ExpectedMessage "Plugin list must contain at least one non-empty entry." -Message "empty plugin lists should fail"
 
-$session = New-XeditClientSessionContext -PluginLines @("*Fallout4.esm", "*ExamplePatch.esp")
-Assert-Equal -Actual (Split-Path $session.SessionPluginsFilePath -Leaf) -Expected "plugins.txt" -Message "session should materialize plugins.txt"
-Assert-Equal -Actual (Get-Content $session.SessionPluginsFilePath) -Expected @("*Fallout4.esm", "*ExamplePatch.esp") -Message "session plugins file should persist normalized lines"
-$tmpPluginsPath = Join-Path $session.SessionPath "plugins.txt.tmp"
-Assert-Equal -Actual (Test-Path -LiteralPath $tmpPluginsPath) -Expected $false -Message "temporary plugin staging file should not persist"
+$sessionTestRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('xedit-client-session-plugins-' + [guid]::NewGuid().ToString('N'))
+$previousSessionBasePath = $env:XEDIT_CLIENT_SESSION_BASE_PATH
+try {
+    $expectedOverrideError = 'XEDIT_CLIENT_SESSION_BASE_PATH must be a strict descendant of the OS temp root.'
+    $env:XEDIT_CLIENT_SESSION_BASE_PATH = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetTempPath())
+    Assert-Throws -Action { Get-XeditClientSessionBasePath -TempPath $env:TEMP } -ExpectedMessage $expectedOverrideError -Message 'session base override must reject a drive root'
 
-$clientOutput = & pwsh -NoProfile -File $xeditClientPath group command
-$clientExitCode = $LASTEXITCODE
-if ($clientExitCode -eq 0) {
-    throw "xedit-client entrypoint should reject unknown commands"
+    $env:XEDIT_CLIENT_SESSION_BASE_PATH = '\\server\share\xedit-client-sessions'
+    Assert-Throws -Action { Get-XeditClientSessionBasePath -TempPath $env:TEMP } -ExpectedMessage $expectedOverrideError -Message 'session base override must reject an arbitrary UNC path'
+
+    $env:XEDIT_CLIENT_SESSION_BASE_PATH = $sessionTestRoot
+    Assert-Equal -Actual (Get-XeditClientSessionBasePath -TempPath $env:TEMP) -Expected $sessionTestRoot -Message 'session base override should accept an owned descendant of the OS temp root'
+    $session = New-XeditClientSessionContext -PluginLines @("*Fallout4.esm", "*ExamplePatch.esp")
+    Assert-Equal -Actual (Split-Path $session.SessionPluginsFilePath -Leaf) -Expected "plugins.txt" -Message "session should materialize plugins.txt"
+    Assert-Equal -Actual (Get-Content $session.SessionPluginsFilePath) -Expected @("*Fallout4.esm", "*ExamplePatch.esp") -Message "session plugins file should persist normalized lines"
+    $tmpPluginsPath = Join-Path $session.SessionPath "plugins.txt.tmp"
+    Assert-Equal -Actual (Test-Path -LiteralPath $tmpPluginsPath) -Expected $false -Message "temporary plugin staging file should not persist"
+
+    $clientOutput = & pwsh -NoProfile -File $xeditClientPath group command
+    $clientExitCode = $LASTEXITCODE
+    if ($clientExitCode -eq 0) {
+        throw "xedit-client entrypoint should reject unknown commands"
+    }
+
+    $clientOutputText = ($clientOutput | ForEach-Object { $_.ToString() }) -join "`n"
+    if ($clientOutputText.Trim() -ne "Unknown command: group command") {
+        throw "xedit-client entrypoint should print an unknown command diagnostic`nActual: $clientOutputText"
+    }
 }
-
-$clientOutputText = ($clientOutput | ForEach-Object { $_.ToString() }) -join "`n"
-if ($clientOutputText.Trim() -ne "Unknown command: group command") {
-    throw "xedit-client entrypoint should print an unknown command diagnostic`nActual: $clientOutputText"
+finally {
+    $env:XEDIT_CLIENT_SESSION_BASE_PATH = $previousSessionBasePath
+    if (Test-Path $sessionTestRoot -PathType Container) {
+        Remove-Item -Path $sessionTestRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host "xedit-client session/plugins checks passed."

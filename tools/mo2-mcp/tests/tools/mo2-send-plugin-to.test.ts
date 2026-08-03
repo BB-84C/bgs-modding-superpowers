@@ -15,7 +15,7 @@ let sendPluginToModule: typeof SendPluginToModule;
 async function _fixture(
   pluginLines: string[] = ["*Base.esm", "*Anchor.esm", "*Source.esp", "*Last.esp"],
 ): Promise<{ root: string; ctx: ToolContext }> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-send-plugin-"));
+  const root = await createTrackedTempDir("mo2-send-plugin-");
   await mkdir(join(root, "profiles", "Default"), { recursive: true });
   await writeFile(join(root, "profiles", "Default", "modlist.txt"), "+SomeMod\n", "utf8");
   await writeFile(join(root, "profiles", "Default", "plugins.txt"), pluginLines.join("\n") + "\n", "utf8");

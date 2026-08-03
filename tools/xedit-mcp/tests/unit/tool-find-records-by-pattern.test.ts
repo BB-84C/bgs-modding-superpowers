@@ -17,7 +17,7 @@ const ctx: ToolContext = {
 
 describe("xedit_find_records_by_pattern tool", () => {
   it("forwards regex args to records.apply_filter and projects matches", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-fbp-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-fbp-");
     const audit = createAuditLogger({ baseDir });
     let forwarded: Record<string, unknown> | undefined;
     const adapter = makeMockAdapter({
@@ -61,7 +61,7 @@ describe("xedit_find_records_by_pattern tool", () => {
   });
 
   it("forwards offset verbatim to records.apply_filter", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-fbp-offset-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-fbp-offset-");
     const audit = createAuditLogger({ baseDir });
     let forwarded: Record<string, unknown> | undefined;
     const adapter = makeMockAdapter({
@@ -85,7 +85,7 @@ describe("xedit_find_records_by_pattern tool", () => {
   });
 
   it("surfaces r7 pagination fields from daemon result", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-fbp-page-fields-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-fbp-page-fields-");
     const audit = createAuditLogger({ baseDir });
     const adapter = makeMockAdapter({
       "records.apply_filter": () => ({
@@ -116,7 +116,7 @@ describe("xedit_find_records_by_pattern tool", () => {
   });
 
   it("rejects limit above contract 0.21 max before daemon call", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-fbp-limit-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-fbp-limit-");
     const audit = createAuditLogger({ baseDir });
     let called = false;
     const adapter = makeMockAdapter({
@@ -141,7 +141,7 @@ describe("xedit_find_records_by_pattern tool", () => {
   });
 
   it("accepts an array for multi-pattern OR", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-fbp-multi-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-fbp-multi-");
     const audit = createAuditLogger({ baseDir });
     let forwarded: Record<string, unknown> | undefined;
     const adapter = makeMockAdapter({
@@ -168,7 +168,7 @@ describe("xedit_find_records_by_pattern tool", () => {
   });
 
   it("refuses when no filter predicate is supplied", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-fbp-empty-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-fbp-empty-");
     const audit = createAuditLogger({ baseDir });
     const handler = makeFindRecordsByPatternHandler({
       adapter: makeMockAdapter({}),
@@ -184,7 +184,7 @@ describe("xedit_find_records_by_pattern tool", () => {
   });
 
   it("refuses when editorIdPattern and editorIdRegex are both supplied", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-fbp-mutex-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-fbp-mutex-");
     const audit = createAuditLogger({ baseDir });
     const handler = makeFindRecordsByPatternHandler({
       adapter: makeMockAdapter({}),
@@ -202,7 +202,7 @@ describe("xedit_find_records_by_pattern tool", () => {
   });
 
   it("unwraps daemon { locator, object } match shape", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-fbp-unwrap-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-fbp-unwrap-");
     const audit = createAuditLogger({ baseDir });
     const adapter = makeMockAdapter({
       "records.apply_filter": () => ({
@@ -231,7 +231,7 @@ describe("xedit_find_records_by_pattern tool", () => {
   });
 
   it("drainAll follows nextOffset pages and aggregates matches without forwarding drainAll", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-fbp-drain-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-fbp-drain-");
     const audit = createAuditLogger({ baseDir });
     const forwarded: Array<Record<string, unknown>> = [];
     const pages = [
@@ -297,7 +297,7 @@ describe("xedit_find_records_by_pattern tool", () => {
   });
 
   it("drainAll stops at the 20 page safety cap and returns continuation metadata", async () => {
-    const baseDir = mkdtempSync(join(tmpdir(), "xedit-mcp-fbp-drain-cap-"));
+    const baseDir = createTrackedTempDirSync("xedit-mcp-fbp-drain-cap-");
     const audit = createAuditLogger({ baseDir });
     const forwarded: Array<Record<string, unknown>> = [];
     const adapter = makeMockAdapter({

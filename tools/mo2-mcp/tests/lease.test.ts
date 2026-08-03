@@ -11,7 +11,7 @@ import {
 
 describe("fingerprintFile", () => {
   it("returns content hash + size for existing file", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "lease-"));
+    const dir = await createTrackedTempDir("lease-");
     const f = join(dir, "test.txt");
     await writeFile(f, "hello world", "utf8");
 
@@ -30,7 +30,7 @@ describe("fingerprintFile", () => {
   });
 
   it("different content → different hash", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "lease-"));
+    const dir = await createTrackedTempDir("lease-");
     const a = join(dir, "a.txt");
     const b = join(dir, "b.txt");
     await writeFile(a, "content A", "utf8");
@@ -44,7 +44,7 @@ describe("fingerprintFile", () => {
 
 describe("fingerprintDir", () => {
   it("counts files + sums sizes recursively", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "lease-"));
+    const dir = await createTrackedTempDir("lease-");
     await writeFile(join(dir, "a.txt"), "hello", "utf8"); // 5 bytes
     await mkdir(join(dir, "sub"));
     await writeFile(join(dir, "sub", "b.txt"), "world!!", "utf8"); // 7 bytes
@@ -63,7 +63,7 @@ describe("fingerprintDir", () => {
 
 describe("computeLease + verifyLease", () => {
   it("verify returns valid when nothing changed", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "lease-"));
+    const dir = await createTrackedTempDir("lease-");
     const f = join(dir, "data.txt");
     await writeFile(f, "stable", "utf8");
 
@@ -74,7 +74,7 @@ describe("computeLease + verifyLease", () => {
   });
 
   it("verify returns drift when file content changes", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "lease-"));
+    const dir = await createTrackedTempDir("lease-");
     const f = join(dir, "data.txt");
     await writeFile(f, "original", "utf8");
 
@@ -93,7 +93,7 @@ describe("computeLease + verifyLease", () => {
   });
 
   it("verify returns drift when dir file count changes", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "lease-"));
+    const dir = await createTrackedTempDir("lease-");
     const subdir = join(dir, "sub");
     await mkdir(subdir);
     await writeFile(join(subdir, "a.txt"), "A", "utf8");
@@ -108,7 +108,7 @@ describe("computeLease + verifyLease", () => {
   });
 
   it("lease token is deterministic given identical components", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "lease-"));
+    const dir = await createTrackedTempDir("lease-");
     const f = join(dir, "data.txt");
     await writeFile(f, "stable", "utf8");
 

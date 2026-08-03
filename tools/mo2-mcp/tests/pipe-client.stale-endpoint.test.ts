@@ -42,7 +42,7 @@ describe("PipeClient._maybeRefreshStaleEndpoint (BUG-14 BUG-A)", () => {
   let mo2Root: string;
 
   beforeEach(async () => {
-    mo2Root = await mkdtemp(join(tmpdir(), "mo2-stale-pipe-"));
+    mo2Root = await createTrackedTempDir("mo2-stale-pipe-");
   });
 
   afterEach(async () => {

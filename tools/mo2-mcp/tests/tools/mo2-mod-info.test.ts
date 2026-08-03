@@ -9,7 +9,7 @@ import { AuditLogger } from "../../src/audit.js";
 import type { ToolContext } from "../../src/types.js";
 
 async function _fixture(): Promise<ToolContext> {
-  const root = await mkdtemp(join(tmpdir(), "mo2-mi-"));
+  const root = await createTrackedTempDir("mo2-mi-");
   await writeFile(
     join(root, "ModOrganizer.ini"),
     "[General]\ngame=fallout4\n[Settings]\nbase_directory=" + root + "\n",

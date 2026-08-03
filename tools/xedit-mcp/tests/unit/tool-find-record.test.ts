@@ -16,7 +16,7 @@ const ctx: ToolContext = {
 };
 
 describe("xedit_find_record tool", () => {
-  const audit = createAuditLogger({ baseDir: mkdtempSync(join(tmpdir(), "xedit-mcp-find-")) });
+  const audit = createAuditLogger({ baseDir: createTrackedTempDirSync("xedit-mcp-find-") });
 
   it("by formId returns a slim locator", async () => {
     const adapter = makeMockAdapter({
