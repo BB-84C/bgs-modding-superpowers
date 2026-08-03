@@ -56,9 +56,9 @@ with `code: "not_ready"` if you call them before the daemon is ready.
 | `xedit_status` | Pure read. Returns `{ status: "not_started" \| "starting" \| "ready" \| "failed", ... }`. Never modifies state. Use this to POLL while waiting for a launch. |
 | `xedit_start` | Kicks off an asynchronous daemon launch if not already starting/ready. Returns immediately. Accepts optional overrides: `{ launcherPath?, gameMode?, dataPath?, pluginsFile?, moProfile? }`. Use `dataPath` (MO2 `gamePath + "\\Data"`) to override xEdit's registry-discovered platform path; use `pluginsFile` to point at a custom load order (see `writing-bgs-load-order`). The launch itself takes 60-240s; that work happens in the background. |
 | `xedit_health` | When ready: sends `system.ping` through the named pipe to catch zombies. Returns `responsive: true \| false`. Otherwise: returns the same shape as `xedit_status`. |
-| `xedit_dirty` | Returns xEdit's dirty state immediately. When ready: wraps `session.get_dirty_state` and returns `{ dirty, dirtyFiles, unsavedChangeCount }`. Otherwise: returns the same shape as `xedit_status`. |
-| `xedit_stop` | Stops the daemon and clears MCP runtime state. If there are unsaved edits, it refuses unless `force: true` is passed. |
-| `xedit_restart` | Stops the daemon (same dirty-state safety as `xedit_stop`) and immediately kicks off a fresh async launch. Use this to relaunch with a new `pluginsFile` or `dataPath` instead of reconnecting `/mcp` manually. |
+| `xedit_dirty` | Returns xEdit dirty state plus MCP-tracked `pendingShutdownSave`. Pending saves remain visible even when daemon dirty state is false or the daemon is not ready. |
+| `xedit_stop` | Stops the daemon and clears MCP runtime state. It refuses unsaved edits or pending-shutdown saves unless `force: true` is explicitly chosen; forced abandonment is reported and audited. |
+| `xedit_restart` | Stops the daemon with the same dirty/pending-save safety, then kicks off a fresh async launch. Use only when no pending save is tracked; `force: true` is explicit abandonment, not a flush. |
 
 ### Domain tools (6) — require ready, fast-fail otherwise
 
@@ -78,9 +78,9 @@ with `code: "not_ready"` if you call them before the daemon is ready.
 2. xedit_status({})                 -> poll until status="ready"   (sleep 5-15s between calls)
 3. xedit_health({})                 -> confirm responsive=true
 4. xedit_session({}) / xedit_*      -> normal domain work
-5. xedit_dirty({})                  -> check unsaved changes before any stop/restart
-6. xedit_stop({ force?: true })     -> stop + clear runtime state
-7. xedit_restart({ ..., force? })   -> relaunch with new overrides
+5. xedit_dirty({})                  -> check dirty state and pendingShutdownSave
+6. xedit_stop({})                   -> only when no dirty or pending state exists
+7. xedit_restart({ ... })           -> only when no dirty or pending state exists
 ```
 
 NEVER call a domain tool in a tight loop expecting it to "wait." If
@@ -120,10 +120,12 @@ actual plugin, load-order, and record readback.
 3. **Mutating operations require explicit user consent and a daemon launched
    with `-IKnowWhatImDoing`.** Read the `xedit-automation` skill BEFORE any
    destructive work. The anti-pattern list there is binding.
-4. **A `session.save` response is not durability.** A save with
-   `savedFilesPendingShutdown > 0` is deferred. Durability proof =
-   save + daemon restart (new PID) + readback. Always restart before declaring
-   a mutating workflow complete.
+4. **A `session.save` response is not durability.** A nonzero
+   `savedFilesPendingShutdown` / `savePendingShutdownCount` is deferred. The
+   MCP retains that state, exposes it through `xedit_dirty`, and refuses normal
+   stop/restart even if xEdit reports `dirty:false`. Current automation has no
+   authoritative pending-queue inspection or flush command. `force:true` is
+   explicit abandonment, never a durability proof.
 5. **Large scope (many records, broad conflict survey) → delegate to a
    read-only investigator subagent FIRST.** The subagent burns its own context
    and returns a distilled summary. Do not loop hundreds of records through

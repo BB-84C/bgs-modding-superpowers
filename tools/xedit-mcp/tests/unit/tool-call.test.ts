@@ -15,7 +15,7 @@ const ctx: ToolContext = {
 };
 
 describe("xedit_call atomic passthrough", () => {
-  const audit = createAuditLogger({ baseDir: mkdtempSync(join(tmpdir(), "xedit-mcp-call-")) });
+  const audit = createAuditLogger({ baseDir: createTrackedTempDirSync("xedit-mcp-call-") });
 
   it("forwards a known command and returns the daemon result", async () => {
     const adapter = makeMockAdapter({
@@ -43,5 +43,29 @@ describe("xedit_call atomic passthrough", () => {
     const env = await handler({ command: "records.get", args: { file: "Ghost.esp", formId: "0x012345" } });
     if (env.ok) throw new Error("expected refusal");
     expect(env.code).toBe("rule_LOAD001");
+  });
+
+  it("reports the exact successful session.save result to the pending-save owner", async () => {
+    const result = {
+      savedFilesNow: [],
+      savedFilesPendingShutdown: [{ name: "Patch.esp", fileName: "Patch.esp" }],
+      savedNowCount: 0,
+      savePendingShutdownCount: 1,
+      dirtyState: { dirty: false },
+    };
+    let observed: unknown;
+    const adapter = makeMockAdapter({ "session.save": () => result });
+    const handler = makeCallHandler({
+      adapter,
+      registry: defaultRegistry(),
+      audit,
+      getContext: () => ctx,
+      onSuccessfulSessionSave: (save) => { observed = save; },
+    });
+
+    const env = await handler({ command: "session.save", args: { files: ["Patch.esp"] } });
+
+    expect(env.ok).toBe(true);
+    expect(observed).toEqual(result);
   });
 });

@@ -49,6 +49,8 @@ export interface CallOptions {
   registry: Registry;
   audit: AuditLogger;
   getContext: () => ToolContext | undefined;
+  /** Observes only successful daemon session.save results. */
+  onSuccessfulSessionSave?: (result: unknown) => void;
 }
 
 export function makeCallHandler(opts: CallOptions) {
@@ -126,6 +128,9 @@ export function makeCallHandler(opts: CallOptions) {
     }
     if (env.ok && r.warnings.length) {
       env.warnings.push(...r.warnings);
+    }
+    if (env.ok && command === "session.save") {
+      opts.onSuccessfulSessionSave?.(env.data);
     }
     await emitAudit({
       audit: opts.audit,

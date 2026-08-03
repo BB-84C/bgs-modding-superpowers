@@ -20,8 +20,10 @@ import { makeCallHandler } from "./tools/call.js";
 import { refuse } from "./envelope.js";
 import { MCP_ERROR_CODES } from "./types.js";
 import { launchDaemon } from "./launch.js";
+import { PendingSaveTracker, pendingSaveLifecycleRisk, withPendingShutdownSave } from "./pending-save.js";
+import { hashArgs } from "./audit-line.js";
 export function buildServerToolset(opts) {
-    const audit = createAuditLogger({
+    const audit = opts.audit ?? createAuditLogger({
         baseDir: opts.auditDir ?? join(tmpdir(), "xedit-mcp-audit"),
     });
     const registry = defaultRegistry();
@@ -41,7 +43,13 @@ export function buildServerToolset(opts) {
     const findByPattern = makeFindRecordsByPatternHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
     const createChild = makeCreateChildRecordHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
     const navigateAncestry = makeNavigateAncestryHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
-    const call = makeCallHandler({ adapter: opts.adapter, registry, audit, getContext: getCtx });
+    const call = makeCallHandler({
+        adapter: opts.adapter,
+        registry,
+        audit,
+        getContext: getCtx,
+        onSuccessfulSessionSave: (result) => opts.pendingSaveTracker?.observeSuccessfulSave(result),
+    });
     const handlers = {
         xedit_session: session.tool,
         xedit_list_capabilities: listCaps,
@@ -212,18 +220,18 @@ export const TOOL_DEFINITIONS = [
     },
     {
         name: "xedit_dirty",
-        description: "Returns xEdit's dirty state immediately. When ready: wraps session.get_dirty_state and returns { dirty, dirtyFiles, unsavedChangeCount }. Otherwise: returns the same shape as xedit_status.",
+        description: "Returns xEdit's dirty state immediately. When ready: wraps session.get_dirty_state and returns { dirty, dirtyFiles, unsavedChangeCount, pendingShutdownSave }. pendingShutdownSave is MCP-tracked from successful session.save responses and remains nonzero even when dirty is false. When not ready or dirty-state probing fails, it still returns pendingShutdownSave alongside lifecycle status.",
         inputSchema: { type: "object", properties: {}, additionalProperties: false },
     },
     {
         name: "xedit_stop",
-        description: "Stops the xEdit daemon and clears MCP state. Before shutdown it checks session.get_dirty_state. If there are unsaved changes and force!==true, returns code='dirty_state' with dirtyFiles instead of stopping. If the daemon is a zombie, use force:true to abandon unsaved work and clear the state.",
+        description: "Stops the xEdit daemon and clears MCP state. Refuses if MCP-tracked session.save results are pending shutdown or if session.get_dirty_state reports unsaved changes, unless force=true. force=true explicitly abandons any pending state and emits an auditable risk field.",
         inputSchema: {
             type: "object",
             properties: {
                 force: {
                     type: "boolean",
-                    description: "If true, stop even when xEdit has unsaved changes (abandons in-memory edits). Default false.",
+                    description: "If true, stop even when xEdit has unsaved changes or pending-shutdown saves. This explicitly abandons the state and returns an auditable risk field. Default false.",
                 },
             },
             additionalProperties: false,
@@ -231,14 +239,14 @@ export const TOOL_DEFINITIONS = [
     },
     {
         name: "xedit_restart",
-        description: "Stops the current daemon (same dirty-state safety as xedit_stop) and immediately kicks off a fresh asynchronous launch. Accepts the same overrides as xedit_start plus force?: boolean. Use this to reboot with a new pluginsFile or dataPath instead of reconnecting /mcp manually.",
+        description: "Stops the current daemon (same pending-save and dirty-state safety as xedit_stop) and immediately kicks off a fresh asynchronous launch. Accepts the same overrides as xedit_start plus force?: boolean. force=true explicitly abandons pending-save state and records the risk.",
         inputSchema: {
             type: "object",
             properties: {
                 ...LAUNCH_OVERRIDE_PROPERTIES,
                 force: {
                     type: "boolean",
-                    description: "If true, restart even when xEdit has unsaved changes (abandons in-memory edits). Default false.",
+                    description: "If true, restart even when xEdit has unsaved changes or pending-shutdown saves. This explicitly abandons the state and returns an auditable risk field. Default false.",
                 },
             },
             additionalProperties: false,
@@ -580,11 +588,14 @@ export async function main() {
     let toolset = null;
     let daemonRef = null;
     let launchGeneration = 0;
+    const pendingSaveTracker = new PendingSaveTracker();
+    const audit = createAuditLogger({ baseDir: join(tmpdir(), "xedit-mcp-audit") });
     function clearRuntimeState(next = { status: "not_started" }) {
         launchGeneration += 1;
         state = next;
         toolset = null;
         daemonRef = null;
+        pendingSaveTracker.clearForSessionTransition();
     }
     async function getDirtyState() {
         if (state.status !== "ready" || !daemonRef) {
@@ -593,7 +604,7 @@ export async function main() {
                 body: {
                     ok: true,
                     tool: "xedit_dirty",
-                    data: { ...statusFields(state, daemonRef), responsive: false },
+                    data: withPendingShutdownSave({ ...statusFields(state, daemonRef), responsive: false }, pendingSaveTracker.snapshot()),
                     hint: state.status === "not_started"
                         ? "Daemon not started. Call xedit_start."
                         : state.status === "starting"
@@ -615,6 +626,7 @@ export async function main() {
                         code,
                         summary: message,
                         hint: message,
+                        data: withPendingShutdownSave({ ...statusFields(state, daemonRef), responsive: false }, pendingSaveTracker.snapshot()),
                     },
                 };
             }
@@ -630,12 +642,12 @@ export async function main() {
                 body: {
                     ok: true,
                     tool: "xedit_dirty",
-                    data: {
+                    data: withPendingShutdownSave({
                         ...statusFields(state, daemonRef),
                         dirty: result.dirty === true,
                         dirtyFiles,
                         unsavedChangeCount,
-                    },
+                    }, pendingSaveTracker.snapshot()),
                 },
             };
         }
@@ -684,6 +696,8 @@ export async function main() {
                     adapter: daemon.adapter,
                     sessionId: `mcp-${process.pid}-${Date.now()}`,
                     daemonPid: daemon.pid,
+                    pendingSaveTracker,
+                    audit,
                 });
                 state = { status: "ready", pid: daemon.pid, since: Date.now() };
             }
@@ -782,12 +796,28 @@ export async function main() {
         }
         if (name === "xedit_stop") {
             const force = args.force === true;
+            const pendingRisk = pendingSaveLifecycleRisk("stop", pendingSaveTracker.snapshot(), force);
+            if (pendingRisk && "code" in pendingRisk) {
+                return jsonResult({ ok: false, tool: name, ...pendingRisk }, true);
+            }
             if (state.status === "not_started") {
+                if (pendingRisk && "abandonment" in pendingRisk) {
+                    await audit.append({
+                        tool: name,
+                        argsHash: hashArgs(args),
+                        decision: "warned",
+                        ok: true,
+                        risk: pendingRisk.risk,
+                        pendingShutdownSave: pendingRisk.pendingShutdownSave,
+                    });
+                    clearRuntimeState();
+                }
                 return jsonResult({
                     ok: true,
                     tool: name,
                     data: statusFields(state, daemonRef),
                     message: "Daemon already stopped.",
+                    ...(pendingRisk && "abandonment" in pendingRisk ? { risk: pendingRisk } : {}),
                 });
             }
             if (state.status === "ready") {
@@ -807,6 +837,17 @@ export async function main() {
                 }
             }
             const current = daemonRef;
+            if (pendingRisk && "abandonment" in pendingRisk) {
+                await audit.append({
+                    tool: name,
+                    argsHash: hashArgs(args),
+                    decision: "warned",
+                    ok: true,
+                    daemonPid: state.status === "ready" ? state.pid : undefined,
+                    risk: pendingRisk.risk,
+                    pendingShutdownSave: pendingRisk.pendingShutdownSave,
+                });
+            }
             clearRuntimeState();
             if (current) {
                 try {
@@ -821,10 +862,15 @@ export async function main() {
                 tool: name,
                 data: { status: "not_started" },
                 message: "Daemon stopped and MCP runtime state cleared.",
+                ...(pendingRisk && "abandonment" in pendingRisk ? { risk: pendingRisk } : {}),
             });
         }
         if (name === "xedit_restart") {
             const force = args.force === true;
+            const pendingRisk = pendingSaveLifecycleRisk("restart", pendingSaveTracker.snapshot(), force);
+            if (pendingRisk && "code" in pendingRisk) {
+                return jsonResult({ ok: false, tool: name, ...pendingRisk }, true);
+            }
             const overrides = {
                 moRoot: typeof args.moRoot === "string" ? args.moRoot : undefined,
                 launcherPath: typeof args.launcherPath === "string" ? args.launcherPath : undefined,
@@ -852,6 +898,17 @@ export async function main() {
                 }
             }
             const current = daemonRef;
+            if (pendingRisk && "abandonment" in pendingRisk) {
+                await audit.append({
+                    tool: name,
+                    argsHash: hashArgs(args),
+                    decision: "warned",
+                    ok: true,
+                    daemonPid: state.status === "ready" ? state.pid : undefined,
+                    risk: pendingRisk.risk,
+                    pendingShutdownSave: pendingRisk.pendingShutdownSave,
+                });
+            }
             clearRuntimeState();
             if (current) {
                 try {
@@ -870,6 +927,7 @@ export async function main() {
                 message: kick.kicked
                     ? "Daemon restart initiated in the background. Poll xedit_status until status='ready'."
                     : (kick.reason ?? "Restart could not be initiated."),
+                ...(pendingRisk && "abandonment" in pendingRisk ? { risk: pendingRisk } : {}),
             });
         }
         // ---- DOMAIN tools ----

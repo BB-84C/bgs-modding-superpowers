@@ -11,6 +11,10 @@ export interface AuditRecord {
   snapshotId?: string;
   daemonPid?: number;
   sessionId?: string;
+  /** Explicit lifecycle abandonment reason, when one was authorized. */
+  risk?: string;
+  /** Pending saves present at a force lifecycle boundary. */
+  pendingShutdownSave?: { count: number; files: unknown[] };
 }
 
 export interface AuditLogger {
