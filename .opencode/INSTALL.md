@@ -50,19 +50,21 @@ The agent should reference the `using-bgs-modding-superpowers` skill and offer t
 
 ## Windows fallback (npm-managed local install)
 
-If the direct git install path is slow or unreliable on Windows, install into your global OpenCode tree first:
+If the direct git install path is slow or unreliable on Windows, vendor the plugin in the project that uses it. OpenCode resolves this dot-relative spec from the project configuration, not from a shared server's current working directory:
 
 ```powershell
-npm install bgs-modding-superpowers@git+https://github.com/BB-84C/bgs-modding-superpowers.git --prefix "$HOME\.config\opencode"
+npm install bgs-modding-superpowers@git+https://github.com/BB-84C/bgs-modding-superpowers.git --prefix .opencode/vendor
 ```
 
-Then point `opencode.json` at the local path:
+Then add the project-relative plugin path to that project's `opencode.json`:
 
 ```json
 {
-  "plugin": ["~/.config/opencode/node_modules/bgs-modding-superpowers"]
+  "plugin": ["./.opencode/vendor/node_modules/bgs-modding-superpowers"]
 }
 ```
+
+Add `.opencode/vendor/` to the consuming project's `.gitignore`. This recipe keeps the installed package beside the project and works whether OpenCode is launched directly or through a shared server.
 
 ## Local development checkout
 
@@ -70,9 +72,11 @@ If you cloned this repo and want to run the plugin from your local checkout, poi
 
 ```json
 {
-  "plugin": ["file:/path/to/your/bgs-modding-superpowers/checkout"]
+  "plugin": ["file:///D:/dev/bgs-modding-superpowers"]
 }
 ```
+
+Use a canonical `file:///` URL for a local checkout, including the drive letter on Windows. Do not use relative or single-slash file URIs, or tilde-based plugin specs: their interpretation can vary with the process working directory or platform.
 
 The committed `plugins/bgs-modding-superpowers/` tree is what `.mcp.json` resolves against, so a plain clone is enough to run both MCPs. You only need a per-MCP `npm install && npm run build` if you are actively editing the TypeScript sources under `tools/xedit-mcp/src/` or `tools/bgs-kb-mcp/src/`; in that case re-materialize the plugin tree afterward with:
 

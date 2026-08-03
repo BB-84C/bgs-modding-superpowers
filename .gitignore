@@ -1,6 +1,7 @@
 .artifacts/*
 !.artifacts/.gitkeep
 .worktrees/
+.superpowers/
 .playwright-mcp/
 docs/initial_pormpt.md
 docs/initial_pormpt.pdf
@@ -23,6 +24,7 @@ Desktop.ini
 /.opencode/*
 !/.opencode/plugins/
 !/.opencode/INSTALL.md
+!/.opencode/bgs-modding-superpowers-helpers.mjs
 
 # Dev-internal router (per AGENTS.md policy)
 AGENTS.md

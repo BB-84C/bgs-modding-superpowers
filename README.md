@@ -28,6 +28,8 @@ Add to the `plugin` array of your `opencode.json`:
 
 Full instructions: [`.opencode/INSTALL.md`](.opencode/INSTALL.md).
 
+For a project-local vendor install, use `npm install --prefix .opencode/vendor ...` and configure the plugin as `./.opencode/vendor/node_modules/bgs-modding-superpowers`. This path is resolved from the project configuration, so a shared OpenCode server does not depend on its own working directory.
+
 ### Claude Code
 
 ```text
