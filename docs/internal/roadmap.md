@@ -130,6 +130,29 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
 
+## 2026-08-02 — Issues #25-#29 construction round
+
+**Delivered on feature branch `fix/open-issues-25-29`:** repository-local repairs for all five open issues, two TES5Edit upstream reports, and a refusal of unsupported WSL bridge scope.
+
+- **#25 — OpenCode local plugin loading:** local-path guidance now uses dot-relative, absolute, or canonical `file:///` forms. The OpenCode entry module is default-export-only; testable helpers live outside the plugin-discovery directory. Static contract checks and an owned ephemeral shared-server integration test start from a different working directory, query the project-scoped server API for the BGS skill plus `xedit`, `bgs_kb`, and `mo2`, account for the owned process tree, and release the ephemeral port without touching shared port 4096.
+- **#26 — deferred xEdit saves:** the MCP retains `savedFilesPendingShutdown` / `savePendingShutdownCount`, exposes them through `xedit_dirty`, and refuses normal stop/restart while pending state exists even when xEdit reports `dirty:false`. `force:true` is explicitly reported and audited as abandonment. Active skill/KB guidance no longer prescribes restart as durability proof. TES5Edit issue [#6](https://github.com/BB-84C/TES5Edit/issues/6) requests authoritative queue readback and an in-band flush primitive; no upstream source changes were made in this round.
+- **#27 — Starfield apparel knowledge:** four Starfield KB records now cover the crowd-apparel equip boundary, the `ARMO -> ARMA -> MRPH -> morph.dat` chain, the observed `MDAT` asset contract, and Outfit Studio 5.8.2 noninteractive setup. Contradicted claims were removed: upstream defaults to the female Starfield skeleton, BodySlide does not expose a `morph.dat` version field, and `Overweight` / `Thin` / `Strong` are attributed to observed game assets rather than tool constants.
+- **#28 — temp-directory leak:** the dominant measured prefixes were traced to MO2 MCP test fixtures rather than proven native `IOrganizer.installMod` behavior. Vitest and PowerShell fixtures now create temp/session paths through explicit ownership helpers and clean them on normal and failure paths; no process-wide filesystem monkeypatch is used. The full MO2 MCP suite leaves zero mapped residue in an isolated temp root. xEdit MCP unit fixtures were migrated to the same ownership discipline. A host scan found no remaining historical candidates older than seven days, so no deletion was performed and the non-FOMOD reinstall path was left unchanged.
+- **#29 — xEdit Pascal silent failures:** four focused core KB records document sortable-container locator movement, foreign FormID local-space resolution, runtime-ledger partial mutations, and safe linked-record/non-ASCII inspection. TES5Edit issue [#7](https://github.com/BB-84C/TES5Edit/issues/7) requests strict resolver and preflight/runtime improvements; no upstream source changes were made.
+- **WSL support decision:** WSL-only Agent operation is not supported. The project remains Windows-native around MO2, xEdit, named pipes, paths, and lifecycle control. The response is recorded on [TES5Edit PR #2](https://github.com/BB-84C/TES5Edit/pull/2#issuecomment-5161193056).
+- **Portable build hardening:** a locked bundled `kb.sqlite` exposed that the materializer deleted the final tree before rebuilding it. The materializer now constructs a private sibling tree and publishes by directory rename with rollback; locked-file regression coverage proves the existing final tree remains intact. The current OpenCode process still holds the tracked portable KB open, so the final materialized-tree refresh is staged and must run after that process releases the file.
+
+**Verification:** xEdit MCP 131/131 unit tests plus build/typecheck; MO2 MCP 598 tests passed with 19 permission-gated acceptance tests skipped; core KB 190 records and Starfield KB 34 records validate; all eight new KB records rank first for their focused retrieval query; project-scoped shared-server integration exits its owned process tree and releases its ephemeral port; staged portable build completes with 8,932 files.
+
+**Now known:**
+
+- `dirty:false` and a successful `session.save` envelope do not imply durability when xEdit reports pending-shutdown files.
+- The historical MO2 temp-directory population was primarily test-harness residue; native reinstall attribution was an unverified inference and is not a basis for product changes.
+- A generated tree must be built privately before replacement. Sentinel checks do not prevent partial destruction when recursive deletion starts before the replacement is ready.
+- WSL compatibility is not a narrow pipe adapter for this ecosystem; it crosses path, process, runtime, sidecar, and lifecycle boundaries. It is intentionally outside the supported surface.
+
+**Next:** after the active OpenCode process releases the bundled SQLite handle, rerun `scripts/build-portable-plugin.ps1 -OutputDir plugins -McpPathStrategy relative -Force`, verify the tracked materialized tree, then perform final whole-change review and commit/push/issue-close decisions.
+
 ## 2026-07-06 — KB release kb-2026.07.06 cut (core → RedPill record) + issues #10/#22/#23/#24 shipped
 
 **Delivered on `main` (11 fix commits + 1 KB release commit, `da2f800 → 9094ac4`):** four GitHub issues closed, KB core pack bumped, KB release published.
