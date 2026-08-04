@@ -1,14 +1,15 @@
-#requires -Version 5.1
+#requires -Version 7.0
 <#
 .SYNOPSIS
   Materialize a portable plugins/<name>/ tree for downstream packaging.
 
 .DESCRIPTION
   Builds a self-contained, hand-distributable copy of the plugin into
-  <OutputDir>/<PluginName>/. The output contains only real files (no
-  directory junctions, no machine-specific absolute paths), so it can be
-  zipped, committed to a release branch, or dropped into a Codex
-  marketplace cache without further surgery.
+  <OutputDir>/<PluginName>/. OutputDir must remain inside this repository so
+  the safe-delete containment checks can prove ownership. The output contains
+  only real files (no directory junctions, no machine-specific absolute
+  paths), so the completed tree can then be zipped, committed, or copied into
+  a Codex marketplace cache without further surgery.
 
   Closes roadmap Target 1 (Portable publishability): the current
   per-machine workaround under repo-root plugins/ relies on directory
@@ -52,7 +53,8 @@
 
 .PARAMETER OutputDir
   Where the portable tree is written. Default: "dist/portable-plugin".
-  Relative paths resolve from the repo root.
+  Relative paths resolve from the repo root. The resolved path must stay inside
+  the repository; copy the completed tree elsewhere only after the build.
 
 .PARAMETER PluginName
   Subdirectory name inside OutputDir. Default: "bgs-modding-superpowers".
@@ -86,9 +88,13 @@
     tools/xedit-hook-bridge/dist/xEditHookBridge.dll
 #>
 
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact='High')]
 param(
+  [ValidateNotNullOrEmpty()]
   [string]$OutputDir = "dist/portable-plugin",
+
+  [ValidateNotNullOrEmpty()]
+  [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
   [string]$PluginName = "bgs-modding-superpowers",
 
   [ValidateSet("claude-plugin-root", "relative", "absolute")]
@@ -101,15 +107,30 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+if ($Force -and -not $PSBoundParameters.ContainsKey('Confirm')) { $ConfirmPreference = 'None' }
 
 # ---- Resolve repo root from this script's location -------------------------
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+. (Join-Path $PSScriptRoot "lib/Assert-SafeDeleteTarget.ps1")
+. (Join-Path $PSScriptRoot "lib/Publish-StagedPortableTree.ps1")
 
 # ---- Resolve OutputDir relative to repo root if not rooted -----------------
 if (-not [IO.Path]::IsPathRooted($OutputDir)) {
   $OutputDir = Join-Path $RepoRoot $OutputDir
 }
-$PluginRoot = Join-Path $OutputDir $PluginName
+$OutputDir = [IO.Path]::GetFullPath($OutputDir)
+$FinalPluginRoot = [IO.Path]::GetFullPath((Join-Path $OutputDir $PluginName))
+$BuildContainmentRoot = $RepoRoot
+if ([string]::Equals($OutputDir, $RepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+  throw "Refusing output directory '$OutputDir': it is the repository root."
+}
+$GeneratedMarker = ".bgs-portable-build"
+$StagingMarker = ".bgs-portable-build-staging"
+$BuildId = [Guid]::NewGuid().ToString('N')
+$PluginRoot = Join-Path $OutputDir ".bgs-portable-build-staging-$BuildId"
+$StagedMarketplacePath = Join-Path $OutputDir ".bgs-portable-build-marketplace-staging-$BuildId.json"
+$StagingRoot = $PluginRoot
+$StagingCreated = $false
 
 Write-Host "[build-portable-plugin] repo root:  $RepoRoot"
 Write-Host "[build-portable-plugin] output dir: $OutputDir"
@@ -130,16 +151,38 @@ foreach ($rel in $RequiredArtifacts) {
   }
 }
 
-# ---- Prepare output ---------------------------------------------------------
-if (Test-Path -LiteralPath $PluginRoot) {
-  if ($Force) {
-    Write-Host "[build-portable-plugin] removing existing $PluginRoot"
-    Remove-Item -LiteralPath $PluginRoot -Recurse -Force
-  } else {
-    throw "$PluginRoot already exists. Pass -Force to overwrite."
+# ---- Prepare output in a private sibling staging tree ----------------------
+if (Test-Path -LiteralPath $FinalPluginRoot) {
+  if (-not $Force) {
+    throw "$FinalPluginRoot already exists. Pass -Force to overwrite."
   }
+  if (-not (Test-BgsGeneratedMarker -Target $FinalPluginRoot -MarkerName $GeneratedMarker)) {
+    throw "Refusing to replace '$FinalPluginRoot': no $GeneratedMarker marker. The materializer never adopts or overwrites an unmarked tree."
+  }
+  $null = Assert-SafeDeleteTarget -Target $FinalPluginRoot -RepoRoot $RepoRoot -ContainmentRoot $BuildContainmentRoot
 }
+if (-not $PSCmdlet.ShouldProcess($FinalPluginRoot, "Publish portable plugin output from private staging tree")) {
+  return
+}
+trap {
+  $buildError = $_
+  if ($StagingCreated -and (Test-Path -LiteralPath $StagingRoot)) {
+    try {
+      Remove-OwnedPortableBuildTree -Path $StagingRoot -RepoRoot $RepoRoot -ContainmentRoot $BuildContainmentRoot -AcceptedMarkerNames @($GeneratedMarker, $StagingMarker)
+    } catch {
+      Write-Warning "Portable build staging tree retained for recovery at '$StagingRoot': $($_.Exception.Message)"
+    }
+  }
+  if (Test-Path -LiteralPath $StagedMarketplacePath) {
+    Remove-Item -LiteralPath $StagedMarketplacePath -Force -ErrorAction SilentlyContinue
+  }
+  throw $buildError
+}
+
+$null = Assert-SafeDeleteTarget -Target $PluginRoot -RepoRoot $RepoRoot -ContainmentRoot $BuildContainmentRoot
 New-Item -ItemType Directory -Path $PluginRoot -Force | Out-Null
+$StagingCreated = $true
+Write-BgsGeneratedMarker -Target $PluginRoot -MarkerName $StagingMarker -Content "generatedBy=build-portable-plugin; buildId=$BuildId; staging=true"
 
 # ---- Helpers ----------------------------------------------------------------
 function Copy-Tree {
@@ -266,6 +309,7 @@ Copy-Tree -From ".claude-plugin"     -To ".claude-plugin"
 Copy-Tree -From ".codex-plugin"      -To ".codex-plugin"
 Copy-FileOnly -From ".mcp.json"      -To ".mcp.json"
 Copy-Tree -From ".opencode/plugins"  -To ".opencode/plugins"
+Copy-FileOnly -From ".opencode/bgs-modding-superpowers-helpers.mjs" -To ".opencode/bgs-modding-superpowers-helpers.mjs"
 
 # ---- 2. Hooks + Scripts -----------------------------------------------------
 # `dev-*.ps1` scripts (e.g. dev-kb-author.ps1) are repo-internal — they require
@@ -502,7 +546,7 @@ function Resolve-McpEntryPath {
       return "./$EntryRel"
     }
     "absolute" {
-      return (Join-Path $PluginRoot $EntryRel) -replace "\\", "/"
+      return (Join-Path $FinalPluginRoot $EntryRel) -replace "\\", "/"
     }
   }
 }
@@ -544,8 +588,20 @@ if ($EmitMarketplace) {
     )
   }
   $mpJson = ($marketplace | ConvertTo-Json -Depth 10).Replace("`r`n", "`n")
+  [IO.File]::WriteAllText($StagedMarketplacePath, $mpJson + "`n", [Text.UTF8Encoding]::new($false))
+}
+
+# A failed build remains unmarked and therefore cannot be deleted as generated
+# external output on a later run. Mark only the fully materialized tree.
+Write-BgsGeneratedMarker -Target $PluginRoot -MarkerName $GeneratedMarker -Content "generatedBy=build-portable-plugin; createdAtUtc=$((Get-Date).ToUniversalTime().ToString('o')); pluginName=$PluginName; mcpPathStrategy=$McpPathStrategy"
+Remove-Item -LiteralPath (Join-Path $PluginRoot $StagingMarker) -Force
+$publishResult = Publish-StagedPortableTree -StagingRoot $StagingRoot -FinalRoot $FinalPluginRoot -RepoRoot $RepoRoot -ContainmentRoot $BuildContainmentRoot -GeneratedMarker $GeneratedMarker -StagingMarker $StagingMarker
+$StagingCreated = $false
+$PluginRoot = $publishResult.FinalRoot
+
+if ($EmitMarketplace) {
   $mpPath = Join-Path $OutputDir "marketplace.json"
-  [IO.File]::WriteAllText($mpPath, $mpJson + "`n", [Text.UTF8Encoding]::new($false))
+  Move-Item -LiteralPath $StagedMarketplacePath -Destination $mpPath -Force -ErrorAction Stop
   Write-Host "[build-portable-plugin] wrote marketplace: $mpPath"
 }
 

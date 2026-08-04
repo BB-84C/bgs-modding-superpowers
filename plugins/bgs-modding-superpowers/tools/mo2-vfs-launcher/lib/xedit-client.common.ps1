@@ -41,6 +41,20 @@ function Get-XeditClientSessionBasePath {
         [string]$TempPath
     )
 
+    if (-not [string]::IsNullOrWhiteSpace($env:XEDIT_CLIENT_SESSION_BASE_PATH)) {
+        $osTempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+        $candidate = [System.IO.Path]::GetFullPath($env:XEDIT_CLIENT_SESSION_BASE_PATH)
+        $relativePath = [System.IO.Path]::GetRelativePath($osTempRoot, $candidate)
+        $escapesTempRoot = $relativePath -eq '.' -or
+            [System.IO.Path]::IsPathRooted($relativePath) -or
+            $relativePath -eq '..' -or
+            $relativePath.StartsWith('..' + [System.IO.Path]::DirectorySeparatorChar)
+        if ($escapesTempRoot) {
+            throw 'XEDIT_CLIENT_SESSION_BASE_PATH must be a strict descendant of the OS temp root.'
+        }
+        return $candidate
+    }
+
     $baseTempPath = if ([string]::IsNullOrWhiteSpace($TempPath)) { $env:TEMP } else { $TempPath }
     if ([string]::IsNullOrWhiteSpace($baseTempPath)) {
         $baseTempPath = [System.IO.Path]::GetTempPath()

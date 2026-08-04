@@ -111,6 +111,9 @@ export function makeCallHandler(opts) {
         if (env.ok && r.warnings.length) {
             env.warnings.push(...r.warnings);
         }
+        if (env.ok && command === "session.save") {
+            opts.onSuccessfulSessionSave?.(env.data);
+        }
         await emitAudit({
             audit: opts.audit,
             tool: "xedit_call",
