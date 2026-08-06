@@ -132,7 +132,7 @@ Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01:
 
 ## 2026-08-02 — Issues #25-#29 construction round
 
-**Delivered on feature branch `fix/open-issues-25-29`:** repository-local repairs for all five open issues, two TES5Edit upstream reports, and a refusal of unsupported WSL bridge scope.
+**Delivered on `main` through `5135d2f`:** repository-local repairs for all five open issues, two TES5Edit upstream reports, and a refusal of unsupported WSL bridge scope.
 
 - **#25 — OpenCode local plugin loading:** local-path guidance now uses dot-relative, absolute, or canonical `file:///` forms. The OpenCode entry module is default-export-only; testable helpers live outside the plugin-discovery directory. Static contract checks and an owned ephemeral shared-server integration test start from a different working directory, query the project-scoped server API for the BGS skill plus `xedit`, `bgs_kb`, and `mo2`, account for the owned process tree, and release the ephemeral port without touching shared port 4096.
 - **#26 — deferred xEdit saves:** the MCP retains `savedFilesPendingShutdown` / `savePendingShutdownCount`, exposes them through `xedit_dirty`, and refuses normal stop/restart while pending state exists even when xEdit reports `dirty:false`. `force:true` is explicitly reported and audited as abandonment. Active skill/KB guidance no longer prescribes restart as durability proof. TES5Edit issue [#6](https://github.com/BB-84C/TES5Edit/issues/6) requests authoritative queue readback and an in-band flush primitive; no upstream source changes were made in this round.
@@ -144,6 +144,8 @@ Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01:
 
 **Verification:** xEdit MCP 131/131 unit tests plus build/typecheck; MO2 MCP 598 tests passed with 19 permission-gated acceptance tests skipped; core KB 190 records and Starfield KB 34 records validate; all eight new KB records rank first for their focused retrieval query; project-scoped shared-server integration exits its owned process tree and releases its ephemeral port. The final portable tree contains 8,932 files; its OpenCode entry imports with exactly one default factory export, its entry/helper/xEdit dist/core SQLite hashes match the source tree, its bundled core SQLite returns 190 records plus all four new xEdit records, and the staged-publish rollback/quarantine regression suite passes.
 
+**Closeout on 2026-08-06:** issues [#25](https://github.com/BB-84C/bgs-modding-superpowers/issues/25), [#26](https://github.com/BB-84C/bgs-modding-superpowers/issues/26), [#27](https://github.com/BB-84C/bgs-modding-superpowers/issues/27), [#28](https://github.com/BB-84C/bgs-modding-superpowers/issues/28), and [#29](https://github.com/BB-84C/bgs-modding-superpowers/issues/29) were individually replied to and closed after the implementation reached `main`. KB release [`kb-2026.08.06`](https://github.com/BB-84C/bgs-modding-superpowers/releases/tag/kb-2026.08.06) publishes seven assets: core and Starfield at `2026.08.06`, the four unchanged game/localization pack versions, and a hash-complete `manifest-index.json`. Live release readback matches the staged manifest, and `bgs_kb_check_updates` reports the new core and Starfield versions without a breaking change. A later audit identified four additional standing-gate/E2E opportunities; the owner explicitly waived them for this closeout, so no live deferred-save xEdit E2E or extra consumer-layout permutations were added.
+
 **Now known:**
 
 - `dirty:false` and a successful `session.save` envelope do not imply durability when xEdit reports pending-shutdown files.
@@ -151,7 +153,7 @@ Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01:
 - A generated tree must be built privately before replacement. Sentinel checks do not prevent partial destruction when recursive deletion starts before the replacement is ready.
 - WSL compatibility is not a narrow pipe adapter for this ecosystem; it crosses path, process, runtime, sidecar, and lifecycle boundaries. It is intentionally outside the supported surface.
 
-**Next:** commit the verified tracked materialized tree. Push and issue-close decisions remain owner-controlled external actions.
+**Next:** no repository-local work remains for #25-#29. TES5Edit issues [#6](https://github.com/BB-84C/TES5Edit/issues/6) and [#7](https://github.com/BB-84C/TES5Edit/issues/7) remain open for the upstream queue/flush and Pascal-runtime capability gaps.
 
 ## 2026-07-06 — KB release kb-2026.07.06 cut (core → RedPill record) + issues #10/#22/#23/#24 shipped
 
