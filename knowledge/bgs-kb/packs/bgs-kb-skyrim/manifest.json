@@ -1,5 +1,5 @@
 {
-  "builtAt": "2026-07-06T16:29:43.826Z",
+  "builtAt": "2026-08-06T15:44:20.783Z",
   "displayName": "BGS Modding Knowledge — Skyrim (LE/SE/AE/VR)",
   "domains": [
     "archive-precedence",
@@ -32,8 +32,8 @@
   "recordCount": 41,
   "schemaVersion": 1,
   "sha256": {
-    "kb.sqlite": "720c896f45c13d8167dc5b403ddb84a3e7f1f60fb498c8c1045577a3a98b2843"
+    "kb.sqlite": "c6694298d8a8668d4e5e73e590d7bec11fb3abf6ecc164f815c8e841a1f7f316"
   },
-  "sourceCommit": "be8e80f53a5789819f14c80515ddfe2c8b2013f0",
+  "sourceCommit": "40dc3ef4a6ce71e62753572fa9d8c17d016f45be",
   "version": "2026.06.02"
 }

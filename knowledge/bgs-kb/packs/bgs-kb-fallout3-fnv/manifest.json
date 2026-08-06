@@ -1,5 +1,5 @@
 {
-  "builtAt": "2026-07-06T16:29:44.495Z",
+  "builtAt": "2026-08-06T15:44:20.866Z",
   "displayName": "BGS Modding Knowledge — Fallout 3 + Fallout New Vegas",
   "domains": [
     "debugging",
@@ -27,8 +27,8 @@
   "recordCount": 36,
   "schemaVersion": 1,
   "sha256": {
-    "kb.sqlite": "9d099f501a4d644592c63bb58d8fd4bb290da344ee613ee9ba9212567a48e992"
+    "kb.sqlite": "b08a497f2751822de0c34093b1a0fcce05da983ec0f3fc3bc6c162826c3a5be8"
   },
-  "sourceCommit": "be8e80f53a5789819f14c80515ddfe2c8b2013f0",
+  "sourceCommit": "40dc3ef4a6ce71e62753572fa9d8c17d016f45be",
   "version": "2026.06.02"
 }

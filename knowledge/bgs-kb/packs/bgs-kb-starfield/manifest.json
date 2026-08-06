@@ -1,5 +1,5 @@
 {
-  "builtAt": "2026-08-03T00:48:31.580Z",
+  "builtAt": "2026-08-06T15:44:21.650Z",
   "displayName": "BGS Modding Knowledge — Starfield",
   "domains": [
     "archive-precedence",
@@ -28,8 +28,8 @@
   "recordCount": 34,
   "schemaVersion": 1,
   "sha256": {
-    "kb.sqlite": "a5d2ce74154dc7fb641c9c95ee6f5bf509c2510a3a7f0182b520d91c965ae1ca"
+    "kb.sqlite": "da4855ad93af306fe57e5c2965d70714d4bd7f9ca601ab664ab6dd66eef32907"
   },
-  "sourceCommit": "ca4e770fa23382db94263f2aaad2ba0c3647617e",
-  "version": "2026.08.02"
+  "sourceCommit": "40dc3ef4a6ce71e62753572fa9d8c17d016f45be",
+  "version": "2026.08.06"
 }
