@@ -72,7 +72,7 @@ If you cloned this repo and want to run the plugin from your local checkout, poi
 
 ```json
 {
-  "plugin": ["file:///D:/dev/bgs-modding-superpowers"]
+  "plugin": ["file:///C:/path/to/bgs-modding-superpowers"]
 }
 ```
 
