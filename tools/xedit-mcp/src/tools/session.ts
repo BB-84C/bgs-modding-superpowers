@@ -5,6 +5,7 @@ import { ok as okEnv, refuse } from "../envelope.js";
 import { MCP_ERROR_CODES } from "../types.js";
 import { buildContext } from "../session.js";
 import { emitAudit } from "../audit-line.js";
+import { dirtyFileNames } from "../pending-save.js";
 
 export interface XeditSessionToolOptions {
   adapter: DaemonAdapter;
@@ -13,6 +14,8 @@ export interface XeditSessionToolOptions {
   mcpModeActive?: boolean;
   /** Optional. When present, every xedit_session call emits an audit line. */
   audit?: AuditLogger;
+  /** Receives only successful daemon dirty-state readbacks. */
+  onDirtyStateReadback?: (result: unknown) => void;
 }
 
 export interface XeditSessionTool {
@@ -30,10 +33,11 @@ export function xeditSessionTool(opts: XeditSessionToolOptions): XeditSessionToo
       try {
         ctx = await buildContext(opts);
         const dirtyRes = await opts.adapter.call({ command: "session.get_dirty_state", args: {} });
+        if (dirtyRes.ok) opts.onDirtyStateReadback?.(dirtyRes.result);
         const dirty = dirtyRes.ok
           ? (dirtyRes.result as {
               dirty?: boolean;
-              dirtyFiles?: string[];
+              dirtyFiles?: unknown;
               unsavedChangeCount?: number;
             })
           : {};
@@ -50,7 +54,7 @@ export function xeditSessionTool(opts: XeditSessionToolOptions): XeditSessionToo
             dirty: dirty.dirty === true,
           },
           dirty: {
-            files: dirty.dirtyFiles ?? [],
+            files: dirtyFileNames(dirty.dirtyFiles),
             unsavedChangeCount: dirty.unsavedChangeCount ?? 0,
           },
         });

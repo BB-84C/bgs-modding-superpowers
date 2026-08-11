@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildServerToolset } from "../../src/index.js";
 import { makeMockAdapter } from "../fixtures/daemon-mock.js";
+import { PendingSaveTracker } from "../../src/pending-save.js";
 
 describe("MCP server toolset", () => {
   it("registers exactly the Batch 1 tools and dispatches them", async () => {
@@ -45,5 +46,27 @@ describe("MCP server toolset", () => {
     expect(env.ok).toBe(false);
     if (env.ok) throw new Error("expected refusal");
     expect(env.code).toBe("invalid_request");
+  });
+
+  it("lets xedit_session authoritative dirty readback clear stale tracker state", async () => {
+    const tracker = new PendingSaveTracker();
+    tracker.observeSuccessfulSave({ savePendingShutdownCount: 1 });
+    const adapter = makeMockAdapter({
+      "system.describe": () => ({ gameMode: "Fallout4" }),
+      "system.capabilities": () => ({ contractVersion: "0.23", commands: [], supports: {} }),
+      "files.list": () => ({ files: ["Fallout4.esm"] }),
+      "session.get_dirty_state": () => ({
+        dirty: false,
+        dirtyFiles: [],
+        unsavedChangeCount: 0,
+        pendingShutdownFiles: [],
+        pendingShutdownCount: 0,
+      }),
+    });
+    const ts = buildServerToolset({ adapter, sessionId: "test", pendingSaveTracker: tracker });
+
+    await ts.invoke("xedit_session", {});
+
+    expect(tracker.snapshot()).toEqual({ count: 0, files: [] });
   });
 });

@@ -130,6 +130,25 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
 
+## 2026-08-11 — xEdit automation contract 0.23 adaptation
+
+**Delivered on `fix/xedit-automation-023`:** the MCP now consumes the TES5Edit automation r9 fixes that closed upstream issues [#6](https://github.com/BB-84C/TES5Edit/issues/6) and [#7](https://github.com/BB-84C/TES5Edit/issues/7).
+
+- The curated native-command digest advances from contract `0.21` / 49 commands to `0.23` / 50 commands.
+- `xedit_dirty` consumes authoritative `pendingShutdownFiles` / `pendingShutdownCount` readback. A complete daemon snapshot replaces stale local fallback state; missing fields or failed probes never become a false zero.
+- New lifecycle-owned `xedit_flush({ force? })` verifies `supports.sessionFlush`, validates every required drain-result field, waits for the managed daemon's promised self-exit, and reports `completed`, `partial`, or unknown outcome. `xedit_call session.flush` is refused because passthrough does not own lifecycle state.
+- Confirmed partial or unknown drains clear the obsolete live-process guard only after exit and preserve a visible, nonblocking `lastFlush` residue. Unconfirmed exits retain the managed process in failed state and prevent a second daemon launch.
+- Stop/restart now refresh dirty/pending authority before deciding. A failed dirty-state probe refuses normal lifecycle action; forced continuation records the unavailable-probe risk.
+- Contract 0.23 script guidance now covers `RecordByFormIDStrict`, sortable-container `sortInvalidated`, policy preflight, Int64 formatting helpers, and partial-mutation reporting without implying transactions or rollback.
+
+**Now known:** `session.flush` is both a persistence primitive and a daemon lifecycle transition. Treating it as ordinary passthrough creates two false surfaces at once: a dead daemon still reported as ready and a local pending tracker that can never learn the queue drained. Fast self-exit also races `process wait` validation, so exit confirmation needs a managed PID/executable identity fallback.
+
+**Verification:** discriminating RED tests were recorded before implementation. The final xEdit MCP suite has 183 passing tests; typecheck and build pass. Core KB 2026.08.11 validates with 190 records, and the materialized SQLite returns 190 records plus three canonical `xedit_flush` hits. The 8,938-file portable tree exposes 17 MCP tools including `xedit_flush`; its 50-command description and critical source/dist/skill/SQLite hashes match the source tree. OpenCode entry-contract checks pass. Independent whole-change review returned PASS after two lifecycle findings were repaired. No live xEdit lifecycle E2E was run because stop/flush/restart are user-reserved shared process state; the production handler's daemon/process seams cover the lifecycle branches without touching a live session.
+
+**Vendor sync:** the Starfield MO2 vendor checkout was clean at the same `5da107c` base. Eighty-four modified files and fourteen new files were copied into it; source/target path sets and SHA-256 hashes match, both bundled Core KB copies report version 2026.08.11, and its materialized xEdit MCP imports with 17 tools including `xedit_flush`.
+
+**Closeout:** the owner authorized commit, merge to `main`, push, feature-branch cleanup, and replacement of the provisional vendor copy with a clean checkout of the resulting upstream `main` commit.
+
 ## 2026-08-02 — Issues #25-#29 construction round
 
 **Delivered on `main` through `5135d2f`:** repository-local repairs for all five open issues, two TES5Edit upstream reports, and a refusal of unsupported WSL bridge scope.

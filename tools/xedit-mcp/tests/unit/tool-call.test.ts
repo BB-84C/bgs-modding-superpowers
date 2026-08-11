@@ -68,4 +68,27 @@ describe("xedit_call atomic passthrough", () => {
     expect(env.ok).toBe(true);
     expect(observed).toEqual(result);
   });
+
+  it.each([
+    { command: "session.flush", args: { force: false } },
+    { command: "session.flush", args: "{\"force\":true}" },
+  ])("refuses session.flush passthrough after args normalization: $args", async (input) => {
+    let forwarded = false;
+    const adapter = makeMockAdapter({
+      "session.flush": () => { forwarded = true; return {}; },
+    });
+    const flushCtx: ToolContext = {
+      ...ctx,
+      capabilities: { ...ctx.capabilities!, commands: ["session.flush"] },
+    };
+    const handler = makeCallHandler({ adapter, registry: defaultRegistry(), audit, getContext: () => flushCtx });
+
+    const env = await handler(input);
+
+    expect(env.ok).toBe(false);
+    if (env.ok) throw new Error("expected refusal");
+    expect(env.code).toBe("invalid_request");
+    expect(env.hint).toContain("xedit_flush");
+    expect(forwarded).toBe(false);
+  });
 });

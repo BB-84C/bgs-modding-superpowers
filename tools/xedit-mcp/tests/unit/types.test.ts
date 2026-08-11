@@ -8,6 +8,7 @@ describe("types", () => {
     expect(MCP_ERROR_CODES.STATE_VIOLATION).toBe("state_violation");
     expect(MCP_ERROR_CODES.DAEMON_ERROR).toBe("daemon_error");
     expect(MCP_ERROR_CODES.MCP_MODE_REQUIRED).toBe("mcp_mode_required");
+    expect(MCP_ERROR_CODES.DIRTY_STATE_UNAVAILABLE).toBe("dirty_state_unavailable");
   });
 
   it("Envelope discriminates ok=false vs ok=true at compile time", () => {

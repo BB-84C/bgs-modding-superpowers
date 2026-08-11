@@ -3,6 +3,38 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createPowershellAdapter } from "./daemon-adapter.js";
+export async function waitForManagedProcessExit(opts) {
+    const run = opts.run ?? runPwshCapture;
+    const timeoutSeconds = Math.max(1, Math.ceil(opts.timeoutMs / 1_000));
+    try {
+        const waitOut = await run(opts.pwsh, [
+            "-NoProfile",
+            "-File",
+            opts.clientScript,
+            "process",
+            "wait",
+            "--xedit-pid",
+            String(opts.pid),
+            "--timeout-seconds",
+            String(timeoutSeconds),
+        ], opts.timeoutMs + 5_000);
+        return /^status:\s*exited\s*$/im.test(waitOut);
+    }
+    catch {
+        // A fast self-exit makes xedit-client's validated-live-process precheck
+        // return nonzero. Distinguish that expected race from a real tool failure
+        // by probing the managed PID identity read-only.
+    }
+    try {
+        const probeOut = await run(opts.pwsh, managedProcessIdentityProbeArgs(opts.pid, opts.launcherPath), Math.min(5_000, Math.max(1_000, opts.timeoutMs)));
+        const probe = JSON.parse(probeOut.trim());
+        return probe.status === "absent" || probe.status === "reused";
+    }
+    catch {
+        // Probe/tool failure is not evidence of process exit.
+        return false;
+    }
+}
 async function stopLaunchedPidBestEffort(pwsh, clientScript, pid) {
     try {
         await runPwshCapture(pwsh, [
@@ -141,6 +173,13 @@ export async function launchDaemon(opts) {
         return {
             pid: launchedPid,
             adapter,
+            waitForExit: (timeoutMs) => waitForManagedProcessExit({
+                pwsh,
+                clientScript: opts.clientScript,
+                pid: launchedPid,
+                launcherPath: opts.launcherPath,
+                timeoutMs,
+            }),
             stop: async () => {
                 await stopLaunchedPidBestEffort(pwsh, opts.clientScript, launchedPid);
             },
@@ -175,21 +214,55 @@ function normalizePid(value) {
     }
     return undefined;
 }
-function runPwshCapture(pwsh, args) {
+function managedProcessIdentityProbeArgs(pid, launcherPath) {
+    const quotedPath = launcherPath.replace(/'/g, "''");
+    const script = [
+        "$ErrorActionPreference = 'Stop'",
+        `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue`,
+        "if ($null -eq $p) { [pscustomobject]@{ status = 'absent' } | ConvertTo-Json -Compress; exit 0 }",
+        "$actual = $p.Path",
+        "if ([string]::IsNullOrWhiteSpace($actual)) { throw 'Managed process path unavailable' }",
+        `$expected = [System.IO.Path]::GetFullPath('${quotedPath}')`,
+        "$actual = [System.IO.Path]::GetFullPath($actual)",
+        "$status = if ($actual.Equals($expected, [System.StringComparison]::OrdinalIgnoreCase)) { 'same' } else { 'reused' }",
+        "[pscustomobject]@{ status = $status; executablePath = $actual } | ConvertTo-Json -Compress",
+    ].join("; ");
+    const encoded = Buffer.from(script, "utf16le").toString("base64");
+    return ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded];
+}
+function runPwshCapture(pwsh, args, timeoutMs) {
     return new Promise((resolve, reject) => {
         const child = spawn(pwsh, args, { stdio: ["ignore", "pipe", "pipe"] });
         let stdout = "";
         let stderr = "";
+        let settled = false;
+        const timer = timeoutMs === undefined
+            ? undefined
+            : setTimeout(() => {
+                if (settled)
+                    return;
+                settled = true;
+                child.kill();
+                reject(new Error(`PowerShell command timed out after ${timeoutMs} ms`));
+            }, timeoutMs);
+        const finish = (callback, value) => {
+            if (settled)
+                return;
+            settled = true;
+            if (timer)
+                clearTimeout(timer);
+            callback(value);
+        };
         child.stdout.on("data", (d) => (stdout += d.toString()));
         child.stderr.on("data", (d) => (stderr += d.toString()));
-        child.on("error", reject);
+        child.on("error", (error) => finish(reject, error));
         child.on("close", (code) => {
             if (code === 0) {
-                resolve(stdout);
+                finish(resolve, stdout);
                 return;
             }
             const tail = (s) => s.trim().slice(-500);
-            reject(new Error(`xedit-client exited ${code}.\n` +
+            finish(reject, new Error(`xedit-client exited ${code}.\n` +
                 (stderr ? `[stderr] ${tail(stderr)}\n` : "") +
                 (stdout ? `[stdout] ${tail(stdout)}\n` : "")));
         });

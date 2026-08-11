@@ -23,8 +23,20 @@ import { makeCallHandler } from "./tools/call.js";
 import { refuse } from "./envelope.js";
 import { MCP_ERROR_CODES } from "./types.js";
 import { launchDaemon, type LaunchOptions, type LaunchedDaemon } from "./launch.js";
-import { PendingSaveTracker, pendingSaveLifecycleRisk, withPendingShutdownSave } from "./pending-save.js";
+import {
+  PendingSaveTracker,
+  dirtyFileNames,
+  pendingSaveLifecycleRisk,
+  refreshPendingSaveAuthority,
+  withPendingShutdownSave,
+} from "./pending-save.js";
 import { hashArgs } from "./audit-line.js";
+import { makeFlushHandler, retryFailedFlushExit, type FlushSummary } from "./flush.js";
+import {
+  dirtyProbeLifecycleDecision,
+  launchKickoffDecision,
+  lifecycleNotReadyHint,
+} from "./lifecycle-decisions.js";
 
 export interface ServerToolsetOptions {
   adapter: DaemonAdapter;
@@ -52,6 +64,7 @@ export function buildServerToolset(opts: ServerToolsetOptions): ServerToolset {
     daemonPid: opts.daemonPid ?? process.pid,
     mcpModeActive: opts.mcpModeActive,
     audit,
+    onDirtyStateReadback: (result) => opts.pendingSaveTracker?.observeDirtyState(result),
   });
   const getCtx = session.getContext;
 
@@ -71,6 +84,8 @@ export function buildServerToolset(opts: ServerToolsetOptions): ServerToolset {
     onSuccessfulSessionSave: (result) => opts.pendingSaveTracker?.observeSuccessfulSave(result),
   });
 
+  // xedit_flush is intentionally absent: it is owned by the stdio lifecycle
+  // controller because managed-process exit cannot be handled by this toolset.
   const handlers: Record<string, (a: Record<string, unknown>) => Promise<Envelope>> = {
     xedit_session: session.tool,
     xedit_list_capabilities: listCaps,
@@ -111,9 +126,9 @@ export function buildServerToolset(opts: ServerToolsetOptions): ServerToolset {
 // timeout and the agent sees a wall of errors. Instead, the server tracks
 // the daemon's lifecycle in memory and ALL tool calls return immediately.
 //
-// Tool surface (9 total):
+// Tool surface includes lifecycle/health owners plus ready-gated domain tools.
 //
-//   LIFECYCLE / HEALTH (3)
+//   LIFECYCLE / HEALTH
 //     xedit_status   pure read — returns { status: "not_started" | "starting" | "ready" | "failed", ... }
 //                    Never blocks. Never modifies state. Use this to poll.
 //     xedit_start    if not_started/failed: kick off background launch.
@@ -121,6 +136,8 @@ export function buildServerToolset(opts: ServerToolsetOptions): ServerToolset {
 //     xedit_health   when ready: send system.ping through the named pipe to
 //                    confirm the daemon is still responsive (vs zombie).
 //                    Otherwise: returns the same shape as xedit_status.
+//     xedit_dirty    authoritative 0.23 pending-save + dirty-state readback.
+//     xedit_flush    lifecycle-owned pending-rename drain + confirmed self-exit.
 //
 //   DOMAIN TOOLS (6)
 //     xedit_session            non-blocking. If status=ready: returns the rich
@@ -329,13 +346,28 @@ export const TOOL_DEFINITIONS = [
   {
     name: "xedit_dirty",
     description:
-      "Returns xEdit's dirty state immediately. When ready: wraps session.get_dirty_state and returns { dirty, dirtyFiles, unsavedChangeCount, pendingShutdownSave }. pendingShutdownSave is MCP-tracked from successful session.save responses and remains nonzero even when dirty is false. When not ready or dirty-state probing fails, it still returns pendingShutdownSave alongside lifecycle status.",
+      "Returns xEdit's dirty state immediately. Contract-0.23 pending fields authoritatively refresh pendingShutdownSave; older daemons retain MCP-local fail-closed save knowledge. When not ready or probing fails, the last known pendingShutdownSave remains visible alongside lifecycle status.",
     inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
+  },
+  {
+    name: "xedit_flush",
+    description:
+      "Requires a ready contract-0.23 daemon with supports.sessionFlush=true. Drains pending shutdown renames, waits for daemon self-exit, and only then clears lifecycle state.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        force: {
+          type: "boolean" as const,
+          description: "Forward force unchanged to session.flush. Default false.",
+        },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "xedit_stop",
     description:
-      "Stops the xEdit daemon and clears MCP state. Refuses if MCP-tracked session.save results are pending shutdown or if session.get_dirty_state reports unsaved changes, unless force=true. force=true explicitly abandons any pending state and emits an auditable risk field.",
+      "Refreshes authoritative dirty/pending state when ready, then stops the xEdit daemon and clears MCP state. Refuses unsaved or pending state unless force=true, which explicitly abandons it and emits an auditable risk field.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -374,7 +406,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "xedit_list_capabilities",
     description:
-      "Requires the daemon to be ready. Returns the curated 49-command digest + live drift report. Fast-fails with code='not_ready' otherwise.",
+      "Requires the daemon to be ready. Returns the curated 50-command digest + live drift report. Fast-fails with code='not_ready' otherwise.",
     inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
   },
   {
@@ -675,7 +707,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "xedit_call",
     description:
-      "Requires the daemon to be ready. Atomic passthrough for any of the ~49 native daemon commands, still in-harness (audit + rules + precheck still apply). " +
+      "Requires the daemon to be ready. Atomic passthrough for native daemon commands except lifecycle-owned session.flush, still in-harness (audit + rules + precheck still apply). " +
       "Use xedit_list_capabilities to enumerate the live command set. For multi-record read/edit work, prefer the scripts.write + scripts.run recipe: " +
       "xedit_call({ command: 'scripts.write', args: { id: 'Agent/my-procedure', source: '<Pascal>', overwrite: true } }) followed by " +
       "xedit_call({ command: 'scripts.run', args: { id: 'Agent/my-procedure', targets: [{file, formId}, ...], timeoutMs: 30000, maxStatements: 1000000 } }). " +
@@ -705,7 +737,7 @@ export const TOOL_DEFINITIONS = [
 ];
 
 // State machine
-type LaunchState =
+export type LaunchState =
   | { status: "not_started" }
   | { status: "starting"; startedAt: number }
   | { status: "ready"; pid: number; since: number }
@@ -720,8 +752,19 @@ function jsonResult(body: unknown, isError = false) {
   };
 }
 
-function statusFields(state: LaunchState, daemon: LaunchedDaemon | null): Record<string, unknown> {
+export function statusFields(
+  state: LaunchState,
+  daemon: LaunchedDaemon | null,
+  lastFlush?: FlushSummary,
+): Record<string, unknown> {
   const out: Record<string, unknown> = { status: state.status };
+  if (lastFlush) {
+    const previousSession = state.status === "ready"
+      && daemon !== null
+      && lastFlush.daemonPid !== undefined
+      && lastFlush.daemonPid !== daemon.pid;
+    out[previousSession ? "previousSessionFlush" : "lastFlush"] = lastFlush;
+  }
   if (state.status === "starting") {
     out.startedAt = state.startedAt;
     out.elapsedSeconds = Math.round((Date.now() - state.startedAt) / 1000);
@@ -732,6 +775,7 @@ function statusFields(state: LaunchState, daemon: LaunchedDaemon | null): Record
   } else if (state.status === "failed") {
     out.error = state.error;
     out.failedAt = state.at;
+    if (daemon) out.daemonPid = daemon.pid;
   }
   return out;
 }
@@ -747,6 +791,7 @@ export async function main(): Promise<void> {
   let daemonRef: LaunchedDaemon | null = null;
   let launchGeneration = 0;
   const pendingSaveTracker = new PendingSaveTracker();
+  let lastFlush: FlushSummary | undefined;
   const audit = createAuditLogger({ baseDir: join(tmpdir(), "xedit-mcp-audit") });
 
   function clearRuntimeState(next: LaunchState = { status: "not_started" }) {
@@ -765,24 +810,26 @@ export async function main(): Promise<void> {
           ok: true,
           tool: "xedit_dirty",
           data: withPendingShutdownSave(
-            { ...statusFields(state, daemonRef), responsive: false },
+            { ...statusFields(state, daemonRef, lastFlush), responsive: false },
             pendingSaveTracker.snapshot(),
           ),
-          hint:
-            state.status === "not_started"
-              ? "Daemon not started. Call xedit_start."
-              : state.status === "starting"
-                ? "Daemon still starting. Poll xedit_status."
-                : "Daemon failed to start; inspect data.error.",
+          hint: lifecycleNotReadyHint(state.status, daemonRef !== null, lastFlush),
         },
       };
     }
 
     try {
-      const env = await daemonRef.adapter.call({ command: "session.get_dirty_state", args: {} });
-      if (!env.ok) {
-        const code = env.error?.code ?? "daemon_error";
-        const message = env.error?.message ?? "session.get_dirty_state failed";
+      const probe = await refreshPendingSaveAuthority(daemonRef.adapter, pendingSaveTracker);
+      if (!probe.ok) {
+        const daemonError = probe.error !== null && typeof probe.error === "object"
+          ? probe.error as { code?: unknown; message?: unknown }
+          : undefined;
+        const code = typeof daemonError?.code === "string" ? daemonError.code : "daemon_error";
+        const message = typeof daemonError?.message === "string"
+          ? daemonError.message
+          : probe.error instanceof Error
+            ? probe.error.message
+            : "session.get_dirty_state failed";
         return {
           ok: false as const,
           body: {
@@ -792,21 +839,19 @@ export async function main(): Promise<void> {
             summary: message,
             hint: message,
             data: withPendingShutdownSave(
-              { ...statusFields(state, daemonRef), responsive: false },
+              { ...statusFields(state, daemonRef, lastFlush), responsive: false },
               pendingSaveTracker.snapshot(),
             ),
           },
         };
       }
 
-      const result = (env.result ?? {}) as {
+      const result = probe.result as {
         dirty?: unknown;
         dirtyFiles?: unknown;
         unsavedChangeCount?: unknown;
       };
-      const dirtyFiles = Array.isArray(result.dirtyFiles)
-        ? result.dirtyFiles.filter((x): x is string => typeof x === "string")
-        : [];
+      const dirtyFiles = dirtyFileNames(result.dirtyFiles);
       const unsavedChangeCount =
         typeof result.unsavedChangeCount === "number" && Number.isFinite(result.unsavedChangeCount)
           ? result.unsavedChangeCount
@@ -818,7 +863,7 @@ export async function main(): Promise<void> {
           ok: true,
           tool: "xedit_dirty",
           data: withPendingShutdownSave({
-            ...statusFields(state, daemonRef),
+            ...statusFields(state, daemonRef, lastFlush),
             dirty: result.dirty === true,
             dirtyFiles,
             unsavedChangeCount,
@@ -835,14 +880,18 @@ export async function main(): Promise<void> {
           code: "daemon_error",
           summary: msg,
           hint: msg,
+          data: withPendingShutdownSave(
+            { ...statusFields(state, daemonRef, lastFlush), responsive: false },
+            pendingSaveTracker.snapshot(),
+          ),
         },
       };
     }
   }
 
   function kickoffLaunch(overrides: LaunchOverrides = {}): { kicked: boolean; reason?: string } {
-    if (state.status === "starting") return { kicked: false, reason: "already_starting" };
-    if (state.status === "ready") return { kicked: false, reason: "already_ready" };
+    const decision = launchKickoffDecision(state.status, daemonRef !== null);
+    if (!decision.allowed) return { kicked: false, reason: decision.reason };
 
     const opts = resolveLaunchOpts(overrides);
     if ("error" in opts) {
@@ -900,7 +949,7 @@ export async function main(): Promise<void> {
     // ---- LIFECYCLE / HEALTH tools (always non-blocking) ----
 
     if (name === "xedit_status") {
-      return jsonResult({ ok: true, tool: name, data: statusFields(state, daemonRef) });
+      return jsonResult({ ok: true, tool: name, data: statusFields(state, daemonRef, lastFlush) });
     }
 
     if (name === "xedit_start") {
@@ -919,7 +968,7 @@ export async function main(): Promise<void> {
       const body = {
         ok: true,
         tool: name,
-        data: statusFields(state, daemonRef),
+        data: statusFields(state, daemonRef, lastFlush),
         kicked: kick.kicked,
         message: kick.kicked
           ? "Daemon launch initiated in the background. Poll xedit_status until status='ready'."
@@ -927,22 +976,41 @@ export async function main(): Promise<void> {
             ? "Daemon is already ready."
             : kick.reason === "already_starting"
               ? "Daemon launch already in progress. Poll xedit_status until status='ready'."
+              : kick.reason === "retained_managed_process"
+                ? lifecycleNotReadyHint(state.status, daemonRef !== null, lastFlush)
               : (kick.reason ?? "Launch could not be initiated."),
       };
       return jsonResult(body);
     }
 
     if (name === "xedit_health") {
+      if (state.status === "failed" && daemonRef && lastFlush?.daemonExited === false) {
+        const current = daemonRef;
+        const updated = await retryFailedFlushExit({
+          waitForExit: current.waitForExit,
+          tracker: pendingSaveTracker,
+          lastFlush,
+          timeoutMs: 1_000,
+          onConfirmedExit: (summary) => {
+            lastFlush = summary;
+            clearRuntimeState();
+          },
+        });
+        if (updated) {
+          return jsonResult({
+            ok: true,
+            tool: name,
+            data: { ...statusFields(state, daemonRef, lastFlush), responsive: false },
+            message: "Delayed xEdit exit confirmed; lifecycle state cleared.",
+          });
+        }
+      }
       if (state.status !== "ready" || !daemonRef) {
         return jsonResult({
           ok: true,
           tool: name,
-          data: { ...statusFields(state, daemonRef), responsive: false },
-          hint: state.status === "not_started"
-            ? "Daemon not started. Call xedit_start."
-            : state.status === "starting"
-              ? "Daemon still starting. Poll xedit_status."
-              : "Daemon failed to start; inspect data.error.",
+          data: { ...statusFields(state, daemonRef, lastFlush), responsive: false },
+          hint: lifecycleNotReadyHint(state.status, daemonRef !== null, lastFlush),
         });
       }
       try {
@@ -951,7 +1019,7 @@ export async function main(): Promise<void> {
           ok: true,
           tool: name,
           data: {
-            ...statusFields(state, daemonRef),
+            ...statusFields(state, daemonRef, lastFlush),
             responsive: ping.ok === true,
             pingEnvelope: ping,
           },
@@ -962,7 +1030,7 @@ export async function main(): Promise<void> {
           ok: true,
           tool: name,
           data: {
-            ...statusFields(state, daemonRef),
+            ...statusFields(state, daemonRef, lastFlush),
             responsive: false,
             pingError: msg,
           },
@@ -976,8 +1044,68 @@ export async function main(): Promise<void> {
       return jsonResult(dirty.body, !dirty.body.ok);
     }
 
+    if (name === "xedit_flush") {
+      if (state.status !== "ready" || !daemonRef) {
+        return jsonResult({
+          ok: false,
+          tool: name,
+          code: "not_ready",
+          summary: `Daemon is not ready (status='${state.status}').`,
+          data: statusFields(state, daemonRef, lastFlush),
+          hint: "Call xedit_start, then poll xedit_status until status='ready'.",
+        }, true);
+      }
+      const current = daemonRef;
+      const flush = makeFlushHandler({
+        adapter: current.adapter,
+        tracker: pendingSaveTracker,
+        waitForExit: current.waitForExit,
+        getContext: () => ({ sessionId: `mcp-${process.pid}`, daemonPid: current.pid }),
+        audit,
+        onConfirmedExit: (summary) => {
+          lastFlush = summary;
+          clearRuntimeState();
+        },
+        onExitFailure: (message, summary) => {
+          if (summary) lastFlush = summary;
+          state = { status: "failed", error: message, at: Date.now() };
+          toolset = null;
+        },
+      });
+      const env = await flush(args);
+      return jsonResult(env, !env.ok);
+    }
+
     if (name === "xedit_stop") {
       const force = args.force === true;
+      const dirty = state.status === "ready" ? await getDirtyState() : undefined;
+      const dirtyDecision = state.status === "ready"
+        ? dirtyProbeLifecycleDecision("stop", dirty?.ok === true, force)
+        : { allowed: true as const, operation: "stop" as const };
+      if (!dirtyDecision.allowed) {
+        await audit.append({
+          tool: name,
+          argsHash: hashArgs(args),
+          decision: "refused",
+          ok: false,
+          code: dirtyDecision.code,
+          daemonPid: daemonRef?.pid,
+          force,
+          risk: "dirty_state_probe_unavailable",
+          dirtyStateProbeUnavailable: true,
+        });
+        return jsonResult({
+          ok: false,
+          tool: name,
+          code: dirtyDecision.code,
+          summary: "Could not verify xEdit dirty state. Refusing to stop without force=true.",
+          data: dirty?.body.data,
+          hint: "Retry xedit_dirty, or use force=true to explicitly accept the unavailable dirty-state readback risk.",
+        }, true);
+      }
+      const dirtyStateProbeRisk = dirtyDecision.risk
+        ? { risk: dirtyDecision.risk, force: true }
+        : undefined;
       const pendingRisk = pendingSaveLifecycleRisk("stop", pendingSaveTracker.snapshot(), force);
       if (pendingRisk && "code" in pendingRisk) {
         return jsonResult({ ok: false, tool: name, ...pendingRisk }, true);
@@ -992,21 +1120,23 @@ export async function main(): Promise<void> {
             ok: true,
             risk: pendingRisk.risk,
             pendingShutdownSave: pendingRisk.pendingShutdownSave,
+            force,
+            dirtyStateProbeUnavailable: dirtyStateProbeRisk !== undefined,
           });
           clearRuntimeState();
         }
         return jsonResult({
           ok: true,
           tool: name,
-          data: statusFields(state, daemonRef),
+          data: statusFields(state, daemonRef, lastFlush),
           message: "Daemon already stopped.",
           ...(pendingRisk && "abandonment" in pendingRisk ? { risk: pendingRisk } : {}),
+          ...(dirtyStateProbeRisk ? { dirtyStateProbeRisk } : {}),
         });
       }
 
       if (state.status === "ready") {
-        const dirty = await getDirtyState();
-        if (dirty.ok) {
+        if (dirty?.ok) {
           const data = dirty.body.data as { dirty?: boolean; dirtyFiles?: string[]; unsavedChangeCount?: number };
           if (data.dirty && !force) {
             return jsonResult({
@@ -1031,6 +1161,19 @@ export async function main(): Promise<void> {
           daemonPid: state.status === "ready" ? state.pid : undefined,
           risk: pendingRisk.risk,
           pendingShutdownSave: pendingRisk.pendingShutdownSave,
+          force,
+          dirtyStateProbeUnavailable: dirtyStateProbeRisk !== undefined,
+        });
+      } else if (dirtyStateProbeRisk) {
+        await audit.append({
+          tool: name,
+          argsHash: hashArgs(args),
+          decision: "warned",
+          ok: true,
+          daemonPid: state.status === "ready" ? state.pid : undefined,
+          risk: dirtyStateProbeRisk.risk,
+          force,
+          dirtyStateProbeUnavailable: true,
         });
       }
       clearRuntimeState();
@@ -1047,11 +1190,40 @@ export async function main(): Promise<void> {
         data: { status: "not_started" },
         message: "Daemon stopped and MCP runtime state cleared.",
         ...(pendingRisk && "abandonment" in pendingRisk ? { risk: pendingRisk } : {}),
+        ...(dirtyStateProbeRisk ? { dirtyStateProbeRisk } : {}),
       });
     }
 
     if (name === "xedit_restart") {
       const force = args.force === true;
+      const dirty = state.status === "ready" ? await getDirtyState() : undefined;
+      const dirtyDecision = state.status === "ready"
+        ? dirtyProbeLifecycleDecision("restart", dirty?.ok === true, force)
+        : { allowed: true as const, operation: "restart" as const };
+      if (!dirtyDecision.allowed) {
+        await audit.append({
+          tool: name,
+          argsHash: hashArgs(args),
+          decision: "refused",
+          ok: false,
+          code: dirtyDecision.code,
+          daemonPid: daemonRef?.pid,
+          force,
+          risk: "dirty_state_probe_unavailable",
+          dirtyStateProbeUnavailable: true,
+        });
+        return jsonResult({
+          ok: false,
+          tool: name,
+          code: dirtyDecision.code,
+          summary: "Could not verify xEdit dirty state. Refusing to restart without force=true.",
+          data: dirty?.body.data,
+          hint: "Retry xedit_dirty, or use force=true to explicitly accept the unavailable dirty-state readback risk.",
+        }, true);
+      }
+      const dirtyStateProbeRisk = dirtyDecision.risk
+        ? { risk: dirtyDecision.risk, force: true }
+        : undefined;
       const pendingRisk = pendingSaveLifecycleRisk("restart", pendingSaveTracker.snapshot(), force);
       if (pendingRisk && "code" in pendingRisk) {
         return jsonResult({ ok: false, tool: name, ...pendingRisk }, true);
@@ -1068,8 +1240,7 @@ export async function main(): Promise<void> {
       };
 
       if (state.status === "ready") {
-        const dirty = await getDirtyState();
-        if (dirty.ok) {
+        if (dirty?.ok) {
           const data = dirty.body.data as { dirty?: boolean; dirtyFiles?: string[]; unsavedChangeCount?: number };
           if (data.dirty && !force) {
             return jsonResult({
@@ -1094,6 +1265,19 @@ export async function main(): Promise<void> {
           daemonPid: state.status === "ready" ? state.pid : undefined,
           risk: pendingRisk.risk,
           pendingShutdownSave: pendingRisk.pendingShutdownSave,
+          force,
+          dirtyStateProbeUnavailable: dirtyStateProbeRisk !== undefined,
+        });
+      } else if (dirtyStateProbeRisk) {
+        await audit.append({
+          tool: name,
+          argsHash: hashArgs(args),
+          decision: "warned",
+          ok: true,
+          daemonPid: state.status === "ready" ? state.pid : undefined,
+          risk: dirtyStateProbeRisk.risk,
+          force,
+          dirtyStateProbeUnavailable: true,
         });
       }
       clearRuntimeState();
@@ -1108,12 +1292,13 @@ export async function main(): Promise<void> {
       return jsonResult({
         ok: true,
         tool: name,
-        data: statusFields(state, daemonRef),
+        data: statusFields(state, daemonRef, lastFlush),
         kicked: kick.kicked,
         message: kick.kicked
           ? "Daemon restart initiated in the background. Poll xedit_status until status='ready'."
           : (kick.reason ?? "Restart could not be initiated."),
         ...(pendingRisk && "abandonment" in pendingRisk ? { risk: pendingRisk } : {}),
+        ...(dirtyStateProbeRisk ? { dirtyStateProbeRisk } : {}),
       });
     }
 
@@ -1136,10 +1321,8 @@ export async function main(): Promise<void> {
       return jsonResult({
         ok: true,
         tool: name,
-        data: statusFields(state, daemonRef),
-        hint: state.status === "failed"
-          ? "Launch failed; inspect data.error. Call xedit_start to retry."
-          : "Daemon not ready yet; poll xedit_status until status='ready'.",
+        data: statusFields(state, daemonRef, lastFlush),
+        hint: lifecycleNotReadyHint(state.status, daemonRef !== null, lastFlush),
       });
     }
 
@@ -1150,12 +1333,8 @@ export async function main(): Promise<void> {
         tool: name,
         code: "not_ready",
         summary: `Daemon is not ready (status='${state.status}').`,
-        data: statusFields(state, daemonRef),
-        hint: state.status === "not_started"
-          ? "Call xedit_start, then poll xedit_status until status='ready'."
-          : state.status === "starting"
-            ? "Launch in progress. Poll xedit_status."
-            : "Launch failed; inspect data.error. Call xedit_start to retry.",
+        data: statusFields(state, daemonRef, lastFlush),
+        hint: lifecycleNotReadyHint(state.status, daemonRef !== null, lastFlush),
       }, true);
     }
 

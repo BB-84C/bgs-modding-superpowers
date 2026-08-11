@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { TOOL_DEFINITIONS } from "../../src/index.js";
+import { statusFields, TOOL_DEFINITIONS } from "../../src/index.js";
 
 // Regression coverage for the OpenCode arg-routing failure mode: when a tool's
 // inputSchema lacks explicit `properties` declarations, OpenCode (and many
@@ -19,6 +19,7 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
       "xedit_dirty",
       "xedit_find_record",
       "xedit_find_records_by_pattern",
+      "xedit_flush",
       "xedit_health",
       "xedit_inspect_conflicts",
       "xedit_inspect_conflicts_deep",
@@ -31,7 +32,7 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
       "xedit_status",
       "xedit_stop",
     ]);
-    expect(TOOL_DEFINITIONS).toHaveLength(16);
+    expect(TOOL_DEFINITIONS).toHaveLength(17);
   });
 
   test("every tool inputSchema is an object schema with explicit properties (no loose additionalProperties:true escape)", () => {
@@ -91,6 +92,73 @@ describe("xedit-mcp stdio server TOOL_DEFINITIONS", () => {
     const schema = tool.inputSchema as { properties: Record<string, unknown> };
     expect(Object.keys(schema.properties)).toEqual(["force"]);
     expect((schema.properties.force as { type: string }).type).toBe("boolean");
+  });
+
+  test("xedit_flush accepts only an optional force boolean", () => {
+    const tool = TOOL_DEFINITIONS.find((t) => t.name === "xedit_flush")!;
+    const schema = tool.inputSchema as { properties: Record<string, unknown>; required?: string[] };
+    expect(Object.keys(schema.properties)).toEqual(["force"]);
+    expect((schema.properties.force as { type: string }).type).toBe("boolean");
+    expect(schema.required ?? []).toEqual([]);
+  });
+
+  test("status readback keeps partial lastFlush residue nonblocking without adding exited state", () => {
+    const data = statusFields({ status: "not_started" }, null, {
+      status: "partial",
+      outcome: "known",
+      force: false,
+      flushed: { attempted: 1, renamed: 0, failed: 1 },
+      pendingRemaining: ["Patch.esp"],
+      pendingRemainingCount: 1,
+      daemonExited: true,
+      daemonPid: 42,
+      at: "2026-08-11T00:00:00.000Z",
+    });
+    expect(data).toMatchObject({
+      status: "not_started",
+      lastFlush: {
+        status: "partial",
+        pendingRemainingCount: 1,
+        daemonExited: true,
+      },
+    });
+    expect(data.status).not.toBe("exited");
+  });
+
+  test("ready status labels a different-PID flush as previousSessionFlush", () => {
+    const flush = {
+      status: "partial" as const,
+      outcome: "known" as const,
+      force: false,
+      flushed: { attempted: 1, renamed: 0, failed: 1 },
+      pendingRemaining: ["Patch.esp"],
+      pendingRemainingCount: 1,
+      daemonExited: false,
+      daemonPid: 41,
+      at: "2026-08-11T00:00:00.000Z",
+    };
+    const daemon = { pid: 42 } as Parameters<typeof statusFields>[1];
+    const data = statusFields({ status: "ready", pid: 42, since: 1 }, daemon, flush);
+    expect(data.lastFlush).toBeUndefined();
+    expect(data.previousSessionFlush).toEqual(flush);
+  });
+
+  test("ready status keeps same-PID flush as lastFlush", () => {
+    const flush = {
+      status: "partial" as const,
+      outcome: "known" as const,
+      force: false,
+      flushed: { attempted: 1, renamed: 0, failed: 1 },
+      pendingRemaining: ["Patch.esp"],
+      pendingRemainingCount: 1,
+      daemonExited: false,
+      daemonPid: 42,
+      at: "2026-08-11T00:00:00.000Z",
+    };
+    const daemon = { pid: 42 } as Parameters<typeof statusFields>[1];
+    const data = statusFields({ status: "ready", pid: 42, since: 1 }, daemon, flush);
+    expect(data.lastFlush).toEqual(flush);
+    expect(data.previousSessionFlush).toBeUndefined();
   });
 
   test("xedit_find_record declares both modes' properties with minLength guards and no top-level oneOf/anyOf/allOf/enum/not", () => {

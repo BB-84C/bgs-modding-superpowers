@@ -83,4 +83,31 @@ describe("xedit_session tool", () => {
     expect(last.decision).toBe("refused");
     expect(last.sessionId).toBe("sess-err");
   });
+
+  it("projects 0.23 dirty file summaries and exposes the readback callback", async () => {
+    const dirtyState = {
+      dirty: true,
+      dirtyFiles: [{ name: "Patch.esp", fileName: "Patch.esp" }],
+      unsavedChangeCount: 1,
+      pendingShutdownFiles: [],
+      pendingShutdownCount: 0,
+    };
+    let observed: unknown;
+    const adapter = makeMockAdapter({
+      ...happyMocks,
+      "session.get_dirty_state": () => dirtyState,
+    });
+    const { tool } = xeditSessionTool({
+      adapter,
+      sessionId: "s-dirty",
+      onDirtyStateReadback: (value) => { observed = value; },
+    });
+
+    const env = await tool({});
+
+    expect(env.ok).toBe(true);
+    if (!env.ok) throw new Error("expected ok");
+    expect(env.dirty?.files).toEqual(["Patch.esp"]);
+    expect(observed).toEqual(dirtyState);
+  });
 });

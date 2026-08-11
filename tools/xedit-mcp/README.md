@@ -8,16 +8,17 @@ This package wraps the agent-friendly xEdit fork at [BB-84C/TES5Edit](https://gi
 
 ## What the agent gets
 
-Six MCP intent tools plus an atomic passthrough:
+The agent-facing surface includes lifecycle controls, intent tools, and an atomic passthrough:
 
 | Tool | Purpose |
 |---|---|
 | `xedit_session` | First call every conversation. Returns game mode, load order size, daemon PID, capability flags. |
-| `xedit_list_capabilities` | Curated 49-command digest + drift report against the live daemon. |
+| `xedit_list_capabilities` | Curated 50-command contract-0.23 digest + drift report against the live daemon. |
+| `xedit_flush` | Consent-gated pending-rename drain. Waits for the daemon's promised self-exit and reports complete, partial, or unknown durability. |
 | `xedit_find_record` | Locate a record by `{file, formId}` or `{editorId}`. |
 | `xedit_read_record` | Fields + base record + winning override. |
 | `xedit_inspect_conflicts` | W2 verdict tool: `no_conflict / itpo / itm / minor / breaking`. |
-| `xedit_call(command, args)` | Atomic passthrough for any of the 49 native daemon commands. Still goes through the full pipeline. |
+| `xedit_call(command, args)` | Atomic passthrough for native daemon commands. Still goes through the full pipeline; lifecycle-owned `session.flush` must use `xedit_flush`. |
 
 The agent-facing skills are documented separately at `skills/xedit-automation/` and `skills/xedit-conflict-audit/` in the plugin root.
 
@@ -50,7 +51,7 @@ Every tool call traverses:
 
 ## Status
 
-- Shipped: pipeline stages [1][2][3][6][7], six intent tools, atomic passthrough, seed rule `LOAD001`, append-only JSONL audit logger, curated 49-command capabilities digest with live drift report.
+- Shipped: pipeline stages [1][2][3][6][7], lifecycle controls including contract-0.23 `xedit_flush`, intent tools, atomic passthrough, seed rule `LOAD001`, append-only JSONL audit logger, and a curated 50-command capabilities digest with live drift report.
 - Deferred: pipeline stages [4][5] (snapshot/preview), mutating record tools, `xedit_run_job` async wrapper, `xedit_run_script` Pascal scripting, `restore_snapshot` recovery tool, `-automation-mcp-mode` token enforcement.
 
 ## Layout
@@ -63,8 +64,10 @@ src/
   envelope.ts                 ok / refuse / fromRuleFinding helpers
   daemon-adapter.ts           PowerShell adapter over xedit-client.ps1
   session.ts                  buildContext: describe + capabilities + files.list -> ToolContext
-  capabilities-digest.ts      Curated 49-command digest used by xedit_list_capabilities
-  launch.ts                   Production launchDaemon: process launch + ready-poll + plugin-load wait
+  capabilities-digest.ts      Curated 50-command contract-0.23 digest used by xedit_list_capabilities
+  flush.ts                    session.flush ownership, response validation, exit confirmation, residue reporting
+  lifecycle-decisions.ts      Pure fail-closed lifecycle decisions used by stop/restart/start
+  launch.ts                   Production launchDaemon: process launch + ready-poll + plugin-load/exit wait
   pipeline/                   Stages [1][2][3][6][7]
   rules/
     registry.ts               createRegistry + defaultRegistry
@@ -105,6 +108,10 @@ Override env vars for non-default paths:
 - FormIDs over the wire: the daemon rejects the `0x` prefix; MCP schemas accept both styles and strip before forwarding.
 - `records.conflict_status`: returns the conflict label under `result.conflict.all` using the xEdit `caXxx` enum (`caConflict`, `caITM`, `caITPO`, `caConflictCritical`, `caOnlyOne`, `caOverride`, `caConflictBenign`, `caUnknown`, `caNoConflict`).
 - `xedit-client.ps1` verified subcommand surface: `process launch | status | wait | stop` + `automation call`. `automation call` flags: `--xedit-pid <pid> --request-file <reqPath> --response-file <resPath> --timeout-seconds <n>`.
+- Contract 0.23 `session.get_dirty_state` supplies authoritative `pendingShutdownFiles` / `pendingShutdownCount`. The MCP replaces stale local fallback state only when that complete readback is present; missing fields never mean zero.
+- `session.flush` is not available through `xedit_call`. `xedit_flush` validates the drain result, waits for the managed PID to exit, clears the blocking pending guard only after confirmed exit, and keeps partial or unknown results as visible nonblocking `lastFlush` residue. Once a fresh daemon is ready, the old summary is labelled `previousSessionFlush` with its timestamp and PID.
+- Stop/restart returns `dirty_state_unavailable` when the authoritative dirty-state probe fails and `force` is absent. Retry `xedit_dirty`; `force:true` explicitly accepts that unknown-state risk.
+- If a validated flush result arrives but daemon exit is not confirmed within the initial bound, the MCP retains the managed process in `failed` state. Retry `xedit_health`; it rechecks the managed PID and clears lifecycle state only after delayed exit is confirmed. Do not force-stop while the normal close path may still be performing its final rename retry.
 
 Deeper internals, plans, and design specs live under [`docs/internal/`](../../docs/internal/) in the plugin root.
 

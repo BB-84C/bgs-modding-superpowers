@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 
 const spawnCalls: Array<{ command: string; args: string[] }> = [];
+let processWaitStatus = "running";
 
 class FakeChild extends EventEmitter {
   stdout = new EventEmitter();
@@ -27,12 +28,16 @@ vi.mock("node:child_process", () => ({
         ? "launch"
         : args[3] === "process" && args[4] === "stop"
           ? "stop"
+          : args[3] === "process" && args[4] === "wait"
+            ? "wait"
           : "other";
 
       if (mode === "launch") {
         child.stdout.emit("data", Buffer.from("process launch\nstatus: ok\nxedit-pid: 4242\n"));
       } else if (mode === "stop") {
         child.stdout.emit("data", Buffer.from("process stop\nstatus: stopped\nxedit-pid: 4242\n"));
+      } else if (mode === "wait") {
+        child.stdout.emit("data", Buffer.from(`process wait\nstatus: ${processWaitStatus}\nxedit-pid: 4242\n`));
       }
 
       child.emit("close", 0);
@@ -44,6 +49,7 @@ vi.mock("node:child_process", () => ({
 describe("launchDaemon readiness-timeout cleanup", () => {
   beforeEach(() => {
     spawnCalls.length = 0;
+    processWaitStatus = "running";
     vi.resetModules();
   });
 
@@ -150,5 +156,64 @@ describe("launchDaemon readiness-timeout cleanup", () => {
     const idx = launchSpawn!.args.indexOf("--no-starfield-redpill");
     expect(idx).toBeGreaterThanOrEqual(0);
     expect(launchSpawn!.args[idx + 1]).toBe("1");
+  });
+
+  it("waitForExit uses canonical process wait and confirms only exited status", async () => {
+    const { launchDaemon } = await import("../../src/launch.js");
+    const daemon = await launchDaemon({
+      clientScript: "D:/awesome-bgs-mod-master/tools/mo2-vfs-launcher/xedit-client.ps1",
+      launcherPath: "D:/Starfield MO2/tools/xEdit/SF1Edit64.exe",
+      gameMode: "Starfield",
+      moProfile: "Default",
+      readyTimeoutMs: 10_000,
+    });
+
+    processWaitStatus = "exited";
+    await expect(daemon.waitForExit(30_000)).resolves.toBe(true);
+
+    const waitSpawn = spawnCalls.at(-1)!;
+    expect(waitSpawn.args).toContain("wait");
+    expect(waitSpawn.args).toContain("--timeout-seconds");
+    expect(waitSpawn.args).toContain("30");
+    expect(spawnCalls.some((call) => call.args.includes("stop"))).toBe(false);
+  });
+
+  it.each(["absent", "reused"])("treats process-wait failure plus managed PID %s as confirmed exit", async (status) => {
+    const { waitForManagedProcessExit } = await import("../../src/launch.js");
+    const run = vi.fn(async (_pwsh: string, args: string[]) => {
+      if (args.includes("wait")) throw new Error("xEdit PID is not running");
+      return JSON.stringify({ status, executablePath: status === "reused" ? "C:/Windows/notepad.exe" : undefined });
+    });
+
+    await expect(waitForManagedProcessExit({
+      pwsh: "pwsh",
+      clientScript: "client.ps1",
+      pid: 4242,
+      launcherPath: "D:/tools/xEdit.exe",
+      timeoutMs: 30_000,
+      run,
+    })).resolves.toBe(true);
+  });
+
+  it.each([
+    ["same managed executable is still alive", async () => JSON.stringify({ status: "same", executablePath: "D:/tools/xEdit.exe" })],
+    ["identity probe itself errors", async () => { throw new Error("Get-Process access denied"); }],
+  ])("does not confirm exit when process wait fails and %s", async (_label, probeRun) => {
+    const { waitForManagedProcessExit } = await import("../../src/launch.js");
+    let call = 0;
+    const run = vi.fn(async () => {
+      call += 1;
+      if (call === 1) throw new Error("process wait failed");
+      return probeRun();
+    });
+
+    await expect(waitForManagedProcessExit({
+      pwsh: "pwsh",
+      clientScript: "client.ps1",
+      pid: 4242,
+      launcherPath: "D:/tools/xEdit.exe",
+      timeoutMs: 30_000,
+      run,
+    })).resolves.toBe(false);
   });
 });

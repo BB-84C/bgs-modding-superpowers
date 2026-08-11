@@ -12,8 +12,14 @@ describe("capabilities digest", () => {
 
   it("has the expected total command count and no duplicates", () => {
     const cmds = allDigestCommands();
-    expect(cmds.length).toBe(49);
-    expect(new Set(cmds).size).toBe(49); // no duplicate command names
+    expect(CAPABILITIES_DIGEST.contractVersionExpected).toBe("0.23");
+    expect(cmds.length).toBe(50);
+    expect(new Set(cmds).size).toBe(50); // no duplicate command names
+    const session = CAPABILITIES_DIGEST.groups.find((group) => group.name === "session")!;
+    expect(session.commands.find((command) => command.name === "session.flush")).toMatchObject({
+      mutating: true,
+      keyArgs: ["force"],
+    });
   });
 
   it("enumerates the read-only commands needed for Batch 1 (W2 conflict audit)", () => {

@@ -97,7 +97,7 @@ export function makeCreateChildRecordHandler(opts) {
             const env = refuse({
                 tool: "xedit_create_child_record",
                 summary: "Mutating call requires xEdit -IKnowWhatImDoing consent",
-                code: "mutation_requires_iknowwhatimdoing",
+                code: MCP_ERROR_CODES.MUTATION_REQUIRES_IKNOWWHATIMDOING,
                 hint: "Relaunch the xEdit daemon with the -IKnowWhatImDoing flag set, then retry. " +
                     "See xedit_session output: data.consentEnabled must be true.",
             });

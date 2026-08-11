@@ -18,7 +18,7 @@ export interface CapabilitiesDigest {
 }
 
 /**
- * TES5Edit-contrib r7 (automation contract 0.21) is additive over the older
+ * TES5Edit-contrib r7 (automation contract 0.23) is additive over the older
  * digest surface. The live daemon reports the details via system.capabilities;
  * this digest only surfaces agent-facing command names and key args.
  *
@@ -35,7 +35,7 @@ export interface CapabilitiesDigest {
  * - supports.reverseNavigation (0.19)
  */
 export const CAPABILITIES_DIGEST: CapabilitiesDigest = {
-  contractVersionExpected: "0.21",
+  contractVersionExpected: "0.23",
   groups: [
     {
       name: "system",
@@ -53,6 +53,7 @@ export const CAPABILITIES_DIGEST: CapabilitiesDigest = {
         { name: "session.get_dirty_state", summary: "Which files have unsaved changes", mutating: false },
         { name: "session.get_gui_snapshot", summary: "Modal blocker probe", mutating: false },
         { name: "session.save", summary: "Save listed files; watch pendingShutdown", mutating: true, keyArgs: ["files"] },
+        { name: "session.flush", summary: "Drain pending renames and self-exit", mutating: true, keyArgs: ["force"] },
         { name: "session.navigate_to_record", summary: "Drive GUI JumpTo", mutating: false, keyArgs: ["file", "formId"] },
       ],
     },
