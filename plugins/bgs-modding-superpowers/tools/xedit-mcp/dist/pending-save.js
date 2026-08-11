@@ -2,10 +2,9 @@ export function withPendingShutdownSave(dirtyState, pending) {
     return { ...dirtyState, pendingShutdownSave: pending };
 }
 /**
- * Local fail-closed knowledge of saves xEdit has acknowledged as queued for
- * shutdown. xEdit's dirty state becomes false after such a save, so it cannot
- * be used to clear this guard. The daemon has no queue-inspection/flush verb;
- * pending entries therefore persist until this MCP session itself transitions.
+ * Fail-closed pending-save knowledge. Contract 0.23 dirty-state responses are
+ * authoritative and replace this local fallback; older daemons retain the
+ * locally observed lower bound until a session transition.
  */
 export class PendingSaveTracker {
     pendingByKey = new Map();
@@ -22,6 +21,7 @@ export class PendingSaveTracker {
         const count = result.savePendingShutdownCount;
         const files = result.savedFilesPendingShutdown;
         if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
+            this.observeDirtyState(result.dirtyState);
             return;
         }
         // This is the exact result shape emitted by xeAutomationSessionSave. A
@@ -35,6 +35,37 @@ export class PendingSaveTracker {
         if (count > 0) {
             this.reportedPendingCount = Math.max(this.reportedPendingCount, count, this.pendingByKey.size);
         }
+        // Contract 0.23 includes a post-save authoritative queue snapshot. Apply it
+        // last so a confirmed zero can clear stale local fail-closed knowledge.
+        this.observeDirtyState(result.dirtyState);
+    }
+    /** Returns true only when a complete authoritative 0.23 readback was applied. */
+    observeDirtyState(value) {
+        if (!isRecord(value))
+            return false;
+        const count = value.pendingShutdownCount;
+        const files = value.pendingShutdownFiles;
+        if (!Array.isArray(files) || typeof count !== "number" || !Number.isInteger(count) || count < 0) {
+            return false;
+        }
+        this.pendingByKey.clear();
+        for (let index = 0; index < files.length; index += 1) {
+            const file = files[index];
+            this.pendingByKey.set(fileKey(file) ?? `authoritative:${index}`, file);
+        }
+        this.reportedPendingCount = count;
+        return true;
+    }
+    /** Applies only the validated post-drain queue from session.flush. */
+    observePostFlushRemaining(files, count) {
+        if (!Number.isInteger(count) || count < 0 || files.length !== count || files.some((file) => typeof file !== "string")) {
+            throw new Error("Invalid post-flush pending state");
+        }
+        this.pendingByKey.clear();
+        for (let index = 0; index < files.length; index += 1) {
+            this.pendingByKey.set(`postFlush:${index}:${files[index]}`, files[index]);
+        }
+        this.reportedPendingCount = count;
     }
     snapshot() {
         return {
@@ -46,6 +77,46 @@ export class PendingSaveTracker {
         this.pendingByKey.clear();
         this.reportedPendingCount = 0;
     }
+}
+/** Probe lifecycle authority without weakening the tracker on any failure. */
+export async function refreshPendingSaveAuthority(adapter, tracker) {
+    try {
+        const env = await adapter.call({ command: "session.get_dirty_state", args: {} });
+        if (!env.ok || !isRecord(env.result)) {
+            return {
+                ok: false,
+                error: env.ok
+                    ? new Error("Invalid dirty-state result: expected an object")
+                    : env.error,
+            };
+        }
+        tracker.observeDirtyState(env.result);
+        return { ok: true, result: env.result };
+    }
+    catch (error) {
+        return { ok: false, error };
+    }
+}
+export function dirtyFileNames(value) {
+    if (!Array.isArray(value))
+        return [];
+    const names = [];
+    for (const entry of value) {
+        if (typeof entry === "string" && entry.length > 0) {
+            names.push(entry);
+            continue;
+        }
+        if (!isRecord(entry))
+            continue;
+        const name = typeof entry.fileName === "string" && entry.fileName.length > 0
+            ? entry.fileName
+            : typeof entry.name === "string" && entry.name.length > 0
+                ? entry.name
+                : undefined;
+        if (name)
+            names.push(name);
+    }
+    return names;
 }
 export function pendingSaveLifecycleRisk(operation, pending, force) {
     if (pending.count === 0)
@@ -61,8 +132,9 @@ export function pendingSaveLifecycleRisk(operation, pending, force) {
         code: "pending_save",
         severity: "CRITICAL",
         summary: `xEdit has ${pending.count} save(s) pending shutdown. Refusing to ${operation}.`,
-        hint: "Pending-shutdown saves are not durable and xEdit exposes no queue flush/readback command. " +
-            "Do not stop or restart this daemon; force:true explicitly abandons the pending save state.",
+        hint: "Pending-shutdown saves are not durable. Use xedit_flush with a contract-0.23 daemon; " +
+            "force stop/restart hard-terminates managed xEdit and skips its pending-rename lifecycle. " +
+            "temporary save files may remain available for manual recovery, but force:true explicitly abandons automated durability.",
         data: { pendingShutdownSave: pending },
     };
 }

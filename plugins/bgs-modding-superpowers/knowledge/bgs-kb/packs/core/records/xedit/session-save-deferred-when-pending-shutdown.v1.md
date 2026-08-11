@@ -6,9 +6,9 @@ domains: [xedit, debugging]
 appliesTo:
   games: [SkyrimLE, SkyrimSE, SkyrimAE, SkyrimVR, Fallout4, Fallout4VR, Fallout3, FalloutNV, Starfield]
 canonical:
-  answer: "A session.save response that reports savedFilesPendingShutdown and savePendingShutdownCount is not durability proof. Do not restart to force or prove a flush: the MCP must retain the pending state and refuse normal stop/restart. Current xEdit automation exposes no authoritative pending-queue inspection or flush command; force is explicit abandonment, not a durability path."
+  answer: "A session.save response that reports savedFilesPendingShutdown and savePendingShutdownCount is not durability proof. On automation contract 0.23, inspect the authoritative pending queue through xedit_dirty, then use lifecycle-owned xedit_flush and require a completed drain with zero remaining plus fresh-daemon readback. Restart alone and force:true are not durability paths."
   confidence: verified-project-doc
-queryKeys: [session.save, savedFilesPendingShutdown, savePendingShutdownCount, pending save, durability, stop restart refusal]
+queryKeys: [session.save, session.flush, xedit_flush, savedFilesPendingShutdown, pendingShutdownFiles, savePendingShutdownCount, pending save, durability]
 severity: critical
 sources:
   - kind: project-skill
@@ -17,7 +17,10 @@ sources:
   - kind: project-internal-doc
     ref: docs/internal/superpowers/plans/2026-05-26-xedit-skills-and-harness-mcp-batch1.STATUS.md
     sectionPath: Implications for later batches
-lastReviewed: "2026-08-02"
+  - kind: tooling-docs
+    url: "https://github.com/BB-84C/TES5Edit/releases/tag/v4.1.6-automation.9"
+    ref: "TES5Edit automation r9, contract 0.23"
+lastReviewed: "2026-08-11"
 schemaVersion: 1
 ---
 
@@ -28,11 +31,17 @@ schemaVersion: 1
 xEdit queued the physical write for shutdown; `dirtyState.dirty` may already be
 false and is not evidence that the queued write became durable.
 
-The MCP must retain pending files/count from a successful save result and show
-them through `xedit_dirty`. It must refuse normal `xedit_stop` and
-`xedit_restart` while that state exists. `force:true` is an auditable
-abandonment of the pending save, never a flush or durability assertion.
+The MCP retains pending files/count from a successful save result and shows
+them through `xedit_dirty`. On contract 0.23, the daemon's complete
+`pendingShutdownFiles` / `pendingShutdownCount` readback replaces stale local
+fallback knowledge. Missing fields or a failed probe never mean zero.
 
-Current automation lacks an authoritative pending-queue inspection or flush
-operation. Keep the daemon alive and treat the result as an upstream capability
-gap; do not prescribe restart-plus-readback as a generic workaround.
+If pending remains, use `xedit_flush`, not `xedit_call session.flush`. The MCP
+validates `flushedFiles`, `pendingRemaining`, and the matching count, then waits
+for the managed daemon's promised self-exit. Only `completed` with zero remaining,
+followed by a fresh-daemon plugin readback, supports a strong durability claim.
+`partial` or `outcome: unknown` remains visible as `lastFlush` residue.
+For a partial drain, failed renames stay queued for one final normal process-exit
+retry. Relaunch and read the plugin back before deciding whether they landed;
+after relaunch the old summary is identified as `previousSessionFlush`.
+`force:true` on stop/restart is auditable abandonment, never a flush.

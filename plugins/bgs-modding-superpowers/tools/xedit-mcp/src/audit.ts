@@ -13,8 +13,14 @@ export interface AuditRecord {
   sessionId?: string;
   /** Explicit lifecycle abandonment reason, when one was authorized. */
   risk?: string;
-  /** Pending saves present at a force lifecycle boundary. */
+  /** Pending-save snapshot at lifecycle or flush decision boundaries. */
   pendingShutdownSave?: { count: number; files: unknown[] };
+  force?: boolean;
+  flushed?: { attempted: number; renamed: number; failed: number };
+  pendingRemaining?: number;
+  daemonExited?: boolean;
+  flushOutcome?: "known" | "unknown";
+  dirtyStateProbeUnavailable?: boolean;
 }
 
 export interface AuditLogger {

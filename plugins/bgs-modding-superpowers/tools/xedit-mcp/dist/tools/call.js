@@ -59,6 +59,17 @@ export function makeCallHandler(opts) {
             return v;
         }
         const { command, args = {} } = parsed.data;
+        if (command === "session.flush") {
+            const env = refuse({
+                tool: "xedit_call",
+                summary: "session.flush is owned by the xEdit lifecycle controller",
+                code: MCP_ERROR_CODES.INVALID_REQUEST,
+                hint: "Call the first-class xedit_flush tool so process exit and lifecycle state are confirmed safely.",
+                detail: { command },
+            });
+            await emitAudit({ audit: opts.audit, tool: "xedit_call", args: rawArgs, env, ctx });
+            return env;
+        }
         // Allow live-daemon commands that exist in capabilities but not in the curated digest,
         // and warn. Reject only if both digest AND live capabilities lack the command.
         const liveCommands = new Set(ctx.capabilities?.commands ?? []);

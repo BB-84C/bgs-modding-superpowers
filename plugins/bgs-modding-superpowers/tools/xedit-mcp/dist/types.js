@@ -9,5 +9,10 @@ export const MCP_ERROR_CODES = {
     CONFIRM_REQUIRED: "confirm_required",
     CONFIRM_TOKEN_INVALID: "confirm_token_invalid",
     CONFIRM_TOKEN_EXPIRED: "confirm_token_expired",
+    UNSUPPORTED_BY_DAEMON: "unsupported_by_daemon",
+    MUTATION_REQUIRES_IKNOWWHATIMDOING: "mutation_requires_iknowwhatimdoing",
+    CONSENT_REQUIRED: "consent_required",
+    STATE_CONFLICT: "state_conflict",
+    DIRTY_STATE_UNAVAILABLE: "dirty_state_unavailable",
 };
 //# sourceMappingURL=types.js.map

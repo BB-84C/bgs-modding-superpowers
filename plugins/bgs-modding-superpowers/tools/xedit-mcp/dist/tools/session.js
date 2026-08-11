@@ -2,6 +2,7 @@ import { ok as okEnv, refuse } from "../envelope.js";
 import { MCP_ERROR_CODES } from "../types.js";
 import { buildContext } from "../session.js";
 import { emitAudit } from "../audit-line.js";
+import { dirtyFileNames } from "../pending-save.js";
 export function xeditSessionTool(opts) {
     let ctx;
     return {
@@ -10,6 +11,8 @@ export function xeditSessionTool(opts) {
             try {
                 ctx = await buildContext(opts);
                 const dirtyRes = await opts.adapter.call({ command: "session.get_dirty_state", args: {} });
+                if (dirtyRes.ok)
+                    opts.onDirtyStateReadback?.(dirtyRes.result);
                 const dirty = dirtyRes.ok
                     ? dirtyRes.result
                     : {};
@@ -26,7 +29,7 @@ export function xeditSessionTool(opts) {
                         dirty: dirty.dirty === true,
                     },
                     dirty: {
-                        files: dirty.dirtyFiles ?? [],
+                        files: dirtyFileNames(dirty.dirtyFiles),
                         unsavedChangeCount: dirty.unsavedChangeCount ?? 0,
                     },
                 });
