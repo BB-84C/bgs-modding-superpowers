@@ -53,11 +53,21 @@ export async function BgsModdingSuperpowersPlugin() {
   const bootstrap = readBootstrap();
   return {
     config: async (config) => {
-      config.skills ??= {};
-      config.skills.paths ??= [];
-      if (!config.skills.paths.includes(SKILLS_DIR)) config.skills.paths.push(SKILLS_DIR);
+      // Do NOT mutate the passed config object in place. OpenCode invokes plugin
+      // config hooks with the workspace's config-state object; when the host
+      // workspace has no project-level `mcp`/`skills` config, those fields are
+      // references into the process-global config cache. Mutating them writes
+      // into shared state visible to every other workspace on the same server.
+      // Assign fresh objects instead (same ??=/push semantics, no shared writes).
+      const nextSkills = config.skills ?? {};
+      config.skills = {
+        ...nextSkills,
+        paths: nextSkills.paths?.includes(SKILLS_DIR)
+          ? nextSkills.paths
+          : [...(nextSkills.paths ?? []), SKILLS_DIR],
+      };
 
-      config.mcp ??= {};
+      const nextMcp = { ...(config.mcp ?? {}) };
       for (const [name, toolName] of [
         ['xedit', 'xedit-mcp'],
         ['bgs_kb', 'bgs-kb-mcp'],
@@ -65,7 +75,7 @@ export async function BgsModdingSuperpowersPlugin() {
       ]) {
         const entry = resolveMcpEntry(PLUGIN_ROOT, toolName);
         if (entry) {
-          config.mcp[name] ??= {
+          nextMcp[name] ??= {
             type: 'local',
             command: ['node', entry],
             enabled: true,
@@ -76,6 +86,7 @@ export async function BgsModdingSuperpowersPlugin() {
           logMissingMcpEntry(toolName, PLUGIN_ROOT);
         }
       }
+      config.mcp = nextMcp;
     },
     'experimental.chat.messages.transform': async (_input, output) => {
       if (!bootstrap || !output?.messages?.length) return;
