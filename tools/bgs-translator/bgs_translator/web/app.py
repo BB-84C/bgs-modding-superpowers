@@ -1553,9 +1553,30 @@ def _project_script(project: str | None) -> str:
       async function api(path, options = {}) {
         const res = await fetch(path, {credentials: 'same-origin', ...options});
         const text = await res.text();
-        const data = text ? JSON.parse(text) : null;
+        let data = null;
+        if (text) {
+          try {
+            data = JSON.parse(text);
+          } catch (parseError) {
+            if (!res.ok) {
+              const err = new Error(text.trim() || `${path} -> ${res.status}`);
+              err.data = null;
+              err.status = res.status;
+              throw err;
+            }
+            throw new Error(`${path} 返回了无法解析的响应（HTTP ${res.status}）。`);
+          }
+        }
         if (!res.ok) {
-          const err = new Error((data && (typeof data.detail === 'string' ? data.detail : data.message)) || `${path} -> ${res.status}`);
+          const detail = data && data.detail;
+          const message = (
+            (typeof detail === 'string' && detail) ||
+            (detail && typeof detail.message === 'string' && detail.message) ||
+            (data && typeof data.message === 'string' && data.message) ||
+            text.trim() ||
+            `${path} -> ${res.status}`
+          );
+          const err = new Error(message);
           err.data = data;
           err.status = res.status;
           throw err;
@@ -4930,6 +4951,9 @@ def _select_plugin_file(current_path: str = "") -> dict[str, Any]:
         env["XTL_FILE_DIALOG_INITIAL_DIR"] = str(initial_dir)
     script = r"""
 Add-Type -AssemblyName System.Windows.Forms
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+[Console]::OutputEncoding = $utf8
+$OutputEncoding = $utf8
 $dialog = New-Object System.Windows.Forms.OpenFileDialog
 $dialog.Title = '选择要导入的 MOD 文件'
 $dialog.Filter = 'Bethesda MOD 文件 (*.esm;*.esp;*.esl)|*.esm;*.esp;*.esl|所有文件 (*.*)|*.*'
@@ -4938,39 +4962,91 @@ $dialog.Multiselect = $false
 if ($env:XTL_FILE_DIALOG_INITIAL_DIR -and (Test-Path -LiteralPath $env:XTL_FILE_DIALOG_INITIAL_DIR)) {
   $dialog.InitialDirectory = $env:XTL_FILE_DIALOG_INITIAL_DIR
 }
-$result = $dialog.ShowDialog()
-if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
-  [pscustomobject]@{ path = $dialog.FileName; canceled = $false } | ConvertTo-Json -Compress
-} else {
-  [pscustomobject]@{ path = ''; canceled = $true } | ConvertTo-Json -Compress
+$owner = New-Object System.Windows.Forms.Form
+$owner.ShowInTaskbar = $false
+$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+$owner.Size = New-Object System.Drawing.Size(1, 1)
+$owner.TopMost = $true
+$owner.Show()
+try {
+  $owner.Activate()
+  $result = $dialog.ShowDialog($owner)
+  if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+    [pscustomobject]@{ path = $dialog.FileName; canceled = $false } | ConvertTo-Json -Compress
+  } else {
+    [pscustomobject]@{ path = ''; canceled = $true } | ConvertTo-Json -Compress
+  }
+} finally {
+  $dialog.Dispose()
+  $owner.Close()
+  $owner.Dispose()
 }
 """
-    completed = subprocess.run(
-        ["powershell", "-NoProfile", "-STA", "-Command", script],
-        capture_output=True,
-        check=False,
-        encoding="utf-8",
-        env=env,
-        timeout=300,
-    )
-    if completed.returncode != 0:
-        detail = (
-            completed.stderr.strip() or completed.stdout.strip() or "Windows 文件选择器启动失败。"
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-STA", "-Command", script],
+            capture_output=True,
+            check=False,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            startupinfo=_windows_dialog_startupinfo(),
+            timeout=300,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Windows 文件选择器等待响应超时。",
+        ) from exc
+    except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
+        detail = str(exc).strip() or type(exc).__name__
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Windows 文件选择器启动失败：{detail}",
+        ) from exc
+    if completed.returncode != 0:
+        stderr = (completed.stderr or "").strip()
+        stdout = (completed.stdout or "").strip()
+        detail = stderr or stdout or "Windows 文件选择器启动失败。"
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail)
-    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    stdout = completed.stdout or ""
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
     if not lines:
-        return {"path": "", "canceled": True}
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Windows 文件选择器没有返回可读取的结果。",
+        )
     try:
         data = json.loads(lines[-1])
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeError) as exc:
         raise HTTPException(
             status.HTTP_500_INTERNAL_SERVER_ERROR, "Windows 文件选择器返回了无法读取的结果。"
         ) from exc
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Windows 文件选择器返回的结果格式无效。",
+        )
     path = str(data.get("path") or "")
+    if "\ufffd" in path:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Windows 文件选择器返回的路径编码无效。",
+        )
     if path and Path(path).suffix.casefold() not in {".esp", ".esm", ".esl"}:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请选择 .esm、.esp 或 .esl 文件。")
     return {"path": path, "canceled": bool(data.get("canceled") or not path)}
+
+
+def _windows_dialog_startupinfo() -> Any | None:
+    """Make the picker PowerShell visible even when the web service is hidden."""
+
+    if os.name != "nt":
+        return None
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 1  # Win32 SW_SHOWNORMAL
+    return startupinfo
 
 
 def _plugin_dialog_initial_dir(current_path: str) -> Path | None:
