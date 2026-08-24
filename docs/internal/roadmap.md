@@ -130,6 +130,18 @@ The reshape to a Superpowers-shaped multi-harness plugin is complete in the loca
 
 Target 3 ("Operator UX — smoothing first-run setup") was closed on 2026-06-01: the invariants it referenced (visible MO2 via `scripts/start-mo2.ps1`, non-blocking MCP lifecycle tools `xedit_status/start/health/dirty/stop/restart`) are already shipped, and "smoothing first-run setup" had no concrete acceptance criteria distinct from the existing `setting-up-bgs-modding-environment` skill.
 
+## 2026-08-24 — Issues #30-#32 Windows/OpenCode repair round
+
+**Current state:** issues [#30](https://github.com/BB-84C/bgs-modding-superpowers/issues/30) and [#31](https://github.com/BB-84C/bgs-modding-superpowers/issues/31) were linked to commits `4be4b7b` and `0ebdfa7` and closed after shared-server use verified that project MCP registration no longer leaks into unrelated workspaces. Issue [#32](https://github.com/BB-84C/bgs-modding-superpowers/issues/32) was fixed by commit `47bc221`, pushed on `fix/issue-32-windows-file-picker`, and closed after the automated and live GUI checks below passed. Integration into `main` remains pending.
+
+- The Windows plugin picker now forces its PowerShell child to request normal visibility and owns the `OpenFileDialog` with a topmost WinForms form, so a hidden Web GUI parent cannot hide the modal dialog.
+- The picker protocol explicitly emits UTF-8, decodes with replacement fallback, rejects replacement-character paths, and converts timeout, spawn, empty-output, invalid-JSON, and invalid-shape failures into structured HTTP errors.
+- The project-page fetch helper now preserves plain-text backend failures instead of parsing them as JSON before checking HTTP status.
+- Source and portable-plugin mirror files are identical. Focused picker tests pass 7/7; the complete Web E2E suite passes 80/80; focused Ruff and `git diff --check` pass.
+- Final semantic acceptance launched the real Web GUI hidden, used Playwright to click Browse, used UI Automation value/invoke patterns to select `中文插件.esm`, read the exact Chinese path back from the DOM, and confirmed a plain-text 500 renders `backend exploded` without `Unexpected token`. The owned browser, server, and picker processes exited; evidence is under `.opencode/artifacts/issue-32/playwright-e2e/evidence-final.json`.
+
+**Scope boundary:** three other page-local fetch helpers still parse response text as JSON before checking status. They are separate defect candidates; #32 covers the project-import Browse flow and does not widen into those pages.
+
 ## 2026-08-11 — xEdit automation contract 0.23 adaptation
 
 **Delivered on `fix/xedit-automation-023`:** the MCP now consumes the TES5Edit automation r9 fixes that closed upstream issues [#6](https://github.com/BB-84C/TES5Edit/issues/6) and [#7](https://github.com/BB-84C/TES5Edit/issues/7).
