@@ -239,3 +239,30 @@ test("skips packs missing kb.sqlite", async () => {
   expect(result.packs).toEqual([]);
   expect(result.skipped).toEqual([{ code: "missing_kb_sqlite", path: join(bundledRoot, "no-sqlite"), packId: "no-sqlite" }]);
 });
+
+test.each([
+  ["2.0.0", "10.0.0", loadedAt],
+  ["2.0.0", "10.0.0", undefined],
+  ["2026.2.1", "2026.10.1", loadedAt],
+  ["2026.06.02", "2026.08.06", undefined],
+])("same-cache tied builtAt selects numeric version %s < %s (builtAt %s)", async (older, newer, builtAt) => {
+  const cacheRoot = await tempRoot("kb-version-tie-");
+  await writePack(cacheRoot, join("same-pack", older!), { packId: "same-pack", manifest: { version: older!, builtAt } });
+  const newest = await writePack(cacheRoot, join("same-pack", newer!), { packId: "same-pack", manifest: { version: newer!, builtAt } });
+  const result = await discoverPacks({ cacheRoot, bundledRoot: join(cacheRoot, "absent"), userPackRoots: [], now });
+  expect(result.packs.map(pack => pack.packRoot)).toEqual([newest]);
+  expect(result.collisions).toHaveLength(1);
+  expect(result.collisions[0]).toMatchObject({ code: "pack_id_overridden", severity: "MEDIUM" });
+});
+
+test("version tie-break does not override builtAt or bundled root precedence", async () => {
+  const cacheRoot = await tempRoot("kb-version-precedence-");
+  const bundledRoot = await tempRoot("kb-version-bundled-");
+  await writePack(cacheRoot, join("same-pack", "10.0.0"), { packId: "same-pack", manifest: { version: "10.0.0", builtAt: loadedAt } });
+  const newerBuild = await writePack(cacheRoot, join("same-pack", "2.0.0"), { packId: "same-pack", manifest: { version: "2.0.0", builtAt: "2026-06-03T00:00:00Z" } });
+  let result = await discoverPacks({ cacheRoot, bundledRoot, userPackRoots: [], now });
+  expect(result.packs[0].packRoot).toBe(newerBuild);
+  const bundled = await writePack(bundledRoot, "core", { packId: "same-pack", manifest: { version: "1.0.0", builtAt: "2026-06-03T00:00:00Z" } });
+  result = await discoverPacks({ cacheRoot, bundledRoot, userPackRoots: [], now });
+  expect(result.packs[0].packRoot).toBe(bundled);
+});

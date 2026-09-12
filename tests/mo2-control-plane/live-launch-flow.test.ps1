@@ -522,6 +522,27 @@ spec.loader.exec_module(module)
 
 main_thread_id = threading.get_ident()
 organizer_calls = []
+organizer_handle = 0x100000001
+expected_pid = 4242
+handle_calls = []
+
+def fake_get_process_id(handle):
+    if handle != organizer_handle:
+        raise AssertionError(f"GetProcessId received the wrong or truncated HANDLE: {handle}")
+    handle_calls.append({"operation": "GetProcessId", "handle": handle})
+    return expected_pid
+
+def fake_close_handle(handle):
+    if handle != organizer_handle:
+        raise AssertionError(f"CloseHandle received an unowned HANDLE: {handle}")
+    handle_calls.append({"operation": "CloseHandle", "handle": handle})
+    return 1
+
+# Stub only the Win32 boundary; exercise the production conversion/ownership helper.
+module.KERNEL32 = types.SimpleNamespace(
+    GetProcessId=fake_get_process_id,
+    CloseHandle=fake_close_handle,
+)
 
 class FakeOrganizer:
     def startApplication(self, target_path, args, cwd, profile=""):
@@ -534,7 +555,7 @@ class FakeOrganizer:
         })
         if threading.get_ident() != main_thread_id:
             raise RuntimeError("startApplication must run on the main thread")
-        return 4242
+        return organizer_handle
 
 pump = module.MainThreadCallPump()
 handlers = module.build_command_handlers(
@@ -593,6 +614,9 @@ print(json.dumps({
     "mainThreadId": main_thread_id,
     "queuedBeforePump": True,
     "organizerCalls": organizer_calls,
+    "organizerHandle": organizer_handle,
+    "expectedPid": expected_pid,
+    "handleCalls": handle_calls,
     "response": response,
 }))
 '@
@@ -619,8 +643,20 @@ print(json.dumps({
         throw "Organizer-backed launch marshalling harness should return ok=true after the main-thread pump runs"
     }
 
-    if ($threadSafeSummary.response.result.pid -ne 4242) {
-        throw "Organizer-backed launch marshalling harness should return the organizer launch pid"
+    if ($threadSafeSummary.response.result.pid -ne $threadSafeSummary.expectedPid) {
+        throw "Organizer-backed launch marshalling harness should return the resolved process id"
+    }
+
+    if ($threadSafeSummary.response.result.pid -eq $threadSafeSummary.organizerHandle) {
+        throw "Organizer-backed launch must not report the owned HANDLE as a process id"
+    }
+
+    if ($threadSafeSummary.handleCalls.Count -ne 2 -or
+        $threadSafeSummary.handleCalls[0].operation -ne "GetProcessId" -or
+        $threadSafeSummary.handleCalls[1].operation -ne "CloseHandle" -or
+        $threadSafeSummary.handleCalls[0].handle -ne $threadSafeSummary.organizerHandle -or
+        $threadSafeSummary.handleCalls[1].handle -ne $threadSafeSummary.organizerHandle) {
+        throw "Organizer-backed launch must resolve the full-width HANDLE then close it exactly once"
     }
 
     $null = New-Item -ItemType Directory -Path $runtimeRoot -Force

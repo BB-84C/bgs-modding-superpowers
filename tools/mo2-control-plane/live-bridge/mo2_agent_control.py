@@ -163,6 +163,9 @@ KERNEL32.CreateNamedPipeW.restype = ctypes.c_void_p
 KERNEL32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
 KERNEL32.OpenProcess.restype = ctypes.c_void_p
 
+KERNEL32.GetProcessId.argtypes = [ctypes.c_void_p]
+KERNEL32.GetProcessId.restype = ctypes.c_uint32
+
 KERNEL32.ConnectNamedPipe.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 KERNEL32.ConnectNamedPipe.restype = ctypes.c_int
 
@@ -2901,8 +2904,28 @@ def start_subprocess_launch(payload: dict[str, object]) -> subprocess.Popen:
     )
 
 
+def consume_organizer_process_handle(handle: int | None) -> int:
+    """Resolve an owned startApplication HANDLE to a PID, then release it.
+
+    MO2 transfers handle ownership to the caller unless waitForApplication is
+    used. launch.start tracks the PID instead; organizer.* keeps its separate
+    raw-handle/wait contract. The Python binding exposes HANDLE as uintptr_t.
+    """
+
+    if handle in (None, 0, -1, INVALID_HANDLE_VALUE, getattr(mobase, "INVALID_HANDLE_VALUE", None)):
+        raise RuntimeError("Organizer launch failed to return a valid process handle")
+
+    try:
+        pid = KERNEL32.GetProcessId(handle)
+        if not pid:
+            raise_last_windows_error("Failed to resolve organizer process handle to process id")
+        return int(pid)
+    finally:
+        KERNEL32.CloseHandle(handle)
+
+
 def start_organizer_launch(organizer, payload: dict[str, object]) -> int | None:
-    """Prefer MO2's organizer launch API when it is available."""
+    """Return the launched PID; None means the organizer API is absent."""
 
     if organizer is None or not hasattr(organizer, "startApplication"):
         return None
@@ -2918,16 +2941,15 @@ def start_organizer_launch(organizer, payload: dict[str, object]) -> int | None:
         (target_path, args),
     ):
         try:
-            launch_pid = start_application(*call_args)
+            process_handle = start_application(*call_args)
         except TypeError:
             continue
 
-        if launch_pid is None:
-            raise RuntimeError("Organizer launch failed to return a process id")
+        # Keep conversion outside signature probing: an acquired handle must
+        # never cause another launch attempt, even if conversion raises TypeError.
+        return consume_organizer_process_handle(process_handle)
 
-        return int(launch_pid)
-
-    return None
+    raise NotImplementedError("Organizer startApplication has no supported launch signature")
 
 
 def handle_launch_start(

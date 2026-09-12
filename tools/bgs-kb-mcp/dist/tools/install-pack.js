@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { ok, refuse } from "../envelope/index.js";
@@ -12,6 +12,20 @@ import { extractZip } from "./install/extract.js";
 const Args = z.object({ packId: z.string().min(1), version: z.string().min(1).refine((value) => value !== "latest", "version must be exact; 'latest' is not allowed"), dryRun: z.boolean().optional() }).strict();
 async function readExtractedManifest(extractPath) {
     return JSON.parse(await readFile(join(extractPath, "manifest.json"), "utf8"));
+}
+async function resolveExtractedPackRoot(extractPath) {
+    const entries = await readdir(extractPath, { withFileTypes: true });
+    const nestedRoots = entries
+        .filter((entry) => entry.isDirectory() && existsSync(join(extractPath, entry.name, "manifest.json")))
+        .map((entry) => join(extractPath, entry.name));
+    const hasRootManifest = entries.some((entry) => entry.isFile() && entry.name === "manifest.json");
+    if (hasRootManifest && nestedRoots.length === 0)
+        return extractPath;
+    // Releases may wrap the pack once. The directory name is not its identity:
+    // the core release uses "core", while its manifest declares "bgs-kb-core".
+    if (!hasRootManifest && entries.length === 1 && nestedRoots.length === 1)
+        return nestedRoots[0];
+    throw new Error("Invalid or ambiguous pack layout: expected a root manifest.json or a single wrapper directory containing manifest.json.");
 }
 export function makeInstallPackTool(opts) {
     return async (rawArgs) => {
@@ -51,7 +65,11 @@ export function makeInstallPackTool(opts) {
             }
             const download = await downloadToFile({ url: entry.releaseUrl, destPath: paths.zipPath, expectedSha256: entry.sha256, expectedSizeBytes: entry.sizeBytes, fetchImpl: opts.fetchImpl });
             await (opts.extractZipImpl ?? extractZip)(paths.zipPath, paths.extractPath);
-            const manifest = await readExtractedManifest(paths.extractPath);
+            const packRoot = await resolveExtractedPackRoot(paths.extractPath);
+            const manifest = await readExtractedManifest(packRoot);
+            if (manifest.packId !== packId || manifest.version !== version) {
+                throw new Error(`Pack manifest identity does not match requested ${packId}@${version}.`);
+            }
             if (manifest.schemaVersion > opts.supportedSchemaVersion) {
                 return refuse({
                     tool: "bgs_kb_install_pack",
@@ -72,7 +90,7 @@ export function makeInstallPackTool(opts) {
             }
             if (!dryRun) {
                 await mkdir(dirname(paths.targetPath), { recursive: true });
-                await rename(paths.extractPath, paths.targetPath);
+                await rename(packRoot, paths.targetPath);
             }
             return ok({
                 tool: "bgs_kb_install_pack",
@@ -103,8 +121,9 @@ export function makeInstallPackTool(opts) {
         }
         finally {
             await rm(paths.zipPath, { force: true }).catch(() => undefined);
-            if (dryRun || !existsSync(paths.targetPath))
-                await rm(paths.extractPath, { force: true, recursive: true }).catch(() => undefined);
+            // A wrapped install moves only the inner root; remove the empty wrapper
+            // as well as failed/dry-run extractions, regardless of target existence.
+            await rm(paths.extractPath, { force: true, recursive: true }).catch(() => undefined);
         }
     };
 }

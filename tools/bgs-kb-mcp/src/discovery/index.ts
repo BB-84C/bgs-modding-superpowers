@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import type { PackManifest } from "../build/types.js";
 import { defaultCacheRoot, parseUserPackRoots, resolvePluginRoot } from "./resolve-roots.js";
 import { sha256File } from "./sha256.js";
+import { compareVersions } from "../tools/updates/semver.js";
 import type { CollisionReport, DiscoveryOptions, DiscoveryResult, LoadedPack, PackCandidate, PackRoot, SkipReason } from "./types.js";
 
 interface CandidateRoot {
@@ -56,6 +57,24 @@ async function listPackDirectories(rootPath: string): Promise<string[]> {
     .filter((entry) => entry.isDirectory())
     .map((entry) => join(rootPath, entry.name))
     .sort((a, b) => a.localeCompare(b));
+}
+
+async function listCandidateDirectories(root: CandidateRoot): Promise<string[]> {
+  const directories = await listPackDirectories(root.rootPath);
+  if (root.root !== "cache") return directories;
+
+  const candidates: string[] = [];
+  for (const directory of directories) {
+    if (existsSync(join(directory, "manifest.json"))) {
+      // Legacy flat cache: <cachePackRoot>/<pack-directory>/manifest.json.
+      candidates.push(directory);
+      continue;
+    }
+    // Discovery already receives the packs root. index.ts passes its dirname
+    // to the installer, which publishes <cachePackRoot>/<packId>/<version>.
+    candidates.push(...await listPackDirectories(directory));
+  }
+  return candidates.sort((a, b) => a.localeCompare(b));
 }
 
 async function readManifest(manifestPath: string): Promise<PackManifest> {
@@ -171,6 +190,13 @@ function compareCandidatesByPrecedence(a: PackCandidate, b: PackCandidate): numb
   const rootDelta = ROOT_PRECEDENCE[b.root] - ROOT_PRECEDENCE[a.root];
   if (rootDelta !== 0) return rootDelta;
 
+  // Installed versions share a logical pack and a cache root. Only break a
+  // builtAt/root tie here; do not change precedence across discovery roots.
+  if (a.root === "cache" && b.root === "cache" && a.rootPath === b.rootPath && a.packId === b.packId) {
+    const versionDelta = compareVersions(b.version, a.version);
+    if (versionDelta !== 0) return versionDelta;
+  }
+
   return a.packRoot.localeCompare(b.packRoot);
 }
 
@@ -262,7 +288,7 @@ export async function discoverPacks(opts: DiscoveryOptions = {}): Promise<Discov
     rootsScanned.push({ ...root, existed });
     if (!existed) continue;
 
-    for (const packRoot of await listPackDirectories(root.rootPath)) {
+    for (const packRoot of await listCandidateDirectories(root)) {
       const result = await scanCandidate({
         ...root,
         packRoot,

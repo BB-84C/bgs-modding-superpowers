@@ -174,6 +174,38 @@ def test_organizer_startApplication_success(monkeypatch):
     assert result["result"]["executable"] == "xEdit"
 
 
+def test_raw_organizer_start_and_wait_preserve_handle_ownership(monkeypatch):
+    """Only launch.start consumes HANDLEs; organizer.* hands ownership to wait."""
+    bridge = _load_bridge(monkeypatch)
+    handle = 0x100000001
+    bridge.KERNEL32.GetProcessId = MagicMock(return_value=4242)
+    bridge.KERNEL32.CloseHandle = MagicMock(return_value=1)
+    organizer = MagicMock()
+    organizer.startApplication.return_value = handle
+    organizer.waitForApplication.return_value = (True, 7)
+    pump = MagicMock()
+    pump.invoke_blocking.side_effect = lambda fn, **kwargs: fn()
+
+    started = bridge._handle_organizer_startApplication(
+        organizer, pump, {"executable": "FakeTool", "args": ["arg"]},
+    )
+    assert started["ok"] is True
+    assert started["result"]["handle"] == handle
+    bridge.KERNEL32.GetProcessId.assert_not_called()
+    bridge.KERNEL32.CloseHandle.assert_not_called()
+
+    waited = bridge._handle_organizer_waitForApplication(
+        organizer, pump, {"handle": started["result"]["handle"], "refresh": False},
+    )
+    assert waited["ok"] is True
+    assert waited["result"]["handle"] == handle
+    assert waited["result"]["success"] is True
+    assert waited["result"]["exit_code"] == 7
+    organizer.waitForApplication.assert_called_once_with(handle, False)
+    bridge.KERNEL32.GetProcessId.assert_not_called()
+    bridge.KERNEL32.CloseHandle.assert_not_called()
+
+
 def test_organizer_startApplication_returns_zero_handle_is_error(monkeypatch):
     """startApplication returns 0 on launch failure."""
 

@@ -6,6 +6,16 @@ This roadmap is the compact control panel for the plugin. It carries scope, work
 
 ## Mission
 
+### Issue #33 and launch-handle repair (2026-09-10)
+
+- Implemented on `fix/kb-install-and-launch-handles`, not yet committed or merged: installer resolves a flat or single-wrapper pack root; discovery scans versioned caches under the actual `kb/packs` root while retaining flat cache and bundled/user layouts. Equal-precedence versions within the same cache root use numeric/calendar version ordering before the existing path tie-break.
+- Acceptance: 159 KB unit tests passed. The actual MCP stdio entrypoint installed an official Skyrim release ZIP under an isolated HOME; a fresh MCP process read 41 records, queried and fetched content from that exact cache without network access. Counterfactual main-root/discovery mutations failed at their intended assertions. The eight integration tests have seven passes and one pre-existing bundled-corpus evaluation failure (0.75 versus 0.8; unchanged against baseline). Build and typecheck passed. Tests require a fresh build; the official-asset case is environment-gated and was exercised in this round.
+- `launch.start` now converts the owned organizer HANDLE using pointer-safe GetProcessId, rejects invalid return values, and closes valid handles exactly once on success or conversion failure. Failure cannot become a successful registry entry or a bare-process fallback. The raw `organizer.*` handle/wait API and the xEdit wrapper/state-file contract remain unchanged. Real owned Windows process evidence covers conversion and release; Python tests: 119 passed, seven real-MO2 smoke skips. Both local PowerShell launch suites passed. This does not claim that the reporter's CreateProcess error 5 is fixed, nor that live MO2 was exercised.
+- Issue #36 response posted: https://github.com/BB-84C/bgs-modding-superpowers/issues/36#issuecomment-5611472692 . Requested launch-parent details, complete failed-attempt evidence, and a manual Explorer-start comparison; explicitly declined an outside-MO2 launch mode because it loses VFS semantics. No issues closed.
+- Packaging: fresh portable output verified against all 133 canonical KB source/dist and bridge files. Only the seven task-owned files were synchronized to the local physical `plugins/` mirror with pre-copy backups; four unrelated, pre-existing KB dist discrepancies remain there. No installed MO2 vendor files were changed.
+- Separate follow-up, not included in this repair: raw `organizer.start_application` sentinel handling and the `mo2_run_tool(wait=false)` returned-handle ownership path require their own disposition. No new issue was filed without authorization.
+- Evidence and scope ledger: `.opencode/artifacts/issues-33-36/kb-fix/main入口验收.md`, `launch-fix/README.md`, and `integration/seven-file-parity.json`. A first incorrect cache-root implementation and its evidence were explicitly superseded before acceptance.
+
 This plugin exists for professional BGS modpack curation across Skyrim, Fallout 4, and Starfield. It is workflow-first, multi-session, and focused on curator decision support for repeatable modpack work, not general mod authoring.
 
 ## Systematic Modpack Workflow

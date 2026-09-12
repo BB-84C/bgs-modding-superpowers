@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { defaultCacheRoot, parseUserPackRoots, resolvePluginRoot } from "./resolve-roots.js";
 import { sha256File } from "./sha256.js";
+import { compareVersions } from "../tools/updates/semver.js";
 const ROOT_PRECEDENCE = {
     bundled: 3,
     cache: 2,
@@ -47,6 +48,23 @@ async function listPackDirectories(rootPath) {
         .filter((entry) => entry.isDirectory())
         .map((entry) => join(rootPath, entry.name))
         .sort((a, b) => a.localeCompare(b));
+}
+async function listCandidateDirectories(root) {
+    const directories = await listPackDirectories(root.rootPath);
+    if (root.root !== "cache")
+        return directories;
+    const candidates = [];
+    for (const directory of directories) {
+        if (existsSync(join(directory, "manifest.json"))) {
+            // Legacy flat cache: <cachePackRoot>/<pack-directory>/manifest.json.
+            candidates.push(directory);
+            continue;
+        }
+        // Discovery already receives the packs root. index.ts passes its dirname
+        // to the installer, which publishes <cachePackRoot>/<packId>/<version>.
+        candidates.push(...await listPackDirectories(directory));
+    }
+    return candidates.sort((a, b) => a.localeCompare(b));
 }
 async function readManifest(manifestPath) {
     return JSON.parse(await readFile(manifestPath, "utf8"));
@@ -147,6 +165,13 @@ function compareCandidatesByPrecedence(a, b) {
     const rootDelta = ROOT_PRECEDENCE[b.root] - ROOT_PRECEDENCE[a.root];
     if (rootDelta !== 0)
         return rootDelta;
+    // Installed versions share a logical pack and a cache root. Only break a
+    // builtAt/root tie here; do not change precedence across discovery roots.
+    if (a.root === "cache" && b.root === "cache" && a.rootPath === b.rootPath && a.packId === b.packId) {
+        const versionDelta = compareVersions(b.version, a.version);
+        if (versionDelta !== 0)
+            return versionDelta;
+    }
     return a.packRoot.localeCompare(b.packRoot);
 }
 export function selectWinner(candidates) {
@@ -230,7 +255,7 @@ export async function discoverPacks(opts = {}) {
         rootsScanned.push({ ...root, existed });
         if (!existed)
             continue;
-        for (const packRoot of await listPackDirectories(root.rootPath)) {
+        for (const packRoot of await listCandidateDirectories(root)) {
             const result = await scanCandidate({
                 ...root,
                 packRoot,
