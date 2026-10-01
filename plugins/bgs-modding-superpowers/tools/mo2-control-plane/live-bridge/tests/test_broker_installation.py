@@ -44,7 +44,7 @@ def test_installation_install_local_archive_success(monkeypatch, tmp_path):
 
     new_mod = MagicMock()
     new_mod.name.return_value = "TestMod"
-    new_mod.absolutePath.return_value = "/path/to/mods/TestMod"
+    new_mod.absolutePath.return_value = str(tmp_path / "mods" / "TestMod")
     organizer = MagicMock()
     organizer.installMod.return_value = new_mod
     pump = MagicMock()
@@ -110,12 +110,13 @@ def test_installation_install_local_archive_missing_file(monkeypatch):
     assert "not found" in result["error"]["message"].lower()
 
 
-def test_installation_create_mod_from_directory_success(monkeypatch):
+def test_installation_create_mod_from_directory_success(monkeypatch, tmp_path):
     bridge = _load_bridge(monkeypatch)
 
     new_mod = MagicMock()
     new_mod.name.return_value = "NewStaged"
-    new_mod.absolutePath.return_value = "/path/to/mods/NewStaged"
+    mod_path = tmp_path / "mods" / "NewStaged"
+    new_mod.absolutePath.return_value = str(mod_path)
     mod_list = MagicMock()
     mod_list.getMod.return_value = None
     organizer = MagicMock()
@@ -130,7 +131,8 @@ def test_installation_create_mod_from_directory_success(monkeypatch):
     assert result["ok"] is True
     r = result["result"]
     assert r["name"] == "NewStaged"
-    assert r["absolute_path"] == "/path/to/mods/NewStaged"
+    assert r["absolute_path"] == str(mod_path)
+    assert mod_path.is_dir()
     organizer.refresh.assert_called_once_with()
 
 
@@ -151,13 +153,14 @@ def test_installation_create_mod_from_directory_collision(monkeypatch):
     assert result["error"]["code"] == "invalid_params"
 
 
-def test_installation_create_mod_from_directory_sanitizes_name(monkeypatch):
+def test_installation_create_mod_from_directory_sanitizes_name(monkeypatch, tmp_path):
     bridge = _load_bridge(monkeypatch)
 
     captured = {}
     new_mod = MagicMock()
     new_mod.name.return_value = "Sanitized"
-    new_mod.absolutePath.return_value = "/m/Sanitized"
+    mod_path = tmp_path / "mods" / "Sanitized"
+    new_mod.absolutePath.return_value = str(mod_path)
     mod_list = MagicMock()
     mod_list.getMod.return_value = None
     organizer = MagicMock()
@@ -176,3 +179,4 @@ def test_installation_create_mod_from_directory_sanitizes_name(monkeypatch):
 
     assert result["ok"] is True
     assert captured["name"] == "BadName"
+    assert mod_path.is_dir()
