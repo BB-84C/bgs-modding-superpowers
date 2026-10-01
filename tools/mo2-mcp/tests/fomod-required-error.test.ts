@@ -33,20 +33,21 @@ const sampleTree: FomodTreeShape = {
   ],
 };
 
-function dispatchCtx(): ToolContext {
+async function dispatchCtx(): Promise<ToolContext> {
+  const root = await createTrackedTempDir("fomod-required-error-dispatch-");
   return {
     config: {
-      mo2Root: "/tmp/mo2",
+      mo2Root: root,
       permissionCeiling: "full-control",
       allowedProfiles: ["Default"],
       deny: [],
-      snapshotRoot: "/tmp/mo2/.mo2-mcp/snapshots",
-      auditRoot: "/tmp/mo2/.mo2-mcp/audit",
+      snapshotRoot: `${root}/.mo2-mcp/snapshots`,
+      auditRoot: `${root}/.mo2-mcp/audit`,
     } as Config,
     sessionId: "fomod-required-error-dispatch-test",
     plans: new PlanCache(),
-    snapshots: new SnapshotManager("/tmp/mo2/.mo2-mcp/snapshots", "fomod-required-error-dispatch-test"),
-    audit: new AuditLogger("/tmp/mo2/.mo2-mcp/audit", "fomod-required-error-dispatch-test"),
+    snapshots: new SnapshotManager(`${root}/.mo2-mcp/snapshots`, "fomod-required-error-dispatch-test"),
+    audit: new AuditLogger(`${root}/.mo2-mcp/audit`, "fomod-required-error-dispatch-test"),
   } as unknown as ToolContext;
 }
 
@@ -97,7 +98,7 @@ describe("dispatch forwards FomodChoicesRequiredError as structured envelope", (
     const result = await dispatchToolCall({
       toolName: "test_fomod_choices_failing_tool",
       rawArgs: {},
-      ctx: dispatchCtx(),
+      ctx: await dispatchCtx(),
       rules: [],
     });
 
@@ -127,7 +128,7 @@ describe("dispatch forwards FomodChoicesRequiredError as structured envelope", (
     const result = await dispatchToolCall({
       toolName: "test_fomod_choices_reinstall_failing_tool",
       rawArgs: {},
-      ctx: dispatchCtx(),
+      ctx: await dispatchCtx(),
       rules: [],
     });
 
@@ -152,7 +153,7 @@ describe("dispatch forwards FomodChoicesRequiredError as structured envelope", (
     const result = await dispatchToolCall({
       toolName: "test_plain_error_after_fomod_tool",
       rawArgs: {},
-      ctx: dispatchCtx(),
+      ctx: await dispatchCtx(),
       rules: [],
     });
 

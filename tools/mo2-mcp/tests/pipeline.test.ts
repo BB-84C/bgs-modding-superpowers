@@ -7,28 +7,23 @@ import { PlanCache } from "../src/plan-apply.js";
 import { SnapshotManager } from "../src/snapshot.js";
 import { AuditLogger } from "../src/audit.js";
 
-const stubCtx = {
-  config: {
-    mo2Root: "/tmp",
-    permissionCeiling: "metadata-editable" as const,
-    allowedProfiles: ["Default"],
-    deny: [],
-    snapshotRoot: "/tmp/.mo2-mcp/snapshots",
-    auditRoot: "/tmp/.mo2-mcp/audit",
-  },
-  sessionId: "test-session",
-  plans: new PlanCache(),
-  snapshots: new SnapshotManager("/tmp/.mo2-mcp/snapshots", "test-session"),
-  audit: new AuditLogger("/tmp/.mo2-mcp/audit", "test-session"),
-} satisfies ToolContext;
-
-const denyCtx = {
-  ...stubCtx,
-  config: {
-    ...stubCtx.config,
-    deny: ["Protected/Data"],
-  },
-} satisfies ToolContext;
+async function makeCtx(deny: string[] = []): Promise<ToolContext> {
+  const root = await createTrackedTempDir("pipeline-");
+  return {
+    config: {
+      mo2Root: root,
+      permissionCeiling: "metadata-editable" as const,
+      allowedProfiles: ["Default"],
+      deny,
+      snapshotRoot: `${root}/.mo2-mcp/snapshots`,
+      auditRoot: `${root}/.mo2-mcp/audit`,
+    },
+    sessionId: "test-session",
+    plans: new PlanCache(),
+    snapshots: new SnapshotManager(`${root}/.mo2-mcp/snapshots`, "test-session"),
+    audit: new AuditLogger(`${root}/.mo2-mcp/audit`, "test-session"),
+  };
+}
 
 describe("rule registry", () => {
   beforeEach(() => {
@@ -58,7 +53,7 @@ describe("runRules", () => {
   });
 
   it("returns empty findings when no rules registered", async () => {
-    const findings = await runRules([], "mo2_status", stubCtx, {});
+    const findings = await runRules([], "mo2_status", await makeCtx(), {});
     expect(findings).toEqual([]);
   });
 
@@ -76,7 +71,7 @@ describe("runRules", () => {
       evaluate: async () => ({ code: "R2", severity: "HIGH", decision: "block", message: "r2" }),
     };
 
-    const findings = await runRules([r1, r2], "mo2_status", stubCtx, {});
+    const findings = await runRules([r1, r2], "mo2_status", await makeCtx(), {});
     expect(findings).toHaveLength(1);
     expect(findings[0].code).toBe("R1");
   });
@@ -90,7 +85,7 @@ describe("runRules", () => {
         throw new Error("boom");
       },
     };
-    const findings = await runRules([bad], "mo2_status", stubCtx, {});
+    const findings = await runRules([bad], "mo2_status", await makeCtx(), {});
     expect(findings[0].code).toBe("BAD-error");
     expect(findings[0].decision).toBe("warn");
     expect(findings[0].message).toContain("boom");
@@ -115,7 +110,7 @@ describe("STOCK001 protected path deny", () => {
 
   it("blocks configured deny patterns", async () => {
     const rules = getAllRules();
-    const findings = await runRules(rules, "mo2_set_mod_notes", denyCtx, {
+    const findings = await runRules(rules, "mo2_set_mod_notes", await makeCtx(["Protected/Data"]), {
       path: "C:/Games/MO2/Protected/Data/Fallout4.esm",
     });
     expect(findings).toHaveLength(1);
@@ -125,7 +120,7 @@ describe("STOCK001 protected path deny", () => {
 
   it("blocks configured deny patterns with backslashes (Windows)", async () => {
     const rules = getAllRules();
-    const findings = await runRules(rules, "mo2_set_mod_notes", denyCtx, {
+    const findings = await runRules(rules, "mo2_set_mod_notes", await makeCtx(["Protected/Data"]), {
       virtual_path: "C:\\MO2\\Protected\\Data\\Skyrim.esm",
     });
     expect(findings[0].code).toBe("STOCK001");
@@ -133,7 +128,7 @@ describe("STOCK001 protected path deny", () => {
 
   it("allows mods/ paths through", async () => {
     const rules = getAllRules();
-    const findings = await runRules(rules, "mo2_install", stubCtx, {
+    const findings = await runRules(rules, "mo2_install", await makeCtx(), {
       archive_path: "C:/downloads/Foo.7z",
       path: "C:/MO2/mods/Foo/Data/foo.esp",
     });

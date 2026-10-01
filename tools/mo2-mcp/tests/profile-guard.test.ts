@@ -217,20 +217,21 @@ describe("CrossProfileMutationError", () => {
   });
 });
 
-function dispatchCtx(): ToolContext {
+async function dispatchCtx(): Promise<ToolContext> {
+  const root = await createTrackedTempDir("profile-guard-dispatch-");
   return {
     config: {
-      mo2Root: "/tmp/mo2",
+      mo2Root: root,
       permissionCeiling: "full-control",
       allowedProfiles: ["Default"],
       deny: [],
-      snapshotRoot: "/tmp/mo2/.mo2-mcp/snapshots",
-      auditRoot: "/tmp/mo2/.mo2-mcp/audit",
+      snapshotRoot: `${root}/.mo2-mcp/snapshots`,
+      auditRoot: `${root}/.mo2-mcp/audit`,
     } as Config,
     sessionId: "profile-guard-dispatch-test",
     plans: new PlanCache(),
-    snapshots: new SnapshotManager("/tmp/mo2/.mo2-mcp/snapshots", "profile-guard-dispatch-test"),
-    audit: new AuditLogger("/tmp/mo2/.mo2-mcp/audit", "profile-guard-dispatch-test"),
+    snapshots: new SnapshotManager(`${root}/.mo2-mcp/snapshots`, "profile-guard-dispatch-test"),
+    audit: new AuditLogger(`${root}/.mo2-mcp/audit`, "profile-guard-dispatch-test"),
   } as unknown as ToolContext;
 }
 
@@ -260,7 +261,7 @@ describe("dispatch forwards CrossProfileMutationError as structured envelope", (
     const result = await dispatchToolCall({
       toolName: "test_cross_profile_failing_tool",
       rawArgs: {},
-      ctx: dispatchCtx(),
+      ctx: await dispatchCtx(),
       rules: [],
     });
 
@@ -293,7 +294,7 @@ describe("dispatch forwards CrossProfileMutationError as structured envelope", (
     const result = await dispatchToolCall({
       toolName: "test_cross_profile_failing_tool_2",
       rawArgs: {},
-      ctx: dispatchCtx(),
+      ctx: await dispatchCtx(),
       rules: [],
     });
 
@@ -319,7 +320,7 @@ describe("dispatch forwards CrossProfileMutationError as structured envelope", (
     const result = await dispatchToolCall({
       toolName: "test_plain_error_after_xprofile_tool",
       rawArgs: {},
-      ctx: dispatchCtx(),
+      ctx: await dispatchCtx(),
       rules: [],
     });
 

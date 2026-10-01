@@ -6,23 +6,23 @@ import { PlanCache } from "../../src/plan-apply.js";
 import { SnapshotManager } from "../../src/snapshot.js";
 import type { ToolContext } from "../../src/types.js";
 
-const stubCtx = {
-  config: {
-    mo2Root: "/tmp",
-    permissionCeiling: "metadata-editable" as const,
-    allowedProfiles: ["Default"],
-    deny: [],
-    snapshotRoot: "/tmp/.mo2-mcp/snapshots",
-    auditRoot: "/tmp/.mo2-mcp/audit",
-  },
-  sessionId: "test-session",
-  plans: new PlanCache(),
-  snapshots: new SnapshotManager("/tmp/.mo2-mcp/snapshots", "test-session"),
-  audit: new AuditLogger("/tmp/.mo2-mcp/audit", "test-session"),
-} satisfies ToolContext;
-
 async function findingsFor(args: Record<string, unknown>) {
-  return runRules([pathTraversalDenyRule], "mo2_install", stubCtx, args);
+  const root = await createTrackedTempDir("pathsafe-");
+  const ctx = {
+    config: {
+      mo2Root: root,
+      permissionCeiling: "metadata-editable" as const,
+      allowedProfiles: ["Default"],
+      deny: [],
+      snapshotRoot: `${root}/.mo2-mcp/snapshots`,
+      auditRoot: `${root}/.mo2-mcp/audit`,
+    },
+    sessionId: "test-session",
+    plans: new PlanCache(),
+    snapshots: new SnapshotManager(`${root}/.mo2-mcp/snapshots`, "test-session"),
+    audit: new AuditLogger(`${root}/.mo2-mcp/audit`, "test-session"),
+  } satisfies ToolContext;
+  return runRules([pathTraversalDenyRule], "mo2_install", ctx, args);
 }
 
 describe("PATHSAFE001 path-traversal-deny", () => {

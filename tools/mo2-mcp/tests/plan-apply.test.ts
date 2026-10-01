@@ -17,20 +17,25 @@ import {
   releaseLeaseLocks,
 } from "../src/lease-lock.js";
 
-const stubCtx = {
-  config: {
-    mo2Root: "/tmp",
-    permissionCeiling: "metadata-editable" as const,
-    allowedProfiles: ["Default"],
-    deny: [],
-    snapshotRoot: "/tmp/.mo2-mcp/snapshots",
-    auditRoot: "/tmp/.mo2-mcp/audit",
-  },
-  sessionId: "test-session",
-  plans: new PlanCache(),
-  snapshots: new SnapshotManager("/tmp/.mo2-mcp/snapshots", "test-session"),
-  audit: new AuditLogger("/tmp/.mo2-mcp/audit", "test-session"),
-} satisfies ToolContext;
+let stubCtx: ToolContext;
+
+beforeEach(async () => {
+  const root = await createTrackedTempDir("plan-apply-context-");
+  stubCtx = {
+    config: {
+      mo2Root: root,
+      permissionCeiling: "metadata-editable",
+      allowedProfiles: ["Default"],
+      deny: [],
+      snapshotRoot: join(root, ".mo2-mcp", "snapshots"),
+      auditRoot: join(root, ".mo2-mcp", "audit"),
+    },
+    sessionId: "test-session",
+    plans: new PlanCache(),
+    snapshots: new SnapshotManager(join(root, ".mo2-mcp", "snapshots"), "test-session"),
+    audit: new AuditLogger(join(root, ".mo2-mcp", "audit"), "test-session"),
+  };
+});
 
 describe("PlanCache", () => {
   it("stores and retrieves plans by id", () => {
@@ -228,7 +233,8 @@ describe("runPlanMode + runApplyMode", () => {
 
   it("apply fails with plan_expired_or_unknown for unknown plan", async () => {
     const cache = new PlanCache();
-    const snaps = new SnapshotManager("/tmp/snap-test-unknown", "s");
+    const root = await createTrackedTempDir("pa-unknown-");
+    const snaps = new SnapshotManager(join(root, "snapshots"), "s");
     const handler: PlanApplyHandler = {
       toolName: "x",
       async buildPlan() {
@@ -431,7 +437,8 @@ describe("routeToPlanApply (PLAN-PATCH P-B3)", () => {
 
   it("throws on invalid mode", async () => {
     const cache = new PlanCache();
-    const snaps = new SnapshotManager("/tmp/sn", "s");
+    const root = await createTrackedTempDir("pa-invalid-mode-");
+    const snaps = new SnapshotManager(join(root, "snapshots"), "s");
     const handler: PlanApplyHandler = {
       toolName: "x",
       async buildPlan() {

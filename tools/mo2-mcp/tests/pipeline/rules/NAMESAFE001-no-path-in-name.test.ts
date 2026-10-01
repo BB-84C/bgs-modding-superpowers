@@ -7,26 +7,26 @@ import { PlanCache } from "../../../src/plan-apply.js";
 import { SnapshotManager } from "../../../src/snapshot.js";
 import type { RuleFinding, ToolContext } from "../../../src/types.js";
 
-const stubCtx = {
-  config: {
-    mo2Root: "/tmp",
-    permissionCeiling: "metadata-editable" as const,
-    allowedProfiles: ["Default"],
-    deny: [],
-    snapshotRoot: "/tmp/.mo2-mcp/snapshots",
-    auditRoot: "/tmp/.mo2-mcp/audit",
-  },
-  sessionId: "test-session",
-  plans: new PlanCache(),
-  snapshots: new SnapshotManager("/tmp/.mo2-mcp/snapshots", "test-session"),
-  audit: new AuditLogger("/tmp/.mo2-mcp/audit", "test-session"),
-} satisfies ToolContext;
-
 async function findingsForCreateModName(name: string): Promise<RuleFinding[]> {
+  const root = await createTrackedTempDir("namesafe-taxonomy-");
+  const ctx = {
+    config: {
+      mo2Root: root,
+      permissionCeiling: "metadata-editable" as const,
+      allowedProfiles: ["Default"],
+      deny: [],
+      snapshotRoot: `${root}/.mo2-mcp/snapshots`,
+      auditRoot: `${root}/.mo2-mcp/audit`,
+    },
+    sessionId: "test-session",
+    plans: new PlanCache(),
+    snapshots: new SnapshotManager(`${root}/.mo2-mcp/snapshots`, "test-session"),
+    audit: new AuditLogger(`${root}/.mo2-mcp/audit`, "test-session"),
+  } satisfies ToolContext;
   return runRules(
     [pathTraversalDenyRule, nameSafetyDenyRule],
     "mo2_create_mod",
-    stubCtx,
+    ctx,
     { mode: "plan", name },
   );
 }

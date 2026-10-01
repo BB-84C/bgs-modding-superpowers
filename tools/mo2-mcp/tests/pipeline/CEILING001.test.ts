@@ -11,20 +11,21 @@ import type { ToolContext } from "../../src/types.js";
 
 const schema = z.object({});
 
-function ctx(ceiling: Config["permissionCeiling"]): ToolContext {
+async function ctx(ceiling: Config["permissionCeiling"]): Promise<ToolContext> {
+  const root = await createTrackedTempDir("ceiling001-");
   return {
     config: {
-      mo2Root: "/tmp",
+      mo2Root: root,
       permissionCeiling: ceiling,
       allowedProfiles: ["Default"],
       deny: [],
-      snapshotRoot: "/tmp/.mo2-mcp/snapshots",
-      auditRoot: "/tmp/.mo2-mcp/audit",
+      snapshotRoot: `${root}/.mo2-mcp/snapshots`,
+      auditRoot: `${root}/.mo2-mcp/audit`,
     },
     sessionId: "test-session",
     plans: new PlanCache(),
-    snapshots: new SnapshotManager("/tmp/.mo2-mcp/snapshots", "test-session"),
-    audit: new AuditLogger("/tmp/.mo2-mcp/audit", "test-session"),
+    snapshots: new SnapshotManager(`${root}/.mo2-mcp/snapshots`, "test-session"),
+    audit: new AuditLogger(`${root}/.mo2-mcp/audit`, "test-session"),
   };
 }
 
@@ -35,7 +36,7 @@ function registerTieredTools(): void {
 }
 
 async function findings(toolName: string, ceiling: Config["permissionCeiling"]) {
-  return runRules([permissionCeilingRule], toolName, ctx(ceiling), {});
+  return runRules([permissionCeilingRule], toolName, await ctx(ceiling), {});
 }
 
 describe("CEILING001 permission ceiling", () => {

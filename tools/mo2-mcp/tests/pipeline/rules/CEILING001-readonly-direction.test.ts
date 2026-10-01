@@ -46,20 +46,21 @@ const REPRESENTATIVE_TOOLS: Array<{
 
 const CEILINGS: PermissionCeiling[] = ["read-only", "metadata-editable", "full-control"];
 
-function ctx(permissionCeiling: PermissionCeiling): ToolContext {
+async function ctx(permissionCeiling: PermissionCeiling): Promise<ToolContext> {
+  const root = await createTrackedTempDir("ceiling001-readonly-");
   return {
     config: {
-      mo2Root: "/tmp/mo2",
+      mo2Root: root,
       permissionCeiling,
       allowedProfiles: ["Default"],
       deny: [],
-      snapshotRoot: "/tmp/mo2/.mo2-mcp/snapshots",
-      auditRoot: "/tmp/mo2/.mo2-mcp/audit",
+      snapshotRoot: `${root}/.mo2-mcp/snapshots`,
+      auditRoot: `${root}/.mo2-mcp/audit`,
     },
     sessionId: "ceiling001-readonly-direction-test",
     plans: new PlanCache(),
-    snapshots: new SnapshotManager("/tmp/mo2/.mo2-mcp/snapshots", "ceiling001-readonly-direction-test"),
-    audit: new AuditLogger("/tmp/mo2/.mo2-mcp/audit", "ceiling001-readonly-direction-test"),
+    snapshots: new SnapshotManager(`${root}/.mo2-mcp/snapshots`, "ceiling001-readonly-direction-test"),
+    audit: new AuditLogger(`${root}/.mo2-mcp/audit`, "ceiling001-readonly-direction-test"),
   };
 }
 
@@ -83,7 +84,7 @@ describe("CEILING001 read-only direction", () => {
 
   it.each(CEILINGS)("enforces representative T1/T2/T3 tools at ceiling %s", async (ceiling) => {
     for (const tool of REPRESENTATIVE_TOOLS) {
-      const findings = await runRules([permissionCeilingRule], tool.name, ctx(ceiling), tool.args);
+      const findings = await runRules([permissionCeilingRule], tool.name, await ctx(ceiling), tool.args);
       const shouldAllow = tool.allowedCeilings.includes(ceiling);
 
       if (shouldAllow) {

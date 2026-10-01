@@ -11,20 +11,21 @@ import type { ToolContext } from "../src/types.js";
 
 const invoked: string[] = [];
 
-function ctx(permissionCeiling: Config["permissionCeiling"]): ToolContext {
+async function ctx(permissionCeiling: Config["permissionCeiling"]): Promise<ToolContext> {
+  const root = await createTrackedTempDir("dispatch-ceiling-");
   return {
     config: {
-      mo2Root: "/tmp/mo2",
+      mo2Root: root,
       permissionCeiling,
       allowedProfiles: ["Default"],
       deny: [],
-      snapshotRoot: "/tmp/mo2/.mo2-mcp/snapshots",
-      auditRoot: "/tmp/mo2/.mo2-mcp/audit",
+      snapshotRoot: `${root}/.mo2-mcp/snapshots`,
+      auditRoot: `${root}/.mo2-mcp/audit`,
     },
     sessionId: "dispatch-ceiling-test",
     plans: new PlanCache(),
-    snapshots: new SnapshotManager("/tmp/mo2/.mo2-mcp/snapshots", "dispatch-ceiling-test"),
-    audit: new AuditLogger("/tmp/mo2/.mo2-mcp/audit", "dispatch-ceiling-test"),
+    snapshots: new SnapshotManager(`${root}/.mo2-mcp/snapshots`, "dispatch-ceiling-test"),
+    audit: new AuditLogger(`${root}/.mo2-mcp/audit`, "dispatch-ceiling-test"),
   };
 }
 
@@ -55,7 +56,7 @@ describe("dispatch CEILING001 integration", () => {
       const result = await dispatchToolCall({
         toolName: name,
         rawArgs: {},
-        ctx: ctx("metadata-editable"),
+        ctx: await ctx("metadata-editable"),
         rules: [permissionCeilingRule],
       });
 
@@ -77,7 +78,7 @@ describe("dispatch CEILING001 integration", () => {
       const result = await dispatchToolCall({
         toolName: name,
         rawArgs: {},
-        ctx: ctx("full-control"),
+        ctx: await ctx("full-control"),
         rules: [permissionCeilingRule],
       });
 

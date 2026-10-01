@@ -211,20 +211,21 @@ describe("enrichBrokerError", () => {
   });
 });
 
-function dispatchCtx(): ToolContext {
+async function dispatchCtx(): Promise<ToolContext> {
+  const root = await createTrackedTempDir("broker-error-dispatch-");
   return {
     config: {
-      mo2Root: "/tmp/mo2",
+      mo2Root: root,
       permissionCeiling: "full-control",
       allowedProfiles: ["Default"],
       deny: [],
-      snapshotRoot: "/tmp/mo2/.mo2-mcp/snapshots",
-      auditRoot: "/tmp/mo2/.mo2-mcp/audit",
+      snapshotRoot: `${root}/.mo2-mcp/snapshots`,
+      auditRoot: `${root}/.mo2-mcp/audit`,
     } as Config,
     sessionId: "broker-error-dispatch-test",
     plans: new PlanCache(),
-    snapshots: new SnapshotManager("/tmp/mo2/.mo2-mcp/snapshots", "broker-error-dispatch-test"),
-    audit: new AuditLogger("/tmp/mo2/.mo2-mcp/audit", "broker-error-dispatch-test"),
+    snapshots: new SnapshotManager(`${root}/.mo2-mcp/snapshots`, "broker-error-dispatch-test"),
+    audit: new AuditLogger(`${root}/.mo2-mcp/audit`, "broker-error-dispatch-test"),
   };
 }
 
@@ -269,7 +270,7 @@ describe("dispatch forwards BrokerEnrichedError as structured envelope", () => {
     const result = await dispatchToolCall({
       toolName: "test_broker_failing_tool",
       rawArgs: {},
-      ctx: dispatchCtx(),
+      ctx: await dispatchCtx(),
       rules: [],
     });
 
@@ -309,7 +310,7 @@ describe("dispatch forwards BrokerEnrichedError as structured envelope", () => {
     const result = await dispatchToolCall({
       toolName: "test_broker_pipe_timeout_tool",
       rawArgs: {},
-      ctx: dispatchCtx(),
+      ctx: await dispatchCtx(),
       rules: [],
     });
 
@@ -334,7 +335,7 @@ describe("dispatch forwards BrokerEnrichedError as structured envelope", () => {
     const result = await dispatchToolCall({
       toolName: "test_plain_error_tool",
       rawArgs: {},
-      ctx: dispatchCtx(),
+      ctx: await dispatchCtx(),
       rules: [],
     });
 
