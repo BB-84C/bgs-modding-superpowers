@@ -2,28 +2,50 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 
-def _root_entries() -> set[str]:
-    root = Path.cwd().anchor
-    return {entry.name for entry in Path(root).iterdir()}
+import pytest
+
+
+_ROOT_ANCHOR = Path.cwd().anchor
+_ROOT_ENTRIES_BEFORE = {entry.name for entry in Path(_ROOT_ANCHOR).iterdir()}
+
+
+def _entry_details(name: str) -> str:
+    entry = Path(_ROOT_ANCHOR) / name
+    try:
+        stat = entry.stat()
+    except FileNotFoundError:
+        return f"{name} (entry disappeared before metadata read)"
+    kind = "dir" if entry.is_dir() else "file"
+    created = datetime.fromtimestamp(stat.st_ctime).isoformat(timespec="seconds")
+    modified = datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
+    return f"{name} ({kind}, created={created}, modified={modified})"
 
 
 def pytest_sessionstart(session) -> None:
-    session.config._drive_root_entries_before = _root_entries()
+    # Keep this hook for an explicit session-level record, while the module-level
+    # snapshot remains valid when pytest loads this conftest after sessionstart.
+    session.config._drive_root_entries_before = _ROOT_ENTRIES_BEFORE
 
 
 def pytest_sessionfinish(session, exitstatus) -> None:
-    before = session.config._drive_root_entries_before
-    added = sorted(_root_entries() - before)
+    added = sorted(
+        entry.name
+        for entry in Path(_ROOT_ANCHOR).iterdir()
+        if entry.name not in _ROOT_ENTRIES_BEFORE
+    )
     if not added:
         return
 
-    session.exitstatus = 1
+    session.exitstatus = exitstatus or pytest.ExitCode.TESTS_FAILED
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
         reporter.write_sep(
             "!",
-            f"drive-root guard detected new top-level entries under {Path.cwd().anchor}: {', '.join(added)}",
+            "drive-root guard detected new top-level entries under "
+            f"{_ROOT_ANCHOR}: {', '.join(_entry_details(name) for name in added)}; "
+            "may also be a concurrent process; identify the owner before deleting; never auto-delete.",
         )
