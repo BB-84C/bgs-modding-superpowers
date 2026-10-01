@@ -5,6 +5,7 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
     environment: "node",
     setupFiles: ["tests/tracked-temp.setup.ts"],
+    globalSetup: ["tests/drive-root-guard.setup.ts"],
     passWithNoTests: true,
   },
 });
