@@ -538,11 +538,13 @@ def test_mods_create_basic(monkeypatch, tmp_path):
     organizer.refresh.assert_called_once_with()
 
 
-def test_mods_create_with_target_priority(monkeypatch):
+def test_mods_create_with_target_priority(monkeypatch, tmp_path):
     bridge = _load_bridge(monkeypatch)
 
     new_mod = MagicMock()
     new_mod.name.return_value = "NewMod"
+    mod_path = tmp_path / "NewMod"
+    new_mod.absolutePath.return_value = str(mod_path)
     mod_list = MagicMock()
     mod_list.getMod.return_value = None
     state = {"current": 0}
@@ -566,6 +568,7 @@ def test_mods_create_with_target_priority(monkeypatch):
     assert result["ok"] is True
     assert result["result"]["priority"] == 3
     assert result["result"]["requested_priority"] == 3
+    assert mod_path.is_dir()
     organizer.refresh.assert_called_once_with()
     organizer.modDataChanged.assert_called_once_with(new_mod)
 
@@ -589,12 +592,14 @@ def test_mods_create_name_collision(monkeypatch):
     assert "exists" in result["error"]["message"].lower()
 
 
-def test_mods_create_sanitizes_name(monkeypatch):
+def test_mods_create_sanitizes_name(monkeypatch, tmp_path):
     bridge = _load_bridge(monkeypatch)
 
     captured = {}
     new_mod = MagicMock()
     new_mod.name.return_value = "BadName"
+    mod_path = tmp_path / "BadName"
+    new_mod.absolutePath.return_value = str(mod_path)
     mod_list = MagicMock()
     mod_list.getMod.return_value = None
     mod_list.priority.return_value = 0
@@ -615,6 +620,7 @@ def test_mods_create_sanitizes_name(monkeypatch):
 
     assert result["ok"] is True
     assert captured["name"] == "BadName"
+    assert mod_path.is_dir()
 
 
 def test_mods_create_returns_internal_error_on_none(monkeypatch):
